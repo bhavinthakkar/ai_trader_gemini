@@ -20,13 +20,12 @@ import os
 from google import genai
 
 
-
-TOKEN = "8837106861:AAEHwkeU67Mw8mAJaTyRvC0YGEMuc4s7ecY"
 CHAT_ID = "969601315"
 
 
 load_dotenv()
 api_key = os.getenv("GEMINI_APT_KEY");
+telegram_token = os.getenv("TELEGRAM_CHANNEL_API_TOKEN");
 
 client = genai.Client(api_key=api_key)
 
@@ -137,6 +136,7 @@ for Symbol in WATCHLIST:
     - Findout current market sentiment.
     - Findout stock specific news / Upgrades / downgrades
     - If the price moves more than 5% within a day, update "push_notification" to "true" in JSON schema
+    - Provide PE and PEG values in the responce JSON
     - Return JSON only.
 
     Schema:
@@ -148,6 +148,7 @@ for Symbol in WATCHLIST:
       "reason": "short explanation"
       "news": "stock specific news"
       "push_notification": "TRUE|FALSE"
+      "PE and PEG": "Values"
     }}
     """
 
@@ -157,7 +158,7 @@ for Symbol in WATCHLIST:
     )
 
 
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
 
     requests.post(
         url,
