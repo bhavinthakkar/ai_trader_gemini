@@ -1,13 +1,14 @@
 import os
 import json
 import time
-import pandas as pd
 import requests
-import ta
-import yfinance as yf
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
+from ollama import chat
+
+from market_agent import MarketAgent
+from news_agent import NewsAgent
+from risk_agent import RiskAgent
+from analyst_agent import AnalystAgent
 
 WATCHLIST = [
     "FLKR",
@@ -26,129 +27,42 @@ WATCHLIST = [
 CHAT_ID = "969601315"
 
 load_dotenv()
-api_key = os.getenv("GEMINI_API_KEY")
 telegram_token = os.getenv("TELEGRAM_CHANNEL_API_TOKEN")
 
-client = genai.Client(api_key=api_key)
+MASTER_TRADER_INSTRUCTION = """
+You are a senior Master Trader & Portfolio Manager.
 
-SYSTEM_INSTRUCTION = """
-You are a senior short-term swing trader and equity research analyst covering major Wall Street investment bank perspectives.
+You receive short-term intelligence collected by four specialized sub-agents:
+1. Market Agent: Price action, 5-day velocity, RSI, EMA20/50, ATR, Forward P/E, profit margins.
+2. News Agent: Today's real-time headlines, news summary, sentiment, and short-term impact.
+3. Risk Agent: Volatility ATR%, technical trend breakdown risk, RSI extreme risk, and stop-loss boundaries.
+4. Analyst Agent: Wall Street consensus, mean target price, and recent rating actions from major investment banks (BofA, Barclays, Credit Suisse, DB, Evercore, Goldman, JPM, Morgan Stanley, UBS).
 
-Your analysis MUST FOCUS STRICTLY ON SHORT-TERM SWING TRADING (1 to 10 trading days horizon).
+Your Task:
+Synthesize the insights from all four agents to deliver a definitive short-term swing trade decision (1 to 10 trading days horizon).
 
-Rules & Analytical Guidelines:
-1. SHORT-TERM SWING FOCUS (IGNORE PRICED-IN LONG-TERM NOISE):
-   - Ignore old, stale historical news, macro narratives, and long-term brand stories that are ALREADY PRICED IN.
-   - Focus strictly on immediate short-term price catalysts, Forward P/E ratio, current quarter profit margins, and guidance for next quarter.
-   - Evaluate short-term price velocity (5-day return %), RSI momentum, and EMA20 vs EMA50 alignment.
-
-2. INVESTMENT BANK COVERAGE & RATING ACTIONS:
-   - Factor in recent Wall Street equity research, price target revisions, and rating actions from major investment banks:
-     1) Bank of America (BofA)
-     2) Barclays
-     3) Credit Suisse
-     4) Deutsche Bank (DB)
-     5) Evercore ISI
-     6) Goldman Sachs
-     7) JPMorgan
-     8) Morgan Stanley
-     9) UBS
-   - Highlight recent upgrades, downgrades, price target raises/cuts, or conviction list changes from these firms.
-
-3. REQUIRED METRICS & OUTPUT SCHEMA:
-   - Forward P/E Ratio (valuation relative to immediate near-term earnings potential).
-   - Current Quarter Profit Margins & Quarterly Earnings/Revenue Growth.
-   - Next Quarter Guidance & Recent Guidance Revisions.
-   - Major Investment Bank Stance & Wall Street Consensus.
+Rules & Guidelines:
+1. Ignore stale long-term macro narratives that are already priced in.
+2. Synthesize News Agent impact + Market Agent momentum + Risk Agent factors + Analyst Agent bank ratings.
+3. Return a valid JSON object matching the requested schema.
 
 Schema:
-[
-  {
-    "stock": "Ticker Symbol",
-    "decision": "BUY|SELL|HOLD",
-    "confidence": 0.85,
-    "reason": "Short-term swing setup analysis incorporating Forward PE, Q profit margins, next Q guidance, and 5-day momentum",
-    "news": "Fresh short-term catalysts & next Q guidance updates",
-    "investment_bank_coverage": "Recent rating actions, price targets & consensus from major banks (BofA, Barclays, Credit Suisse, DB, Evercore, Goldman, JPM, Morgan Stanley, UBS)",
-    "push_notification": "TRUE|FALSE",
-    "PE_and_PEG": "Forward PE / PEG ratio values"
-  }
-]
+{
+  "stock": "Ticker Symbol",
+  "decision": "BUY|SELL|HOLD",
+  "confidence": 0.85,
+  "reason": "Short-term swing setup rationale synthesizing Market, News, Risk & Analyst Agent insights",
+  "news": "Today's key news summary & catalyst impact from News Agent",
+  "investment_bank_coverage": "Recent rating actions & consensus from Analyst Agent",
+  "risk_assessment": "Risk level & stop-loss boundary from Risk Agent",
+  "push_notification": "TRUE|FALSE",
+  "PE_and_PEG": "Forward PE ratio value"
+}
 """
-
-config = types.GenerateContentConfig(
-    system_instruction=SYSTEM_INSTRUCTION,
-    response_mime_type="application/json"
-)
-
-
-def collect_market_data():
-    market_data = []
-    print("Collecting short-term market metrics & forward fundamentals...")
-    for Symbol in WATCHLIST:
-        try:
-            ticker = yf.Ticker(Symbol)
-            df = ticker.history(period="6mo", interval="1d")
-
-            if df.empty:
-                continue
-
-            df = df.dropna(subset=["Close"])
-            if len(df) < 20:
-                continue
-
-            df["RSI"] = ta.momentum.RSIIndicator(close=df["Close"], window=14).rsi()
-            df["EMA20"] = ta.trend.EMAIndicator(close=df["Close"], window=20).ema_indicator()
-            df["EMA50"] = ta.trend.EMAIndicator(close=df["Close"], window=50).ema_indicator()
-            atr = ta.volatility.AverageTrueRange(high=df["High"], low=df["Low"], close=df["Close"], window=14)
-            df["ATR"] = atr.average_true_range()
-
-            latest = df.iloc[-1]
-            price = latest["Close"]
-            rsi = latest["RSI"]
-            ema20 = latest["EMA20"]
-            ema50 = latest["EMA50"]
-            atr_val = latest["ATR"]
-
-            if pd.isna(price):
-                continue
-
-            # Short-term 5-day price return %
-            price_5d_ago = df["Close"].iloc[-6] if len(df) >= 6 else df["Close"].iloc[0]
-            change_5d_pct = ((price - price_5d_ago) / price_5d_ago) * 100
-
-            # Forward fundamentals & margins
-            try:
-                info = ticker.info or {}
-            except Exception:
-                info = {}
-
-            forward_pe = info.get("forwardPE")
-            profit_margins = info.get("profitMargins")
-            earnings_growth = info.get("earningsGrowth")
-            rev_growth = info.get("revenueGrowth")
-
-            market_data.append({
-                "symbol": Symbol,
-                "price": round(float(price), 2),
-                "change_5d_pct": f"{change_5d_pct:+.2f}%",
-                "rsi14": round(float(rsi), 2) if not pd.isna(rsi) else None,
-                "ema20": round(float(ema20), 2) if not pd.isna(ema20) else None,
-                "ema50": round(float(ema50), 2) if not pd.isna(ema50) else None,
-                "atr": round(float(atr_val), 2) if not pd.isna(atr_val) else None,
-                "forward_pe": round(float(forward_pe), 2) if forward_pe else "N/A",
-                "profit_margins_this_q": f"{profit_margins * 100:.1f}%" if profit_margins else "N/A",
-                "earnings_growth_yoy": f"{earnings_growth * 100:.1f}%" if earnings_growth else "N/A",
-                "revenue_growth_yoy": f"{rev_growth * 100:.1f}%" if rev_growth else "N/A"
-            })
-        except Exception as e:
-            print(f"Error gathering data for {Symbol}: {e}")
-
-    return market_data
 
 
 def format_telegram_digest(results):
-    lines = ["⚡ *Short-Term Swing Market Digest* ⚡\n"]
+    lines = ["⚡ *4-Agent Short-Term Swing Digest (Ollama)* ⚡\n"]
     emoji_map = {"BUY": "🟢", "SELL": "🔴", "HOLD": "⚪"}
 
     for item in results:
@@ -157,19 +71,22 @@ def format_telegram_digest(results):
         confidence = item.get("confidence", 0.0)
         reason = item.get("reason", "")
         news = item.get("news", "")
-        bank_coverage = item.get("investment_bank_coverage", item.get("bank_ratings", ""))
+        bank_coverage = item.get("investment_bank_coverage", "")
+        risk_info = item.get("risk_assessment", "")
         pe_peg = item.get("PE_and_PEG", "")
         emoji = emoji_map.get(decision, "⚪")
 
-        lines.append(f"{emoji} *{stock}* | *{decision}* (Conf: {confidence:.2f})")
+        lines.append(f"{emoji} *{stock}* | *{decision}* (Conf: {confidence})")
         if pe_peg:
             lines.append(f"• *Fwd Valuation:* _{pe_peg}_")
         if bank_coverage:
             lines.append(f"• *Bank Coverage:* _{bank_coverage}_")
+        if risk_info:
+            lines.append(f"• *Risk Profile:* _{risk_info}_")
         if reason:
             lines.append(f"• *Swing Setup:* _{reason}_")
         if news:
-            lines.append(f"• *Next Q / Short-Term Catalysts:* _{news}_")
+            lines.append(f"• *Today's News & Impact:* _{news}_")
         lines.append("")
 
     return "\n".join(lines)
@@ -221,67 +138,85 @@ def send_telegram_digest(token, chat_id, text):
 
 
 def main():
-    stock_data = collect_market_data()
-    if not stock_data:
-        print("No stock data collected.")
-        return
+    print("=== Initializing 4-Agent Stock Analysis Pipeline ===")
+    market_agent = MarketAgent()
+    news_agent = NewsAgent()
+    risk_agent = RiskAgent()
+    analyst_agent = AnalystAgent()
 
-    print(f"Sending short-term swing analysis batch ({len(stock_data)} stocks) to Gemini API...")
-    batch_prompt = f"Analyze the following short-term stock market data & forward metrics:\n{json.dumps(stock_data, indent=2)}"
+    ollama_model = os.getenv("OLLAMA_MODEL", "gemma3:4b")
+    all_results = []
 
-    MODELS_ORDER = [
-        "gemini-3.6-flash",
-        "gemini-3.5-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-3.1-flash-lite",
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-2.0-flash",
-        "gemini-1.5-flash"
-    ]
+    for idx, symbol in enumerate(WATCHLIST, 1):
+        print(f"\n--- [{idx}/{len(WATCHLIST)}] Processing {symbol} ---")
 
-    response = None
-    for model_name in MODELS_ORDER:
+        # 1. Market Agent Data Collection
+        m_data = market_agent.analyze(symbol)
+        if not m_data:
+            print(f"Skipping {symbol}: Insufficient price data.")
+            continue
+
+        # 2. News Agent Data Collection & Sentiment Impact
+        n_data = news_agent.analyze(symbol)
+
+        # 3. Risk Agent Data Collection & Volatility Evaluation
+        r_data = risk_agent.analyze(m_data)
+
+        # 4. Analyst Agent Investment Bank Rating Extraction
+        a_data = analyst_agent.analyze(symbol)
+
+        # 5. Master Trader Synthesis
+        payload = {
+            "stock": symbol,
+            "market_agent_data": m_data,
+            "news_agent_data": n_data,
+            "risk_agent_data": r_data,
+            "analyst_agent_data": a_data
+        }
+
+        print(f"[MasterTrader] Synthesizing 4-agent insights for {symbol} via Ollama ({ollama_model})...")
+        prompt = f"4-Agent Payload for {symbol}:\n{json.dumps(payload, indent=2)}"
+
         try:
-            print(f"Attempting short-term analysis with model '{model_name}'...")
-            response = client.models.generate_content(
-                model=model_name,
-                contents=batch_prompt,
-                config=config
+            response_obj = chat(
+                model=ollama_model,
+                messages=[
+                    {"role": "system", "content": MASTER_TRADER_INSTRUCTION},
+                    {"role": "user", "content": prompt}
+                ],
+                format="json"
             )
-            print(f"Successfully generated analysis using '{model_name}'.")
-            break
-        except Exception as e:
-            err = str(e)
-            if "429" in err or "RESOURCE_EXHAUSTED" in err or "404" in err or "NOT_FOUND" in err or "INVALID_ARGUMENT" in err:
-                print(f"Model '{model_name}' unavailable/rate-limited. Switching to next model...")
-                continue
-            else:
-                print(f"Error with '{model_name}': {e}. Trying next model...")
-                continue
+            res_content = response_obj["message"]["content"]
+            parsed = json.loads(res_content)
 
-    if not response:
-        print("All models in the fallback sequence failed.")
+            res_obj = None
+            if isinstance(parsed, dict):
+                res_obj = parsed
+            elif isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], dict):
+                res_obj = parsed[0]
+
+            if res_obj:
+                if "stock" not in res_obj:
+                    res_obj["stock"] = symbol
+                all_results.append(res_obj)
+                print(f"[MasterTrader] Decision for {symbol}: {res_obj.get('decision')} (Conf: {res_obj.get('confidence')})")
+            else:
+                print(f"Warning: Master Trader returned empty output for {symbol}.")
+
+        except Exception as e:
+            print(f"Master Trader synthesis error for {symbol}: {e}")
+
+    if not all_results:
+        print("\nNo analysis results generated.")
         return
 
-    print("\n--- Gemini Short-Term Analysis Output ---")
-    print(response.text)
+    print("\n================ Aggregated Analysis Output ================")
+    print(json.dumps(all_results, indent=2))
 
-    try:
-        results = json.loads(response.text)
-    except Exception as e:
-        print(f"Error parsing JSON output: {e}")
-        results = []
-
-    if results and telegram_token:
-        digest_message = format_telegram_digest(results)
+    if all_results and telegram_token:
+        digest_message = format_telegram_digest(all_results)
         send_telegram_digest(telegram_token, CHAT_ID, digest_message)
 
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
