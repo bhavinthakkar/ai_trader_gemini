@@ -1,30 +1,21 @@
 import streamlit as st
 import pandas as pd
 import json
-import subprocess
-import sys
 from db import init_db, get_latest_signals, get_signal_history, get_summary_stats
 
 # Page Configuration
 st.set_page_config(
-    page_title="AI Trader - 4-Agent Swing Trading Dashboard",
+    page_title="AI Trader - Swing Trading Analysis Report",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom Styling (Dark/Modern Theme with Glassmorphism Accent)
+# Custom Styling
 st.markdown("""
 <style>
     .main {
         background-color: #0e1117;
-    }
-    .metric-card {
-        background: linear-gradient(135deg, #1e222d 0%, #141721 100%);
-        border: 1px solid #2a2e3d;
-        border-radius: 12px;
-        padding: 200px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     }
     .badge-buy {
         background-color: #0e3a24;
@@ -73,41 +64,23 @@ st.markdown("""
 init_db()
 
 # Sidebar Setup
-st.sidebar.title("⚡ AI Trader Control Center")
+st.sidebar.title("⚡ AI Trader Report Viewer")
 st.sidebar.markdown("---")
 
-st.sidebar.subheader("Run New Pipeline Analysis")
-model_option = st.sidebar.radio(
-    "Select Model:",
-    ["Gemini 3.6 Flash", "gemma4:12b (Ollama Local)"],
-    index=0
-)
-
-run_button = st.sidebar.button("🚀 Run 4-Agent Analysis", use_container_width=True)
-
-if run_button:
-    model_arg = "local" if "Ollama" in model_option else "gemini"
-    st.sidebar.info(f"Launching pipeline with {model_option}...")
-    with st.spinner("Analyzing market technicals, news catalysts, risk boundaries & bank ratings..."):
-        try:
-            # Run main.py as subprocess with selected model argument
-            cmd = [sys.executable, "main.py", model_arg]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            if result.returncode == 0:
-                st.sidebar.success("Pipeline Analysis Completed Successfully!")
-                st.rerun()
-            else:
-                st.sidebar.error(f"Error running pipeline: {result.stderr}")
-        except Exception as e:
-            st.sidebar.error(f"Execution error: {e}")
+st.sidebar.info("""
+💻 **Terminal Trigger Mode**
+To run a new pipeline analysis, execute in your terminal:
+- `python main.py` (Gemini 3.6 Flash)
+- `python main.py local` (Local gemma4:12b)
+""")
 
 st.sidebar.markdown("---")
-if st.sidebar.button("🔄 Refresh Dashboard Data", use_container_width=True):
+if st.sidebar.button("🔄 Refresh Report Data", width="stretch"):
     st.rerun()
 
 # Main App Layout
-st.title("📈 Autonomous Stock Swing Trading Dashboard")
-st.caption("Powered by 4-Agent Multi-Agent Architecture (Market, News, Risk & Analyst Agents) & SQLite")
+st.title("📈 Autonomous Stock Swing Trading Report")
+st.caption("Reporting dashboard reading analysis results from SQLite (`trader.db`)")
 
 # Summary KPI Cards
 stats = get_summary_stats()
@@ -135,7 +108,7 @@ with tab1:
     st.subheader("Latest Swing Trade Recommendations")
 
     if not latest_signals:
-        st.info("No signal data found in database yet. Run a pipeline analysis from the sidebar to populate signals!")
+        st.info("No signal data found in database. Run `python main.py` in your terminal to populate analysis reports!")
     else:
         # Filters
         filter_col1, filter_col2 = st.columns([2, 2])
@@ -169,7 +142,6 @@ with tab1:
                 "timestamp": "Timestamp"
             })
 
-            # Format dataframe display with badges
             def format_decision(val):
                 if val == "BUY":
                     return "🟢 BUY"
@@ -178,7 +150,7 @@ with tab1:
                 return "⚪ HOLD"
 
             df_table["Decision"] = df_table["Decision"].apply(format_decision)
-            st.dataframe(df_table, use_container_width=True, hide_index=True)
+            st.dataframe(df_table, width="stretch", hide_index=True)
         else:
             st.warning("No signals match the selected filters.")
 
@@ -186,7 +158,7 @@ with tab2:
     st.subheader("Sub-Agent Intelligence & Synthesis Breakdown")
 
     if not latest_signals:
-        st.info("No data available. Run an analysis to view stock details.")
+        st.info("No data available. Run `python main.py` in terminal to generate stock details.")
     else:
         symbol_list = [s["symbol"] for s in latest_signals]
         selected_stock = st.selectbox("Select Ticker Symbol to Inspect:", options=symbol_list)
@@ -228,7 +200,6 @@ with tab2:
                 st.subheader("📊 Forward Valuation")
                 st.write(f"Forward P/E Ratio: `{stock_data.get('pe_and_peg', 'N/A')}`")
 
-            # Display Raw JSON details if available
             with st.expander("🛠️ View Full JSON Payload"):
                 st.json(stock_data.get("raw_json") or json.dumps(stock_data))
 
@@ -250,4 +221,4 @@ with tab3:
             "model_used": "Model Used",
             "reason": "Swing Setup Reason"
         })
-        st.dataframe(df_hist, use_container_width=True, hide_index=True)
+        st.dataframe(df_hist, width="stretch", hide_index=True)
