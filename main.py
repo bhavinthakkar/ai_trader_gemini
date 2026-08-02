@@ -7,6 +7,7 @@ import requests
 from dotenv import load_dotenv
 
 from llm_service import query_llm
+from db import init_db, save_results
 from market_agent import MarketAgent
 from news_agent import NewsAgent
 from risk_agent import RiskAgent
@@ -218,6 +219,9 @@ def main():
 
     print("\n================ Aggregated Analysis Output ================")
     print(json.dumps(all_results, indent=2))
+
+    # Auto-save results to SQLite DB
+    save_results(all_results, model_used=model_label)
 
     if all_results and telegram_token:
         digest_message = format_telegram_digest(all_results, model_label=model_label)
