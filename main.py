@@ -142,13 +142,13 @@ def send_telegram_digest(token, chat_id, text):
 
 def main():
     parser = argparse.ArgumentParser(description="4-Agent Stock Swing Trading Analysis Pipeline")
-    parser.add_argument("model_arg", nargs="?", default=None, help="Model choice: 'local' for gemma4:12b, otherwise uses Gemini 3.6 Flash")
-    parser.add_argument("--model", "-m", dest="model_opt", default=None, help="Model choice: 'local' for gemma4:12b, otherwise uses Gemini 3.6 Flash")
+    parser.add_argument("model_arg", nargs="?", default=None, help="Model choice: 'local' for gemma4:12b, otherwise uses Gemini 3.1 Pro")
+    parser.add_argument("--model", "-m", dest="model_opt", default=None, help="Model choice: 'local' for gemma4:12b, otherwise uses Gemini 3.1 Pro")
     args = parser.parse_args()
 
     model_choice = args.model_opt or args.model_arg or "gemini"
     is_local = (str(model_choice).strip().lower() == "local")
-    model_label = "gemma4:12b (Ollama)" if is_local else "Gemini 3.6 Flash"
+    model_label = "gemma4:12b (Ollama)" if is_local else "Gemini 3.1 Pro"
 
     print(f"=== Initializing 4-Agent Stock Analysis Pipeline (Model: {model_label}) ===")
     market_agent = MarketAgent()
