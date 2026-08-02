@@ -1,10 +1,12 @@
+import sys
+import argparse
 import os
 import json
 import time
 import requests
 from dotenv import load_dotenv
-from ollama import chat
 
+from llm_service import query_llm
 from market_agent import MarketAgent
 from news_agent import NewsAgent
 from risk_agent import RiskAgent
@@ -61,8 +63,8 @@ Schema:
 """
 
 
-def format_telegram_digest(results):
-    lines = ["⚡ *4-Agent Short-Term Swing Digest (Ollama)* ⚡\n"]
+def format_telegram_digest(results, model_label="Gemini 3.6 Flash"):
+    lines = [f"⚡ *4-Agent Short-Term Swing Digest ({model_label})* ⚡\n"]
     emoji_map = {"BUY": "🟢", "SELL": "🔴", "HOLD": "⚪"}
 
     for item in results:
@@ -138,13 +140,21 @@ def send_telegram_digest(token, chat_id, text):
 
 
 def main():
-    print("=== Initializing 4-Agent Stock Analysis Pipeline ===")
+    parser = argparse.ArgumentParser(description="4-Agent Stock Swing Trading Analysis Pipeline")
+    parser.add_argument("model_arg", nargs="?", default=None, help="Model choice: 'local' for gemma4:12b, otherwise uses Gemini 3.6 Flash")
+    parser.add_argument("--model", "-m", dest="model_opt", default=None, help="Model choice: 'local' for gemma4:12b, otherwise uses Gemini 3.6 Flash")
+    args = parser.parse_args()
+
+    model_choice = args.model_opt or args.model_arg or "gemini"
+    is_local = (str(model_choice).strip().lower() == "local")
+    model_label = "gemma4:12b (Ollama)" if is_local else "Gemini 3.6 Flash"
+
+    print(f"=== Initializing 4-Agent Stock Analysis Pipeline (Model: {model_label}) ===")
     market_agent = MarketAgent()
-    news_agent = NewsAgent()
+    news_agent = NewsAgent(model_choice=model_choice)
     risk_agent = RiskAgent()
     analyst_agent = AnalystAgent()
 
-    ollama_model = os.getenv("OLLAMA_MODEL", "gemma3:4b")
     all_results = []
 
     for idx, symbol in enumerate(WATCHLIST, 1):
@@ -174,19 +184,15 @@ def main():
             "analyst_agent_data": a_data
         }
 
-        print(f"[MasterTrader] Synthesizing 4-agent insights for {symbol} via Ollama ({ollama_model})...")
+        print(f"[MasterTrader] Synthesizing 4-agent insights for {symbol} via {model_label}...")
         prompt = f"4-Agent Payload for {symbol}:\n{json.dumps(payload, indent=2)}"
 
         try:
-            response_obj = chat(
-                model=ollama_model,
-                messages=[
-                    {"role": "system", "content": MASTER_TRADER_INSTRUCTION},
-                    {"role": "user", "content": prompt}
-                ],
-                format="json"
+            res_content = query_llm(
+                system_instruction=MASTER_TRADER_INSTRUCTION,
+                user_prompt=prompt,
+                model_choice=model_choice
             )
-            res_content = response_obj["message"]["content"]
             parsed = json.loads(res_content)
 
             res_obj = None
@@ -214,7 +220,7 @@ def main():
     print(json.dumps(all_results, indent=2))
 
     if all_results and telegram_token:
-        digest_message = format_telegram_digest(all_results)
+        digest_message = format_telegram_digest(all_results, model_label=model_label)
         send_telegram_digest(telegram_token, CHAT_ID, digest_message)
 
 

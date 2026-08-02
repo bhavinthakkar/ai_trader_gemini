@@ -35,8 +35,8 @@ class AnalystAgent:
         consensus = "N/A"
 
         try:
-            # 1. Price Target Summary (FMP v4)
-            pt_url = f"https://financialmodelingprep.com/api/v4/price-target-summary?symbol={symbol}&apikey={self.fmp_key}"
+            # 1. Price Target Summary (FMP Stable API)
+            pt_url = f"https://financialmodelingprep.com/stable/price-target-summary?symbol={symbol}&apikey={self.fmp_key}"
             res_pt = requests.get(pt_url, timeout=5)
             if res_pt.status_code == 200 and res_pt.json():
                 data = res_pt.json()
@@ -45,8 +45,8 @@ class AnalystAgent:
             else:
                 print(f"[AnalystAgent] FMP price target API returned status {res_pt.status_code} for {symbol}.")
 
-            # 2. Upgrades & Downgrades (FMP v4)
-            ud_url = f"https://financialmodelingprep.com/api/v4/upgrades-downgrades-grading-company?symbol={symbol}&apikey={self.fmp_key}"
+            # 2. Upgrades & Downgrades / Bank Grades (FMP Stable API)
+            ud_url = f"https://financialmodelingprep.com/stable/grades?symbol={symbol}&apikey={self.fmp_key}"
             res_ud = requests.get(ud_url, timeout=5)
             if res_ud.status_code == 200 and res_ud.json():
                 data = res_ud.json()

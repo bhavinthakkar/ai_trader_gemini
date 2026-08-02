@@ -3,7 +3,7 @@ import json
 import requests
 import yfinance as yf
 from dotenv import load_dotenv
-from ollama import chat
+from llm_service import query_llm
 
 load_dotenv()
 
@@ -24,11 +24,11 @@ class NewsAgent:
     """
     News Agent: Fetches real-time news articles using newsapi.ai (Event Registry)
     or newsapi.org (with an automatic yfinance fallback), synthesizes key developments,
-    and estimates short-term market impact via local LLM (gemma3:4b).
+    and estimates short-term market impact via selected LLM (gemma4:12b or Gemini 3.6 Flash).
     """
 
-    def __init__(self, model_name=None):
-        self.model_name = model_name or os.getenv("OLLAMA_MODEL", "gemma3:4b")
+    def __init__(self, model_choice="gemini"):
+        self.model_choice = model_choice
         self.news_api_key = os.getenv("NEWS_API_KEY")
 
     def fetch_from_newsapi_ai(self, symbol: str) -> list:
@@ -162,15 +162,12 @@ Return a JSON object matching this schema:
 """
 
         try:
-            response_obj = chat(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": "You are a financial news intelligence agent. Analyze news articles and output JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                format="json"
+            res_content = query_llm(
+                system_instruction="You are a financial news intelligence agent. Analyze news articles and output JSON.",
+                user_prompt=prompt,
+                model_choice=self.model_choice
             )
-            parsed = json.loads(response_obj["message"]["content"])
+            parsed = json.loads(res_content)
             if isinstance(parsed, dict):
                 parsed["raw_headlines"] = headlines
                 parsed["source"] = source_used
