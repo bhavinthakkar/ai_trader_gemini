@@ -6,7 +6,7 @@ import time
 import requests
 from dotenv import load_dotenv
 
-from llm_service import query_llm
+from llm_service import query_llm, get_model_label
 from db import init_db, save_results
 from market_agent import MarketAgent
 from news_agent import NewsAgent
@@ -141,14 +141,41 @@ def send_telegram_digest(token, chat_id, text):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="4-Agent Stock Swing Trading Analysis Pipeline")
-    parser.add_argument("model_arg", nargs="?", default=None, help="Model choice: 'local' for gemma4:12b, otherwise uses Gemini 3.1 Pro")
-    parser.add_argument("--model", "-m", dest="model_opt", default=None, help="Model choice: 'local' for gemma4:12b, otherwise uses Gemini 3.1 Pro")
+    parser = argparse.ArgumentParser(
+        description="4-Agent Stock Swing Trading Analysis Pipeline",
+        usage="python main.py {gemini|gemma|qwen}"
+    )
+    parser.add_argument(
+        "model_arg",
+        nargs="?",
+        default=None,
+        help="Required model short name: 'gemini' (Gemini 3.1 Pro), 'gemma' (gemma4:12b), or 'qwen' (qwen3:30b-a3b-instruct-2507-q4_K_M)"
+    )
+    parser.add_argument(
+        "--model", "-m",
+        dest="model_opt",
+        default=None,
+        help="Model short name: 'gemini', 'gemma', or 'qwen'"
+    )
     args = parser.parse_args()
 
-    model_choice = args.model_opt or args.model_arg or "gemini"
-    is_local = (str(model_choice).strip().lower() == "local")
-    model_label = "gemma4:12b (Ollama)" if is_local else "Gemini 3.1 Pro"
+    raw_model = args.model_opt or args.model_arg
+    if not raw_model:
+        print("\n❌ ERROR: Model argument is required!")
+        print("Usage: python main.py {gemini|gemma|qwen}")
+        print("  - gemini : Cloud Gemini 3.1 Pro")
+        print("  - gemma  : Local Ollama gemma4:12b")
+        print("  - qwen   : Local Ollama qwen3:30b-a3b-instruct-2507-q4_K_M\n")
+        sys.exit(1)
+
+    model_choice = str(raw_model).strip().lower()
+    valid_models = ["gemini", "gemma", "qwen", "local"]
+    if model_choice not in valid_models:
+        print(f"\n❌ ERROR: Invalid model choice '{raw_model}'!")
+        print("Supported choices are: 'gemini', 'gemma', 'qwen'\n")
+        sys.exit(1)
+
+    model_label = get_model_label(model_choice)
 
     print(f"=== Initializing 4-Agent Stock Analysis Pipeline (Model: {model_label}) ===")
     market_agent = MarketAgent()

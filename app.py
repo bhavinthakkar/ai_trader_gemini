@@ -70,8 +70,9 @@ st.sidebar.markdown("---")
 st.sidebar.info("""
 💻 **Terminal Trigger Mode**
 To run a new pipeline analysis, execute in your terminal:
-- `python main.py` (Gemini 3.1 Pro)
-- `python main.py local` (Local gemma4:12b)
+- `python main.py gemini` (Gemini 3.1 Pro)
+- `python main.py gemma` (Local gemma4:12b)
+- `python main.py qwen` (Local qwen3:30b)
 """)
 
 st.sidebar.markdown("---")

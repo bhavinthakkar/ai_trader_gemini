@@ -4,22 +4,63 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+MODEL_REGISTRY = {
+    "gemini": {
+        "provider": "gemini",
+        "primary": "gemini-3.1-pro-preview",
+        "fallbacks": ["gemini-3.5-flash", "gemini-2.5-flash"],
+        "label": "Gemini 3.1 Pro"
+    },
+    "gemma": {
+        "provider": "ollama",
+        "model": "gemma4:12b",
+        "label": "gemma4:12b (Ollama)"
+    },
+    "qwen": {
+        "provider": "ollama",
+        "model": "qwen3:30b-a3b-instruct-2507-q4_K_M",
+        "label": "qwen3:30b-a3b (Ollama)"
+    }
+}
 
-def query_llm(system_instruction: str, user_prompt: str, model_choice: str = "gemini") -> str:
-    """
-    Executes an LLM chat query.
-    - If model_choice.lower() == 'local', uses Ollama with model 'gemma4:12b'.
-    - Otherwise, uses Gemini API defaulting to 'gemini-3.1-pro-preview' (Gemini 3.1 Pro) with automatic fallback to 'gemini-3.5-flash' / 'gemini-2.5-flash' on 429 quota limits.
-    """
-    is_local = (str(model_choice).strip().lower() == "local")
 
-    if is_local:
+def get_model_label(model_choice: str) -> str:
+    key = str(model_choice).strip().lower()
+    if key == "local":
+        key = "gemma"
+    if key in MODEL_REGISTRY:
+        return MODEL_REGISTRY[key]["label"]
+    return model_choice
+
+
+def query_llm(system_instruction: str, user_prompt: str, model_choice: str) -> str:
+    """
+    Executes an LLM chat query based on the model short name.
+    Supported model short names:
+      - 'gemini': Gemini 3.1 Pro (via Gemini API)
+      - 'gemma': Local Ollama model 'gemma4:12b'
+      - 'qwen': Local Ollama model 'qwen3:30b-a3b-instruct-2507-q4_K_M'
+    """
+    if not model_choice or not str(model_choice).strip():
+        raise ValueError("Model choice argument is required. Valid choices: 'gemini', 'gemma', 'qwen'")
+
+    key = str(model_choice).strip().lower()
+    if key == "local":
+        key = "gemma"
+
+    if key not in MODEL_REGISTRY:
+        raise ValueError(f"Invalid model choice '{model_choice}'. Choose one of: {list(MODEL_REGISTRY.keys())}")
+
+    config = MODEL_REGISTRY[key]
+    provider = config["provider"]
+
+    if provider == "ollama":
         try:
             from ollama import chat as ollama_chat
         except ImportError:
             raise ImportError("The 'ollama' python package is required for local model execution. Run: pip install ollama")
 
-        model_name = "gemma4:12b"
+        model_name = config["model"]
         response_obj = ollama_chat(
             model=model_name,
             messages=[
@@ -29,23 +70,21 @@ def query_llm(system_instruction: str, user_prompt: str, model_choice: str = "ge
             format="json"
         )
         return response_obj["message"]["content"]
-    else:
+
+    elif provider == "gemini":
         try:
             from google import genai
             from google.genai import types
         except ImportError:
             raise ImportError("The 'google-genai' python package is required for Gemini model execution. Run: pip install google-genai")
 
-        model_name = "gemini-3.1-pro-preview"
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("GEMINI_API_KEY environment variable is not set in .env")
 
         client = genai.Client(api_key=api_key)
-        
-        # Candidate models in order of priority
-        candidate_models = [model_name, "gemini-3.5-flash", "gemini-2.5-flash"]
-        
+        candidate_models = [config["primary"]] + config.get("fallbacks", [])
+
         last_error = None
         for m in candidate_models:
             try:
