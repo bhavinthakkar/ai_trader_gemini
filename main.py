@@ -13,19 +13,7 @@ from news_agent import NewsAgent
 from risk_agent import RiskAgent
 from analyst_agent import AnalystAgent
 
-WATCHLIST = [
-    "FLKR",
-    "AAPL",
-    "MSFT",
-    "NVDA",
-    "AMZN",
-    "META",
-    "GOOGL",
-    "TSLA",
-    "AMD",
-    "NFLX",
-    "PLTR"
-]
+# WATCHLIST is now passed dynamically via CLI argument
 
 CHAT_ID = "969601315"
 
@@ -143,102 +131,91 @@ def send_telegram_digest(token, chat_id, text):
 def main():
     parser = argparse.ArgumentParser(
         description="4-Agent Stock Swing Trading Analysis Pipeline",
-        usage="python main.py {gemini|gemma|qwen}"
+        usage="python main.py <model> <symbol>"
     )
     parser.add_argument(
-        "model_arg",
-        nargs="?",
-        default=None,
-        help="Required model short name: 'gemini' (Gemini 3.1 Pro), 'gemma' (gemma4:12b), or 'qwen' (qwen3:30b-a3b-instruct-2507-q4_K_M)"
+        "model",
+        help="Required model short name: 'gemini', 'gemma', 'qwen', or 'nemotron'"
     )
     parser.add_argument(
-        "--model", "-m",
-        dest="model_opt",
-        default=None,
-        help="Model short name: 'gemini', 'gemma', or 'qwen'"
+        "symbol",
+        help="Required stock ticker symbol to analyze (e.g. AAPL)"
     )
     args = parser.parse_args()
 
-    raw_model = args.model_opt or args.model_arg
-    if not raw_model:
-        print("\n❌ ERROR: Model argument is required!")
-        print("Usage: python main.py {gemini|gemma|qwen}")
-        print("  - gemini : Cloud Gemini 3.1 Pro")
-        print("  - gemma  : Local Ollama gemma4:12b")
-        print("  - qwen   : Local Ollama qwen3:30b-a3b-instruct-2507-q4_K_M\n")
-        sys.exit(1)
+    raw_model = args.model
+    symbol = str(args.symbol).strip().upper()
 
     model_choice = str(raw_model).strip().lower()
-    valid_models = ["gemini", "gemma", "qwen", "local"]
+    valid_models = ["gemini", "gemma", "qwen", "nemotron", "local"]
     if model_choice not in valid_models:
         print(f"\n❌ ERROR: Invalid model choice '{raw_model}'!")
-        print("Supported choices are: 'gemini', 'gemma', 'qwen'\n")
+        print("Supported choices are: 'gemini', 'gemma', 'qwen', 'nemotron'\n")
         sys.exit(1)
 
     model_label = get_model_label(model_choice)
 
-    print(f"=== Initializing 4-Agent Stock Analysis Pipeline (Model: {model_label}) ===")
+    print(f"=== Initializing 4-Agent Stock Analysis Pipeline ({symbol}) (Model: {model_label}) ===")
     market_agent = MarketAgent()
     news_agent = NewsAgent(model_choice=model_choice)
     risk_agent = RiskAgent()
     analyst_agent = AnalystAgent()
 
+    print(f"\n--- Processing {symbol} ---")
+
+    # 1. Market Agent Data Collection
+    m_data = market_agent.analyze(symbol)
+    if not m_data:
+        print(f"❌ ERROR: Insufficient price data for {symbol}.")
+        sys.exit(1)
+
+    # 2. Analyst Agent Investment Bank Rating Extraction
+    a_data = analyst_agent.analyze(symbol)
+
+    # 3. News Agent Data Collection & Sentiment Impact (with Analyst/Bank Ratings)
+    n_data = news_agent.analyze(symbol, analyst_data=a_data)
+
+    # 4. Risk Agent Data Collection & Volatility Evaluation
+    r_data = risk_agent.analyze(m_data)
+
+    # 5. Master Trader Synthesis
+    payload = {
+        "stock": symbol,
+        "market_agent_data": m_data,
+        "news_agent_data": n_data,
+        "risk_agent_data": r_data,
+        "analyst_agent_data": a_data
+    }
+
+    print(f"[MasterTrader] Synthesizing 4-agent insights for {symbol} via {model_label}...")
+    prompt = f"4-Agent Payload for {symbol}:\n{json.dumps(payload, indent=2)}"
+
     all_results = []
+    try:
+        res_content = query_llm(
+            system_instruction=MASTER_TRADER_INSTRUCTION,
+            user_prompt=prompt,
+            model_choice=model_choice
+        )
+        parsed = json.loads(res_content)
 
-    for idx, symbol in enumerate(WATCHLIST, 1):
-        print(f"\n--- [{idx}/{len(WATCHLIST)}] Processing {symbol} ---")
+        # In case of nested lists, unpack it
+        res_obj = None
+        if isinstance(parsed, dict):
+            res_obj = parsed
+        elif isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], dict):
+            res_obj = parsed[0]
 
-        # 1. Market Agent Data Collection
-        m_data = market_agent.analyze(symbol)
-        if not m_data:
-            print(f"Skipping {symbol}: Insufficient price data.")
-            continue
+        if res_obj:
+            if "stock" not in res_obj:
+                res_obj["stock"] = symbol
+            all_results.append(res_obj)
+            print(f"[MasterTrader] Decision for {symbol}: {res_obj.get('decision')} (Conf: {res_obj.get('confidence')})")
+        else:
+            print(f"Warning: Master Trader returned empty output for {symbol}.")
 
-        # 2. News Agent Data Collection & Sentiment Impact
-        n_data = news_agent.analyze(symbol)
-
-        # 3. Risk Agent Data Collection & Volatility Evaluation
-        r_data = risk_agent.analyze(m_data)
-
-        # 4. Analyst Agent Investment Bank Rating Extraction
-        a_data = analyst_agent.analyze(symbol)
-
-        # 5. Master Trader Synthesis
-        payload = {
-            "stock": symbol,
-            "market_agent_data": m_data,
-            "news_agent_data": n_data,
-            "risk_agent_data": r_data,
-            "analyst_agent_data": a_data
-        }
-
-        print(f"[MasterTrader] Synthesizing 4-agent insights for {symbol} via {model_label}...")
-        prompt = f"4-Agent Payload for {symbol}:\n{json.dumps(payload, indent=2)}"
-
-        try:
-            res_content = query_llm(
-                system_instruction=MASTER_TRADER_INSTRUCTION,
-                user_prompt=prompt,
-                model_choice=model_choice
-            )
-            parsed = json.loads(res_content)
-
-            res_obj = None
-            if isinstance(parsed, dict):
-                res_obj = parsed
-            elif isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], dict):
-                res_obj = parsed[0]
-
-            if res_obj:
-                if "stock" not in res_obj:
-                    res_obj["stock"] = symbol
-                all_results.append(res_obj)
-                print(f"[MasterTrader] Decision for {symbol}: {res_obj.get('decision')} (Conf: {res_obj.get('confidence')})")
-            else:
-                print(f"Warning: Master Trader returned empty output for {symbol}.")
-
-        except Exception as e:
-            print(f"Master Trader synthesis error for {symbol}: {e}")
+    except Exception as e:
+        print(f"Master Trader synthesis error for {symbol}: {e}")
 
     if not all_results:
         print("\nNo analysis results generated.")
@@ -250,6 +227,7 @@ def main():
     # Auto-save results to SQLite DB
     save_results(all_results, model_used=model_label)
 
+    # Send Telegram alerts
     if all_results and telegram_token:
         digest_message = format_telegram_digest(all_results, model_label=model_label)
         send_telegram_digest(telegram_token, CHAT_ID, digest_message)

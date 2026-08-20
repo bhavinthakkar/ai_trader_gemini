@@ -1,5 +1,6 @@
 import os
 import json
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -20,6 +21,11 @@ MODEL_REGISTRY = {
         "provider": "ollama",
         "model": "qwen3:30b-a3b-instruct-2507-q4_K_M",
         "label": "qwen3:30b-a3b (Ollama)"
+    },
+    "nemotron": {
+        "provider": "nvidia",
+        "model": "nvidia/nemotron-3-ultra-550b-a55b",
+        "label": "Nemotron-3-Ultra-550B (NVIDIA)"
     }
 }
 
@@ -40,9 +46,10 @@ def query_llm(system_instruction: str, user_prompt: str, model_choice: str) -> s
       - 'gemini': Gemini 3.1 Pro (via Gemini API)
       - 'gemma': Local Ollama model 'gemma4:12b'
       - 'qwen': Local Ollama model 'qwen3:30b-a3b-instruct-2507-q4_K_M'
+      - 'nemotron': Nemotron-3-Ultra-550B (via NVIDIA NIM API)
     """
     if not model_choice or not str(model_choice).strip():
-        raise ValueError("Model choice argument is required. Valid choices: 'gemini', 'gemma', 'qwen'")
+        raise ValueError("Model choice argument is required. Valid choices: 'gemini', 'gemma', 'qwen', 'nemotron'")
 
     key = str(model_choice).strip().lower()
     if key == "local":
@@ -106,3 +113,34 @@ def query_llm(system_instruction: str, user_prompt: str, model_choice: str) -> s
 
         if last_error:
             raise last_error
+
+    elif provider == "nvidia":
+        api_key = os.getenv("NVIDIA_API_KEY")
+        if not api_key:
+            raise ValueError("NVIDIA_API_KEY environment variable is not set in .env")
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": config["model"],
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": 0.2,
+            "top_p": 0.7
+        }
+        try:
+            response = requests.post(
+                "https://integrate.api.nvidia.com/v1/chat/completions",
+                json=payload,
+                headers=headers,
+                timeout=60
+            )
+            response.raise_for_status()
+            res_data = response.json()
+            return res_data["choices"][0]["message"]["content"]
+        except Exception as e:
+            raise RuntimeError(f"Error querying NVIDIA NIM API: {e}")
