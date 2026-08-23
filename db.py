@@ -13,7 +13,7 @@ def get_connection(db_path=DB_PATH):
 
 def init_db(db_path=DB_PATH):
     """
-    Initializes the SQLite database schema if tables do not exist.
+    Initializes the SQLite database schema if tables do not exist and applies migrations.
     """
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
@@ -25,6 +25,8 @@ def init_db(db_path=DB_PATH):
                 decision TEXT NOT NULL,
                 confidence REAL,
                 reason TEXT,
+                institutional_data TEXT,
+                macro_data TEXT,
                 news TEXT,
                 investment_bank_coverage TEXT,
                 risk_assessment TEXT,
@@ -33,7 +35,23 @@ def init_db(db_path=DB_PATH):
                 raw_json TEXT
             );
         """)
+        cursor.execute("PRAGMA table_info(signals);")
+        cols = [row["name"] for row in cursor.fetchall()]
+        if "institutional_data" not in cols:
+            cursor.execute("ALTER TABLE signals ADD COLUMN institutional_data TEXT;")
+        if "macro_data" not in cols:
+            cursor.execute("ALTER TABLE signals ADD COLUMN macro_data TEXT;")
         conn.commit()
+
+
+def _ensure_str(val, default="") -> str:
+    if val is None:
+        return default
+    if isinstance(val, (list, tuple)):
+        return ", ".join(str(x) for x in val)
+    if isinstance(val, dict):
+        return json.dumps(val)
+    return str(val)
 
 
 def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB_PATH):
@@ -49,7 +67,7 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
         for item in results:
-            stock = item.get("stock", item.get("symbol", "N/A"))
+            stock = _ensure_str(item.get("stock", item.get("symbol", "N/A")))
             decision = str(item.get("decision", "HOLD")).upper()
             confidence = item.get("confidence", 0.0)
             try:
@@ -57,20 +75,22 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
             except (ValueError, TypeError):
                 confidence = 0.0
 
-            reason = item.get("reason", "")
-            news = item.get("news", "")
-            bank_coverage = item.get("investment_bank_coverage", "")
-            risk_info = item.get("risk_assessment", "")
-            pe_peg = item.get("PE_and_PEG", "")
+            reason = _ensure_str(item.get("reason", ""))
+            inst_data = _ensure_str(item.get("institutional_data", ""))
+            macro_data = _ensure_str(item.get("macro_data", item.get("marco_data", "")))
+            news = _ensure_str(item.get("news", ""))
+            bank_coverage = _ensure_str(item.get("investment_bank_coverage", ""))
+            risk_info = _ensure_str(item.get("risk_assessment", ""))
+            pe_peg = _ensure_str(item.get("PE_and_PEG", ""))
             raw_json = json.dumps(item)
 
             cursor.execute("""
                 INSERT INTO signals (
-                    timestamp, symbol, decision, confidence, reason, news,
+                    timestamp, symbol, decision, confidence, reason, institutional_data, macro_data, news,
                     investment_bank_coverage, risk_assessment, pe_and_peg, model_used, raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                timestamp, stock, decision, confidence, reason, news,
+                timestamp, stock, decision, confidence, reason, inst_data, macro_data, news,
                 bank_coverage, risk_info, pe_peg, model_used, raw_json
             ))
         conn.commit()

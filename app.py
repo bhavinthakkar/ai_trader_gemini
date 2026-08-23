@@ -68,12 +68,19 @@ st.sidebar.title("⚡ AI Trader Report Viewer")
 st.sidebar.markdown("---")
 
 st.sidebar.info("""
-💻 **Terminal Trigger Mode**
+💻 **Terminal Trigger Mode (6-Agent System)**
 To run a new pipeline analysis, execute in your terminal:
-- `python main.py gemini` (Gemini 3.1 Pro)
-- `python main.py gemma` (Local gemma4:12b)
-- `python main.py qwen` (Local qwen3:30b)
-- `python main.py nemotron` (Nemotron 3 Ultra)
+st.sidebar.info("""
+💻 **Terminal Trigger Mode (6-Agent System)**
+To run a new pipeline analysis, execute in your terminal:
+- `python main.py nemotron <TICKER>` (Nemotron-3 Super 120B)
+- `python main.py gemini <TICKER>` (Gemini 3.1 Pro)
+- `python main.py twostage <TICKER>` (2-Stage: Qwen2.5 14B + Qwen3 30B)
+- `python main.py gemma <TICKER>` (Local gemma4:12b)
+- `python main.py qwen <TICKER>` (Local Qwen2.5 14B)
+
+*Example:* `python main.py nemotron NVDA` or `python main.py nemotron 000660.KS`
+""")
 """)
 
 st.sidebar.markdown("---")
@@ -188,6 +195,12 @@ with tab2:
             with col_left:
                 st.subheader("💡 Swing Setup Rationale")
                 st.info(stock_data.get("reason") or "No rationale provided.")
+
+                st.subheader("🏛️ SEC EDGAR Institutional & Filings")
+                st.write(stock_data.get("institutional_data") or "No SEC filing summary available.")
+
+                st.subheader("🌐 Macro Economy (FRED) & CFTC COT")
+                st.write(stock_data.get("macro_data") or stock_data.get("marco_data") or "No macro summary available.")
 
                 st.subheader("📰 Today's News Catalysts")
                 st.write(stock_data.get("news") or "No news catalyst summary reported.")

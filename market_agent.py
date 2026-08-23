@@ -47,6 +47,21 @@ class MarketAgent:
             except Exception:
                 info = {}
 
+            # S&P 500 Market Benchmark (SPY) 5-day relative return comparison
+            market_5d_pct = "N/A"
+            relative_alpha_5d = "N/A"
+            try:
+                spy_df = yf.Ticker("SPY").history(period="1mo", interval="1d")
+                if not spy_df.empty and len(spy_df) >= 6:
+                    spy_latest = spy_df["Close"].iloc[-1]
+                    spy_5d_ago = spy_df["Close"].iloc[-6]
+                    spy_change = ((spy_latest - spy_5d_ago) / spy_5d_ago) * 100
+                    market_5d_pct = f"{spy_change:+.2f}%"
+                    rel_diff = change_5d_pct - spy_change
+                    relative_alpha_5d = f"{rel_diff:+.2f}%"
+            except Exception:
+                pass
+
             forward_pe = info.get("forwardPE")
             profit_margins = info.get("profitMargins")
             earnings_growth = info.get("earningsGrowth")
@@ -58,6 +73,8 @@ class MarketAgent:
                 "symbol": symbol,
                 "current_price": round(float(price), 2),
                 "change_5d_pct": f"{change_5d_pct:+.2f}%",
+                "market_spy_5d_pct": market_5d_pct,
+                "relative_alpha_5d": relative_alpha_5d,
                 "rsi14": round(float(rsi), 2) if not pd.isna(rsi) else None,
                 "ema20": round(float(ema20), 2) if not pd.isna(ema20) else None,
                 "ema50": round(float(ema50), 2) if not pd.isna(ema50) else None,

@@ -5,11 +5,16 @@ import urllib.request
 import xml.etree.ElementTree as ET
 import yfinance as yf
 from dotenv import load_dotenv
-from llm_service import query_llm
+from llm_service import query_llm, extract_json
 
 load_dotenv()
 
 COMPANY_NAME_MAP = {
+    "MU": "Micron",
+    "SKHY": "SK Hynix",
+    "AMAT": "Applied Materials",
+    "STXH": "Seagate",
+    "WDC": "Western Digital",
     "AAPL": "Apple",
     "MSFT": "Microsoft",
     "NVDA": "Nvidia",
@@ -18,7 +23,7 @@ COMPANY_NAME_MAP = {
     "GOOGL": "Google",
     "TSLA": "Tesla",
     "AMD": "AMD",
-    "NFLX": "Netflix",
+    "MRVL": "Marvell",
     "PLTR": "Palantir"
 }
 
@@ -38,11 +43,20 @@ class NewsAgent:
             return []
 
         search_query = COMPANY_NAME_MAP.get(symbol, symbol)
-        url = f"https://newsapi.ai/api/v1/article/getArticles?keyword={search_query}&articlesCount=5&articlesSortBy=date&lang=eng&resultType=articles&apiKey={self.news_api_key}"
+        url = "https://newsapi.ai/api/v1/article/getArticles"
+        params = {
+            "keyword": search_query,
+            "keywordLoc": "title",
+            "articlesCount": 5,
+            "articlesSortBy": "date",
+            "lang": "eng",
+            "resultType": "articles",
+            "apiKey": self.news_api_key
+        }
 
         headlines = []
         try:
-            res = requests.get(url, timeout=6)
+            res = requests.get(url, params=params, timeout=6)
             if res.status_code == 200:
                 data = res.json()
                 # newsapi.ai stores articles in articles.results or articles
@@ -359,12 +373,14 @@ Return a JSON object matching this schema:
 """
 
         try:
+            # For news summarization, use single-stage fast extraction (qwen) if twostage/local is selected
+            effective_model = "qwen" if self.model_choice in ["twostage", "local"] else self.model_choice
             res_content = query_llm(
                 system_instruction="You are a financial news, institutional holdings, analyst ratings, SEC corporate filings, macroeconomics, and market/sector sentiment intelligence agent. Analyze news, 13F data, bank ratings, SEC EDGAR filings, FRED macro data, and CNN/Sector sentiment, then output JSON.",
                 user_prompt=prompt,
-                model_choice=self.model_choice
+                model_choice=effective_model
             )
-            parsed = json.loads(res_content)
+            parsed = extract_json(res_content)
             if isinstance(parsed, dict):
                 parsed["raw_headlines"] = headlines
                 parsed["source"] = source_used
