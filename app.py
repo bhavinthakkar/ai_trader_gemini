@@ -70,9 +70,6 @@ st.sidebar.markdown("---")
 st.sidebar.info("""
 💻 **Terminal Trigger Mode (6-Agent System)**
 To run a new pipeline analysis, execute in your terminal:
-st.sidebar.info("""
-💻 **Terminal Trigger Mode (6-Agent System)**
-To run a new pipeline analysis, execute in your terminal:
 - `python main.py nemotron <TICKER>` (Nemotron-3 Super 120B)
 - `python main.py gemini <TICKER>` (Gemini 3.1 Pro)
 - `python main.py twostage <TICKER>` (2-Stage: Qwen2.5 14B + Qwen3 30B)
@@ -80,7 +77,6 @@ To run a new pipeline analysis, execute in your terminal:
 - `python main.py qwen <TICKER>` (Local Qwen2.5 14B)
 
 *Example:* `python main.py nemotron NVDA` or `python main.py nemotron 000660.KS`
-""")
 """)
 
 st.sidebar.markdown("---")
