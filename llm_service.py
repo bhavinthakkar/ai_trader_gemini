@@ -22,6 +22,21 @@ MODEL_REGISTRY = {
         "model": "nvidia/nemotron-3-ultra-550b-a55b",
         "label": "Nemotron-3 Ultra 550B (NVIDIA)"
     },
+    "kimi": {
+        "provider": "nvidia",
+        "model": "moonshotai/kimi-k3",
+        "label": "Moonshot AI Kimi-K3 (NVIDIA)"
+    },
+    "kimi-k3": {
+        "provider": "nvidia",
+        "model": "moonshotai/kimi-k3",
+        "label": "Moonshot AI Kimi-K3 (NVIDIA)"
+    },
+    "k3": {
+        "provider": "nvidia",
+        "model": "moonshotai/kimi-k3",
+        "label": "Moonshot AI Kimi-K3 (NVIDIA)"
+    },
     "nemotron": {
         "provider": "nvidia",
         "model": os.getenv("NEMOTRON_MODEL", "nvidia/nemotron-3-ultra-550b-a55b"),
@@ -204,6 +219,8 @@ def get_model_label(model_choice: str) -> str:
         key = "ultra"
     if key in ["120b", "nemotron-super", "super"]:
         key = "super"
+    if key in ["kimi", "kimi-k3", "k3", "moonshot"]:
+        key = "kimi"
     if key in MODEL_REGISTRY:
         return MODEL_REGISTRY[key]["label"]
     return model_choice
@@ -222,6 +239,7 @@ def query_llm(
     Executes an LLM chat query based on the model short name.
     Supported model short names:
       - 'nemotron' / 'ultra' / '550b': Cloud Nemotron-3 Ultra 550B (NVIDIA API)
+      - 'kimi' / 'kimi-k3' / 'k3': Moonshot AI Kimi-K3 (NVIDIA API)
       - 'super' / '120b': Cloud Nemotron-3 Super 120B (NVIDIA API)
       - 'gemini': Cloud Gemini 3.1 Pro
       - 'openrouter' / 'free': OpenRouter Free Models Router (openrouter/free)
@@ -230,7 +248,7 @@ def query_llm(
       - 'qwen': Local Ollama model 'qwen2.5:14b'
     """
     if not model_choice or not str(model_choice).strip():
-        raise ValueError("Model choice argument is required. Valid choices: 'nemotron', 'ultra', 'gemini', 'openrouter', 'twostage', 'gemma', 'qwen'")
+        raise ValueError("Model choice argument is required. Valid choices: 'nemotron', 'ultra', 'kimi', 'gemini', 'openrouter', 'twostage', 'gemma', 'qwen'")
 
     key = str(model_choice).strip().lower()
     if key == "local":
@@ -241,6 +259,8 @@ def query_llm(
         key = "ultra"
     if key in ["120b", "nemotron-super", "super"]:
         key = "super"
+    if key in ["kimi", "kimi-k3", "k3", "moonshot"]:
+        key = "kimi"
 
     if key not in MODEL_REGISTRY:
         raise ValueError(f"Invalid model choice '{model_choice}'. Choose one of: {list(MODEL_REGISTRY.keys())}")
@@ -260,7 +280,10 @@ def query_llm(
         }
         model_name = config.get("model", "nvidia/nemotron-3-ultra-550b-a55b")
 
-        eff_temp = float(temperature) if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "0.7"))
+        if "kimi" in model_name.lower():
+            eff_temp = float(temperature) if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "1.0"))
+        else:
+            eff_temp = float(temperature) if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "0.7"))
         eff_budget = int(reasoning_budget) if reasoning_budget is not None else int(os.getenv("REASONING_BUDGET", "16000"))
         eff_effort = str(reasoning_effort) if reasoning_effort is not None else os.getenv("REASONING_EFFORT", "high")
 
@@ -275,9 +298,13 @@ def query_llm(
             "max_tokens": eff_budget
         }
 
-        # Nemotron-3 Super 120B supports explicit reasoning_budget/reasoning_effort;
-        # Nemotron-3 Ultra 550B uses vLLM V2 which reasons natively without these params
-        if "ultra" not in model_name.lower():
+        # Handle reasoning parameters per model architecture:
+        # - Kimi-K3 supports reasoning_effort ("max", "high", etc.)
+        # - Nemotron-3 Super 120B supports explicit reasoning_budget and reasoning_effort
+        # - Nemotron-3 Ultra 550B uses vLLM V2 which reasons natively without these params
+        if "kimi" in model_name.lower():
+            payload["reasoning_effort"] = eff_effort if eff_effort in ["low", "medium", "high", "max"] else "max"
+        elif "ultra" not in model_name.lower():
             payload["reasoning_effort"] = eff_effort
             payload["reasoning_budget"] = eff_budget
 

@@ -1,6 +1,6 @@
 # ⚡ Gloomberb Multi-Agent AI Trader & Dual-Horizon RAG Analysis Engine
 
-An autonomous, multi-agent financial reasoning system designed for deterministic stock swing trading analysis. Powered by **NVIDIA Nemotron-3 Super 120B**, **Deterministic 5-Pillar Quantitative Scoring**, **Multi-Query Dual-Horizon FastEmbed RAG**, the **official Gloomberb CLI**, and a **16-Channel Institutional Data Pipeline**.
+An autonomous, multi-agent financial reasoning system designed for deterministic stock swing trading analysis. Powered by **Moonshot AI Kimi-K3**, **NVIDIA Nemotron-3 Ultra 550B & Super 120B**, **Deterministic 5-Pillar Quantitative Scoring**, **Multi-Query Dual-Horizon FastEmbed RAG**, the **official Gloomberb CLI**, and a **16-Channel Institutional Data Pipeline**.
 
 ---
 
@@ -222,7 +222,19 @@ To ensure strict system reliability and guarantee that raw LLM text is never for
 
 ## 🚀 Usage Guide
 
-### **Run Pipeline with Nemotron-3 Super 120B (NVIDIA Cloud)**
+### **Run Pipeline with Moonshot AI Kimi-K3 (NVIDIA Cloud)**
+```bash
+./venv/bin/python main.py kimi AAPL
+```
+```bash
+./venv/bin/python main.py kimi NVDA,META,TSLA
+```
+```bash
+# Optional tuning: adjust temperature and reasoning effort ('low', 'medium', 'high', 'max')
+./venv/bin/python main.py kimi NVDA --temperature 1.0 --reasoning-effort max
+```
+
+### **Run Pipeline with Nemotron-3 Ultra 550B / Super 120B (NVIDIA Cloud)**
 ```bash
 ./venv/bin/python main.py nemotron AAPL
 ```
@@ -252,7 +264,7 @@ To ensure strict system reliability and guarantee that raw LLM text is never for
 
 ## 🛠️ Technology Stack
 
-* **LLM Reasoning**: NVIDIA Nemotron-3 Super 120B (`nvidia/nemotron-3-super-120b`), OpenRouter Free Models Router (`openrouter/free`, 200k context window), Gemini 3.1 Pro, Ollama Qwen 2.5 14B / Qwen 3 30B.
+* **LLM Reasoning**: Moonshot AI Kimi-K3 (`moonshotai/kimi-k3` via NVIDIA NIM), NVIDIA Nemotron-3 Ultra 550B (`nvidia/nemotron-3-ultra-550b-a55b`) & Super 120B (`nvidia/nemotron-3-super-120b`), OpenRouter Free Models Router (`openrouter/free`, 200k context window), Gemini 3.1 Pro, Ollama Qwen 2.5 14B / Qwen 3 30B.
 * **Vector Embeddings**: FastEmbed (`BAAI/bge-small-en-v1.5`, 384-dimensional dense vectors).
 * **CLI Terminal Feed**: Official `gloom-sh/gloomberb` CLI.
 * **Macro Data**: FRED API (US Treasury Yield Curve) & CNN Fear & Greed Index.

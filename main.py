@@ -266,13 +266,13 @@ def send_telegram_digest(token, chat_id, text):
 def main():
     parser = argparse.ArgumentParser(
         description="6-Agent Stock Swing Trading Analysis Pipeline",
-        usage="python main.py {nemotron|ultra|super|gemini|openrouter|twostage|gemma|qwen} [ticker]"
+        usage="python main.py {nemotron|ultra|kimi|super|gemini|openrouter|twostage|gemma|qwen} [ticker]"
     )
     parser.add_argument(
         "model_arg",
         nargs="?",
         default=None,
-        help="Required model short name: 'nemotron' / 'ultra' (Nemotron-3 Ultra 550B), 'super' (Nemotron-3 Super 120B), 'gemini' (Gemini 3.1 Pro), 'openrouter' (OpenRouter Free Models Router - openrouter/free), 'twostage' (Qwen2.5 14B + DeepSeek-R1 14B), 'gemma' (gemma4:12b), or 'qwen' (qwen2.5:14b)"
+        help="Required model short name: 'nemotron' / 'ultra' (Nemotron-3 Ultra 550B), 'kimi' (Moonshot AI Kimi-K3), 'super' (Nemotron-3 Super 120B), 'gemini' (Gemini 3.1 Pro), 'openrouter' (OpenRouter Free Models Router - openrouter/free), 'twostage' (Qwen2.5 14B + DeepSeek-R1 14B), 'gemma' (gemma4:12b), or 'qwen' (qwen2.5:14b)"
     )
     parser.add_argument(
         "ticker_arg",
@@ -284,7 +284,7 @@ def main():
         "--model", "-m",
         dest="model_opt",
         default=None,
-        help="Model short name: 'nemotron', 'ultra', 'super', 'gemini', 'openrouter', 'free', 'twostage', 'gemma', or 'qwen'"
+        help="Model short name: 'nemotron', 'ultra', 'kimi', 'super', 'gemini', 'openrouter', 'free', 'twostage', 'gemma', or 'qwen'"
     )
     parser.add_argument(
         "--ticker", "-t",
@@ -307,17 +307,18 @@ def main():
     parser.add_argument(
         "--reasoning-effort",
         type=str,
-        choices=["low", "medium", "high"],
+        choices=["low", "medium", "high", "max"],
         default=None,
-        help="Reasoning effort level ('low', 'medium', 'high', default: 'high')"
+        help="Reasoning effort level ('low', 'medium', 'high', 'max', default: 'high')"
     )
     args = parser.parse_args()
 
     raw_model = args.model_opt or args.model_arg
     if not raw_model:
         print("\n❌ ERROR: Model argument is required!")
-        print("Usage: python main.py {nemotron|ultra|super|gemini|openrouter|twostage|gemma|qwen} [ticker]")
+        print("Usage: python main.py {nemotron|ultra|kimi|super|gemini|openrouter|twostage|gemma|qwen} [ticker]")
         print("  - nemotron / ultra : Cloud Nemotron-3 Ultra 550B (NVIDIA)")
+        print("  - kimi             : Moonshot AI Kimi-K3 (NVIDIA)")
         print("  - super            : Cloud Nemotron-3 Super 120B (NVIDIA)")
         print("  - gemini           : Cloud Gemini 3.1 Pro")
         print("  - openrouter       : OpenRouter Free Models Router (openrouter/free)")
@@ -329,6 +330,7 @@ def main():
     model_choice = str(raw_model).strip().lower()
     valid_models = [
         "nemotron", "nvidia", "ultra", "nemotron-ultra", "550b",
+        "kimi", "kimi-k3", "k3", "moonshot",
         "super", "nemotron-super", "120b",
         "gemini", "openrouter", "free", "openrouter/free",
         "minimax", "minimax-m3", "minimax_m3", "m3",
@@ -336,7 +338,7 @@ def main():
     ]
     if model_choice not in valid_models:
         print(f"\n❌ ERROR: Invalid model choice '{raw_model}'!")
-        print("Supported choices are: 'nemotron' (Ultra 550B), 'super' (120B), 'gemini', 'openrouter', 'twostage', 'gemma', 'qwen'\n")
+        print("Supported choices are: 'nemotron' (Ultra 550B), 'kimi' (Kimi-K3), 'super' (120B), 'gemini', 'openrouter', 'twostage', 'gemma', 'qwen'\n")
         sys.exit(1)
 
     raw_ticker = args.ticker_opt or args.ticker_arg

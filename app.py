@@ -70,14 +70,15 @@ st.sidebar.markdown("---")
 st.sidebar.info("""
 💻 **Terminal Trigger Mode (6-Agent System)**
 To run a new pipeline analysis, execute in your terminal:
-- `python main.py nemotron <TICKER>` (Nemotron-3 Super 120B)
+- `python main.py nemotron <TICKER>` (Nemotron-3 Ultra 550B / Super 120B)
+- `python main.py kimi <TICKER>` (Moonshot AI Kimi-K3 via NVIDIA)
 - `python main.py gemini <TICKER>` (Gemini 3.1 Pro)
 - `python main.py openrouter <TICKER>` (OpenRouter Free Models Router - openrouter/free)
 - `python main.py twostage <TICKER>` (2-Stage: Qwen2.5 14B + Qwen3 30B)
 - `python main.py gemma <TICKER>` (Local gemma4:12b)
 - `python main.py qwen <TICKER>` (Local Qwen2.5 14B)
 
-*Example:* `python main.py openrouter NVDA` or `python main.py nemotron 000660.KS`
+*Example:* `python main.py kimi NVDA` or `python main.py nemotron AAPL`
 """)
 
 st.sidebar.markdown("---")
