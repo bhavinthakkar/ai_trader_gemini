@@ -5,7 +5,22 @@ import numpy as np
 from typing import List, Dict
 
 # FastEmbed Dense Vector Embeddings
-from fastembed import TextEmbedding
+try:
+    from fastembed import TextEmbedding
+except ImportError as e:
+    raise ModuleNotFoundError(
+        "\n\n❌ [Dependency Error] 'fastembed' is not installed in the current Python environment.\n"
+        "This usually happens when running with system Python instead of the project virtual environment.\n\n"
+        "To resolve:\n"
+        "  1. Activate the virtual environment:\n"
+        "     source venv/bin/activate\n"
+        "  2. Or execute directly with the venv python binary:\n"
+        "     ./venv/bin/python main.py kimi <TICKER>\n"
+        "  3. If setting up on a new machine, install all project dependencies:\n"
+        "     python3 -m venv venv\n"
+        "     source venv/bin/activate\n"
+        "     pip install -r requirements.txt\n"
+    ) from e
 
 # LangChain Document Splitter
 from langchain_core.documents import Document
