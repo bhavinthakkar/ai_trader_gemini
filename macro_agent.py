@@ -32,7 +32,20 @@ class MacroDataAgent:
         """
         Fetches the latest value and date for a single FRED series.
         """
-        # 1. Try official FRED API if key exists
+        # 1. Primary: Native Gloomberb FRED CLI terminal engine
+        try:
+            from gloomberb_service import GloomberbService
+            gb = GloomberbService()
+            obs = gb.fetch_fred_series(series_id)
+            if obs and isinstance(obs, list) and len(obs) > 0:
+                item = obs[0]
+                val = item.get("value")
+                if val is not None and val != ".":
+                    return series_id, {"date": str(item.get("date")), "value": float(val)}
+        except Exception as e:
+            print(f"[MacroDataAgent] Gloomberb FRED series warning for {series_id}: {e}")
+
+        # 2. Try official FRED API if key exists
         if self.fred_api_key:
             try:
                 url = f"https://api.stlouisfed.org/fred/series/observations?series_id={series_id}&api_key={self.fred_api_key}&file_type=json&sort_order=desc&limit=5"

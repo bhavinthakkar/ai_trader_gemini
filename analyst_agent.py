@@ -6,13 +6,14 @@ import subprocess
 import yfinance as yf
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from gloomberb_service import GloomberbService
 
 load_dotenv()
 
 class AnalystAgent:
     """
     Analyst Agent: Extracts Wall Street investment bank rating actions, upgrades/downgrades,
-    consensus recommendations, and target prices using Finnhub or Financial Modeling Prep (FMP),
+    consensus recommendations, and target prices using Gloomberb, Finnhub or Financial Modeling Prep (FMP),
     with an automatic yfinance fallback.
     """
 
@@ -23,6 +24,7 @@ class AnalystAgent:
     ]
 
     def __init__(self):
+        self.gloomberb_service = GloomberbService()
         self.finnhub_key = os.getenv("FINNHUB_API_KEY", "").strip()
         self.fmp_key = os.getenv("FMP_API_KEY", "").strip()
         self.finnhub_client = finnhub.Client(api_key=self.finnhub_key) if self.finnhub_key else None
@@ -347,13 +349,30 @@ class AnalystAgent:
         print(f"[AnalystAgent] Extracting investment bank ratings & targets for {symbol}...")
 
         res = None
-        # 1. Try Financial Modeling Prep (FMP) if configured
-        if self.fmp_key:
+
+        # 1. Primary: Native Gloomberb Terminal Analyst Research Feed
+        try:
+            gb_analyst = self.gloomberb_service.fetch_analyst_ratings(symbol)
+            if gb_analyst and (gb_analyst.get("recent_major_bank_actions") or gb_analyst.get("mean_target_price") != "N/A"):
+                res = {
+                    "wall_street_consensus": gb_analyst.get("recommendations_breakdown", {}),
+                    "mean_target_price": gb_analyst.get("mean_target_price"),
+                    "median_target_price": gb_analyst.get("median_target_price"),
+                    "recent_major_bank_actions": gb_analyst.get("recent_major_bank_actions", [])[:5],
+                    "earnings_estimates": gb_analyst.get("earnings_estimates", []),
+                    "source": "Gloomberb Terminal (Analyst Feed)"
+                }
+                print(f"[AnalystAgent] Successfully extracted analyst ratings directly from Gloomberb for {symbol}.")
+        except Exception as e:
+            print(f"[AnalystAgent] Gloomberb analyst fetch warning for {symbol}: {e}")
+
+        # 2. Try Financial Modeling Prep (FMP) if configured and Gloomberb was unavailable
+        if not res and self.fmp_key:
             fmp_res = self.fetch_from_fmp(symbol)
             if fmp_res and (fmp_res.get("recent_major_bank_actions") or fmp_res.get("mean_target_price") != "N/A"):
                 res = fmp_res
 
-        # 2. Try Finnhub if configured
+        # 3. Try Finnhub if configured
         if not res and self.finnhub_key:
             fh_res = self.fetch_from_finnhub(symbol)
             if fh_res:
@@ -363,16 +382,26 @@ class AnalystAgent:
                     fh_res["recent_major_bank_actions"] = yf_res.get("recent_major_bank_actions", [])
                 res = fh_res
 
-        # 3. Fallback: yfinance
+        # 4. Fallback: yfinance
         if not res:
             res = self.fetch_from_yfinance(symbol, log_prefix="Primary")
 
-        # 4. Fetch SEC EDGAR filings
-        sec_filings = self.fetch_sec_filings(symbol)
+        # 5. Fetch SEC EDGAR filings (Gloomberb CLI with SEC fallback)
+        try:
+            gb_filings = self.gloomberb_service.fetch_filings(symbol)
+            if gb_filings:
+                sec_filings = [f"[{f.get('date')}] Form {f.get('form')}: {f.get('summary')}" for f in gb_filings]
+            else:
+                sec_filings = self.fetch_sec_filings(symbol)
+        except Exception:
+            sec_filings = self.fetch_sec_filings(symbol)
         res["recent_sec_filings"] = sec_filings
 
-        # 5. Fetch FRED macroeconomic indicators
-        macro_data = self.fetch_fred_macro_data()
-        res["macro_data"] = macro_data
+        # 6. Fetch FRED macroeconomic indicators (Gloomberb CLI with fallback)
+        try:
+            gb_macro = self.gloomberb_service.fetch_macro_econ()
+            res["macro_data"] = gb_macro.get("interest_rate_outlook", self.fetch_fred_macro_data())
+        except Exception:
+            res["macro_data"] = self.fetch_fred_macro_data()
 
         return res

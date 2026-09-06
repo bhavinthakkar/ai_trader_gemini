@@ -156,7 +156,7 @@ To ensure strict system reliability and guarantee that raw LLM text is never for
 ## 🔄 Execution Workflow
 
 1. **Structured Data Extraction (`MarketAgent`)**: Sourcing price action, RSI14, EMA20/50, ATR, and 5-day relative alpha vs SPY.
-2. **Gloomberb CLI Ingestion (`GloomberbService`)**: Fetching 10 subcommands (news, SEC filings, financials, options flow, insider % profile, peers, sector ETFs, fear/greed, econ calendar, yield curve).
+2. **Gloomberb CLI Ingestion (`GloomberbService`)**: Fetching 22+ official CLI channels (real-time quotes, historical price series, annual/quarterly financial statements, valuation multiples & fundamentals, options chains & flow dynamics, Form 4 insider transactions, institutional 13F holdings, Wall Street analyst consensus & price targets, earnings calendar & revision momentum, quarterly earnings surprise history, SEC EDGAR filings, breaking news catalysts, CNN Fear & Greed, Treasury yield curve, FRED macro series, economic calendar, benchmark US indices, market breadth & active movers, SPDR sector ETFs, 1Y price correlation engine, multi-symbol comparison, watchlists and portfolios).
 3. **Institutional Data Sourcing (`InstitutionalDataService`)**: Ingesting IR RSS releases, direct SEC EDGAR API filings, earnings call transcripts, press releases, Tier-1 financial media, and FRED yield curves.
 4. **Deterministic Quantitative Scoring (`QuantitativeScoringService`)**: Calculating the explicit 5-pillar composite quantitative score (0-100).
 5. **Dual-Horizon Multiplicative RAG Indexing (`RAGService`)**: Indexing qualitative document chunks, embedding with FastEmbed `BAAI/bge-small-en-v1.5`, and retrieving top passages across `CURRENT CONTEXT` vs `HISTORICAL CONTEXT`.
@@ -208,6 +208,7 @@ To ensure strict system reliability and guarantee that raw LLM text is never for
    ```env
    NVIDIA_API_KEY=nvapi-...
    GEMINI_API_KEY=AIzaSy...
+   OPENROUTER_API_KEY=sk-or-v1-...
    TELEGRAM_CHANNEL_API_TOKEN=bot...
    FINNHUB_API_KEY=...
    NEWS_API_KEY=...
@@ -229,6 +230,14 @@ To ensure strict system reliability and guarantee that raw LLM text is never for
 ./venv/bin/python main.py nemotron NVDA,META,TSLA
 ```
 
+### **Run Pipeline with OpenRouter Free Models Router (`openrouter/free`)**
+```bash
+./venv/bin/python main.py openrouter AAPL
+```
+```bash
+./venv/bin/python main.py openrouter NVDA,TSLA
+```
+
 ### **Run Pipeline with Gemini 3.1 Pro**
 ```bash
 ./venv/bin/python main.py gemini AAPL
@@ -243,9 +252,8 @@ To ensure strict system reliability and guarantee that raw LLM text is never for
 
 ## 🛠️ Technology Stack
 
-* **LLM Reasoning**: NVIDIA Nemotron-3 Super 120B (`nvidia/nemotron-3-super-120b`), Gemini 3.1 Pro, Ollama Qwen 2.5 14B / Qwen 3 30B.
+* **LLM Reasoning**: NVIDIA Nemotron-3 Super 120B (`nvidia/nemotron-3-super-120b`), OpenRouter Free Models Router (`openrouter/free`, 200k context window), Gemini 3.1 Pro, Ollama Qwen 2.5 14B / Qwen 3 30B.
 * **Vector Embeddings**: FastEmbed (`BAAI/bge-small-en-v1.5`, 384-dimensional dense vectors).
 * **CLI Terminal Feed**: Official `gloom-sh/gloomberb` CLI.
 * **Macro Data**: FRED API (US Treasury Yield Curve) & CNN Fear & Greed Index.
 * **Database & UI**: SQLite3 (`trading_analysis.db`), Streamlit dashboard.
-

@@ -226,7 +226,85 @@ Schema:
                 "time_horizon": "HISTORICAL"
             }))
 
-        # 5. Institutional Multi-Source Qualitative Text Documents
+        # 5. Wall Street Analyst Research, Ratings & Price Targets -> Horizon: CURRENT
+        analyst = gloomberb_payload.get("analyst_ratings", {})
+        if analyst and (analyst.get("recent_major_bank_actions") or analyst.get("mean_target_price") != "N/A"):
+            actions_text = "; ".join(analyst.get("recent_major_bank_actions", [])[:6])
+            analyst_text = (
+                f"[Wall Street Analyst Research & Consensus] Mean Target Price: ${analyst.get('mean_target_price')}, "
+                f"Median Target: ${analyst.get('median_target_price')}, High: ${analyst.get('high_target_price')}, Low: ${analyst.get('low_target_price')}. "
+                f"Recent Major Bank Ratings: {actions_text if actions_text else 'Consensus ratings active.'}"
+            )
+            docs.append(Document(page_content=analyst_text, metadata={
+                "ticker": symbol,
+                "source": "Gloomberb Analyst Research",
+                "document_type": "AnalystRatings",
+                "published_at": today_str,
+                "effective_date": today_str,
+                "reliability": 0.85,
+                "importance": 0.85,
+                "time_horizon": "CURRENT"
+            }))
+
+        # 6. Upcoming Earnings Guidance, Estimates & Revision Momentum -> Horizon: CURRENT
+        earnings = gloomberb_payload.get("earnings", {})
+        if earnings and earnings.get("earnings_date") != "N/A":
+            rev7 = earnings.get("eps_revisions_7d", {})
+            rev30 = earnings.get("eps_revisions_30d", {})
+            earnings_text = (
+                f"[Earnings Calendar & Revision Momentum] Upcoming Earnings: {earnings.get('earnings_date')} ({earnings.get('timing')}). "
+                f"EPS Consensus: ${earnings.get('eps_estimate')} (YoY Growth: {earnings.get('eps_growth_yoy')}), "
+                f"Revenue Estimate: {earnings.get('revenue_estimate')}. "
+                f"Analyst EPS Revisions: Last 7 Days (Up: {rev7.get('up', 0)}, Down: {rev7.get('down', 0)}), "
+                f"Last 30 Days (Up: {rev30.get('up', 0)}, Down: {rev30.get('down', 0)})."
+            )
+            docs.append(Document(page_content=earnings_text, metadata={
+                "ticker": symbol,
+                "source": "Gloomberb Earnings Calendar",
+                "document_type": "EarningsGuidance",
+                "published_at": today_str,
+                "effective_date": today_str,
+                "reliability": 0.95,
+                "importance": 0.90,
+                "time_horizon": "CURRENT"
+            }))
+
+        # 7. Historical Earnings Surprises & Corporate Events -> Horizon: HISTORICAL
+        events = gloomberb_payload.get("events", {})
+        if events and events.get("historical_earnings_surprises"):
+            surprises = events.get("historical_earnings_surprises", [])
+            s_text = "; ".join(f"[{s.get('date')}: Actual ${s.get('actual')} vs Est ${s.get('estimate')} ({s.get('surprise_pct')})]" for s in surprises[:4])
+            events_text = f"[Historical Earnings Surprises & Execution History] Past Quarters: {s_text}."
+            docs.append(Document(page_content=events_text, metadata={
+                "ticker": symbol,
+                "source": "Gloomberb Corporate Events",
+                "document_type": "EarningsSurprises",
+                "published_at": today_str,
+                "effective_date": today_str,
+                "reliability": 1.00,
+                "importance": 0.85,
+                "time_horizon": "HISTORICAL"
+            }))
+
+        # 8. Major Benchmark Market Indices & Market Breadth -> Horizon: CURRENT
+        indices = gloomberb_payload.get("market_indices", [])
+        movers = gloomberb_payload.get("market_movers", [])
+        if indices or movers:
+            idx_str = ", ".join(f"{i.get('name', i.get('symbol'))} {i.get('change_pct')}" for i in indices)
+            mover_str = ", ".join(f"{m.get('symbol')} {m.get('change_pct')}" for m in movers[:4]) if movers else "Normal breadth"
+            market_text = f"[Major Benchmark Indices & Market Breadth] Index Performance: {idx_str}. Top Active Movers: {mover_str}."
+            docs.append(Document(page_content=market_text, metadata={
+                "ticker": symbol,
+                "source": "Gloomberb Benchmark Indices",
+                "document_type": "MarketBreadth",
+                "published_at": today_str,
+                "effective_date": today_str,
+                "reliability": 0.95,
+                "importance": 0.80,
+                "time_horizon": "CURRENT"
+            }))
+
+        # 9. Institutional Multi-Source Qualitative Text Documents
         if institutional_data:
             # 5a. Company Investor-Relations (IR) Website Releases -> Horizon: CURRENT
             for ir in institutional_data.get("investor_relations", []):
@@ -481,13 +559,29 @@ Schema:
             },
             "direct_peer_benchmarks": peer_val.get("direct_peer_benchmarks", []),
             "macro_market_sentiment": macro_econ,
+            "benchmark_market_indices": gloomberb_payload.get("market_indices", []),
+            "market_spy_correlation": gloomberb_payload.get("market_spy_correlation", {}),
+            "realtime_quote": gloomberb_payload.get("quote", {}),
+            "wall_street_analyst_coverage": {
+                "mean_target_price": gloomberb_payload.get("analyst_ratings", {}).get("mean_target_price"),
+                "median_target_price": gloomberb_payload.get("analyst_ratings", {}).get("median_target_price"),
+                "high_target_price": gloomberb_payload.get("analyst_ratings", {}).get("high_target_price"),
+                "low_target_price": gloomberb_payload.get("analyst_ratings", {}).get("low_target_price"),
+                "recommendation_rating": gloomberb_payload.get("analyst_ratings", {}).get("recommendation_rating"),
+                "recommendations_breakdown": gloomberb_payload.get("analyst_ratings", {}).get("recommendations_breakdown", {}),
+                "recent_major_bank_actions": gloomberb_payload.get("analyst_ratings", {}).get("recent_major_bank_actions", [])[:5]
+            },
+            "upcoming_earnings_and_revisions": gloomberb_payload.get("earnings", {}),
+            "historical_earnings_surprises": gloomberb_payload.get("events", {}).get("historical_earnings_surprises", []),
+            "top_institutional_holders": gloomberb_payload.get("insider_institutional", {}).get("top_institutional_holders", []),
             "granular_options_flow": {
                 "put_call_ratio": options_flow.get("put_call_ratio"),
                 "call_volume": options_flow.get("call_volume"),
                 "put_volume": options_flow.get("put_volume"),
                 "call_open_interest": options_flow.get("call_open_interest"),
                 "put_open_interest": options_flow.get("put_open_interest"),
-                "implied_volatility": options_flow.get("implied_volatility")
+                "implied_volatility": options_flow.get("implied_volatility"),
+                "unusual_activity": options_flow.get("unusual_activity")
             },
             "growth_and_margins": {
                 "revenue_growth": fin_ratios.get("revenue_growth", "N/A"),

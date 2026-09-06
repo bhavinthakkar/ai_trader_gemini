@@ -266,13 +266,13 @@ def send_telegram_digest(token, chat_id, text):
 def main():
     parser = argparse.ArgumentParser(
         description="6-Agent Stock Swing Trading Analysis Pipeline",
-        usage="python main.py {nemotron|gemini|twostage|gemma|qwen} [ticker]"
+        usage="python main.py {nemotron|ultra|super|gemini|openrouter|twostage|gemma|qwen} [ticker]"
     )
     parser.add_argument(
         "model_arg",
         nargs="?",
         default=None,
-        help="Required model short name: 'nemotron' (Nemotron-3 Super 120B), 'gemini' (Gemini 3.1 Pro), 'twostage' (Qwen2.5 14B + DeepSeek-R1 14B), 'gemma' (gemma4:12b), or 'qwen' (qwen2.5:14b)"
+        help="Required model short name: 'nemotron' / 'ultra' (Nemotron-3 Ultra 550B), 'super' (Nemotron-3 Super 120B), 'gemini' (Gemini 3.1 Pro), 'openrouter' (OpenRouter Free Models Router - openrouter/free), 'twostage' (Qwen2.5 14B + DeepSeek-R1 14B), 'gemma' (gemma4:12b), or 'qwen' (qwen2.5:14b)"
     )
     parser.add_argument(
         "ticker_arg",
@@ -284,7 +284,7 @@ def main():
         "--model", "-m",
         dest="model_opt",
         default=None,
-        help="Model short name: 'nemotron', 'gemini', 'twostage', 'gemma', or 'qwen'"
+        help="Model short name: 'nemotron', 'ultra', 'super', 'gemini', 'openrouter', 'free', 'twostage', 'gemma', or 'qwen'"
     )
     parser.add_argument(
         "--ticker", "-t",
@@ -292,24 +292,51 @@ def main():
         default=None,
         help="Stock ticker symbol (e.g. 000660.KS, NVDA) or comma-separated list of tickers"
     )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="Model sampling temperature (e.g. 0.2 for strict determinism, 0.6-0.8 for deep reasoning CoT)"
+    )
+    parser.add_argument(
+        "--reasoning-budget",
+        type=int,
+        default=None,
+        help="Internal reasoning token budget for reasoning models (default: 16000)"
+    )
+    parser.add_argument(
+        "--reasoning-effort",
+        type=str,
+        choices=["low", "medium", "high"],
+        default=None,
+        help="Reasoning effort level ('low', 'medium', 'high', default: 'high')"
+    )
     args = parser.parse_args()
 
     raw_model = args.model_opt or args.model_arg
     if not raw_model:
         print("\n❌ ERROR: Model argument is required!")
-        print("Usage: python main.py {nemotron|gemini|twostage|gemma|qwen} [ticker]")
-        print("  - nemotron : Cloud Nemotron-3 Super 120B (NVIDIA)")
-        print("  - gemini   : Cloud Gemini 3.1 Pro")
-        print("  - twostage : 2-Stage Local (qwen2.5:14b extraction + qwen3:30b-a3b-instruct-2507-q4_K_M reasoning)")
-        print("  - gemma    : Local Ollama gemma4:12b")
-        print("  - qwen     : Local Ollama qwen2.5:14b\n")
+        print("Usage: python main.py {nemotron|ultra|super|gemini|openrouter|twostage|gemma|qwen} [ticker]")
+        print("  - nemotron / ultra : Cloud Nemotron-3 Ultra 550B (NVIDIA)")
+        print("  - super            : Cloud Nemotron-3 Super 120B (NVIDIA)")
+        print("  - gemini           : Cloud Gemini 3.1 Pro")
+        print("  - openrouter       : OpenRouter Free Models Router (openrouter/free)")
+        print("  - twostage         : 2-Stage Local (qwen2.5:14b extraction + qwen3:30b-a3b-instruct-2507-q4_K_M reasoning)")
+        print("  - gemma            : Local Ollama gemma4:12b")
+        print("  - qwen             : Local Ollama qwen2.5:14b\n")
         sys.exit(1)
 
     model_choice = str(raw_model).strip().lower()
-    valid_models = ["nemotron", "nvidia", "gemini", "twostage", "gemma", "qwen", "local"]
+    valid_models = [
+        "nemotron", "nvidia", "ultra", "nemotron-ultra", "550b",
+        "super", "nemotron-super", "120b",
+        "gemini", "openrouter", "free", "openrouter/free",
+        "minimax", "minimax-m3", "minimax_m3", "m3",
+        "twostage", "gemma", "qwen", "local"
+    ]
     if model_choice not in valid_models:
         print(f"\n❌ ERROR: Invalid model choice '{raw_model}'!")
-        print("Supported choices are: 'nemotron', 'gemini', 'twostage', 'gemma', 'qwen'\n")
+        print("Supported choices are: 'nemotron' (Ultra 550B), 'super' (120B), 'gemini', 'openrouter', 'twostage', 'gemma', 'qwen'\n")
         sys.exit(1)
 
     raw_ticker = args.ticker_opt or args.ticker_arg
@@ -344,17 +371,20 @@ def main():
         # 3. Institutional Multi-Source Data Stream (IR, SEC direct, Earnings calls, Press releases, Reputable news)
         institutional_payload = institutional_service.get_all_institutional_data(symbol)
 
-        # 4. Dense Vector Embedding RAG & Prompt Payload Assembly for Nemotron-3 Super
+        # 4. Dense Vector Embedding RAG & Prompt Payload Assembly
         context = rag_service.get_nemotron_payload(gloomberb_payload, technical_data=m_data, institutional_data=institutional_payload)
 
-        # 5. Nemotron 3 Super Reasoning Core & Market Analysis
-        print(f"[Nemotron 3 Super] Executing market analysis for {symbol} via {model_label}...")
+        # 5. Model Reasoning Core & Market Analysis
+        print(f"[{model_label}] Executing market analysis for {symbol}...")
 
         try:
             res_content = query_llm(
                 system_instruction=context["system_instruction"],
                 user_prompt=context["user_prompt"],
-                model_choice=model_choice
+                model_choice=model_choice,
+                temperature=args.temperature,
+                reasoning_budget=args.reasoning_budget,
+                reasoning_effort=args.reasoning_effort
             )
             parsed = extract_json(res_content)
 
@@ -367,7 +397,7 @@ def main():
             if res_obj:
                 normalized_obj = normalize_master_trader_json(res_obj, symbol, m_data)
                 all_results.append(normalized_obj)
-                print(f"[Nemotron 3 Super] Final Decision for {symbol}: {normalized_obj.get('decision')} (Conf: {normalized_obj.get('confidence')})")
+                print(f"[{model_label}] Final Decision for {symbol}: {normalized_obj.get('decision')} (Conf: {normalized_obj.get('confidence')})")
             else:
                 print(f"Warning: Model returned empty output for {symbol}.")
 

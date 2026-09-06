@@ -7,12 +7,42 @@ from dotenv import load_dotenv
 load_dotenv()
 
 MODEL_REGISTRY = {
+    "ultra": {
+        "provider": "nvidia",
+        "model": "nvidia/nemotron-3-ultra-550b-a55b",
+        "label": "Nemotron-3 Ultra 550B (NVIDIA)"
+    },
+    "nemotron-ultra": {
+        "provider": "nvidia",
+        "model": "nvidia/nemotron-3-ultra-550b-a55b",
+        "label": "Nemotron-3 Ultra 550B (NVIDIA)"
+    },
+    "550b": {
+        "provider": "nvidia",
+        "model": "nvidia/nemotron-3-ultra-550b-a55b",
+        "label": "Nemotron-3 Ultra 550B (NVIDIA)"
+    },
     "nemotron": {
+        "provider": "nvidia",
+        "model": os.getenv("NEMOTRON_MODEL", "nvidia/nemotron-3-ultra-550b-a55b"),
+        "label": "Nemotron-3 Ultra 550B (NVIDIA)"
+    },
+    "nvidia": {
+        "provider": "nvidia",
+        "model": os.getenv("NEMOTRON_MODEL", "nvidia/nemotron-3-ultra-550b-a55b"),
+        "label": "Nemotron-3 Ultra 550B (NVIDIA)"
+    },
+    "super": {
         "provider": "nvidia",
         "model": "nvidia/nemotron-3-super-120b-a12b",
         "label": "Nemotron-3 Super 120B (NVIDIA)"
     },
-    "nvidia": {
+    "nemotron-super": {
+        "provider": "nvidia",
+        "model": "nvidia/nemotron-3-super-120b-a12b",
+        "label": "Nemotron-3 Super 120B (NVIDIA)"
+    },
+    "120b": {
         "provider": "nvidia",
         "model": "nvidia/nemotron-3-super-120b-a12b",
         "label": "Nemotron-3 Super 120B (NVIDIA)"
@@ -38,6 +68,42 @@ MODEL_REGISTRY = {
         "extraction_model": os.getenv("TWOSTAGE_EXTRACTION_MODEL", "qwen2.5:14b"),
         "reasoning_model": os.getenv("TWOSTAGE_REASONING_MODEL", "qwen3:30b-a3b-instruct-2507-q4_K_M"),
         "label": "2-Stage Local (qwen2.5:14b + qwen3:30b-a3b-instruct-2507-q4_K_M)"
+    },
+    "openrouter": {
+        "provider": "openrouter",
+        "model": "openrouter/free",
+        "fallbacks": ["nvidia/nemotron-3-super-120b-a12b:free", "minimax/minimax-m3:free"],
+        "label": "OpenRouter Free Models Router (openrouter/free)"
+    },
+    "free": {
+        "provider": "openrouter",
+        "model": "openrouter/free",
+        "fallbacks": ["nvidia/nemotron-3-super-120b-a12b:free", "minimax/minimax-m3:free"],
+        "label": "OpenRouter Free Models Router (openrouter/free)"
+    },
+    "openrouter/free": {
+        "provider": "openrouter",
+        "model": "openrouter/free",
+        "fallbacks": ["nvidia/nemotron-3-super-120b-a12b:free", "minimax/minimax-m3:free"],
+        "label": "OpenRouter Free Models Router (openrouter/free)"
+    },
+    "minimax": {
+        "provider": "openrouter",
+        "model": "openrouter/free",
+        "fallbacks": ["minimax/minimax-m3:free", "nvidia/nemotron-3-super-120b-a12b:free"],
+        "label": "OpenRouter Free Models Router (openrouter/free)"
+    },
+    "minimax-m3": {
+        "provider": "openrouter",
+        "model": "openrouter/free",
+        "fallbacks": ["minimax/minimax-m3:free", "nvidia/nemotron-3-super-120b-a12b:free"],
+        "label": "OpenRouter Free Models Router (openrouter/free)"
+    },
+    "m3": {
+        "provider": "openrouter",
+        "model": "openrouter/free",
+        "fallbacks": ["minimax/minimax-m3:free", "nvidia/nemotron-3-super-120b-a12b:free"],
+        "label": "OpenRouter Free Models Router (openrouter/free)"
     }
 }
 
@@ -132,28 +198,49 @@ def get_model_label(model_choice: str) -> str:
     key = str(model_choice).strip().lower()
     if key == "local":
         key = "twostage"
+    if key in ["free", "openrouter/free", "or", "minimax", "minimax-m3", "minimax_m3", "m3"]:
+        key = "openrouter"
+    if key in ["550b", "nemotron-ultra", "ultra"]:
+        key = "ultra"
+    if key in ["120b", "nemotron-super", "super"]:
+        key = "super"
     if key in MODEL_REGISTRY:
         return MODEL_REGISTRY[key]["label"]
     return model_choice
 
 
-def query_llm(system_instruction: str, user_prompt: str, model_choice: str) -> str:
+def query_llm(
+    system_instruction: str,
+    user_prompt: str,
+    model_choice: str,
+    temperature: float = None,
+    reasoning_budget: int = None,
+    reasoning_effort: str = None
+) -> str:
     """
     [System: Do not output <think> tags or internal reasoning steps. Go directly to the answer.]
     Executes an LLM chat query based on the model short name.
     Supported model short names:
-      - 'nemotron' / 'nvidia': Cloud Nemotron-3 Super 120B (NVIDIA API)
+      - 'nemotron' / 'ultra' / '550b': Cloud Nemotron-3 Ultra 550B (NVIDIA API)
+      - 'super' / '120b': Cloud Nemotron-3 Super 120B (NVIDIA API)
       - 'gemini': Cloud Gemini 3.1 Pro
+      - 'openrouter' / 'free': OpenRouter Free Models Router (openrouter/free)
       - 'twostage' / 'local': 2-Stage Local (Stage 1 extraction via qwen2.5:14b, Stage 2 reasoning via qwen3:30b-a3b-instruct-2507-q4_K_M)
       - 'gemma': Local Ollama model 'gemma4:12b'
       - 'qwen': Local Ollama model 'qwen2.5:14b'
     """
     if not model_choice or not str(model_choice).strip():
-        raise ValueError("Model choice argument is required. Valid choices: 'nemotron', 'gemini', 'twostage', 'gemma', 'qwen'")
+        raise ValueError("Model choice argument is required. Valid choices: 'nemotron', 'ultra', 'gemini', 'openrouter', 'twostage', 'gemma', 'qwen'")
 
     key = str(model_choice).strip().lower()
     if key == "local":
         key = "twostage"
+    if key in ["free", "openrouter/free", "or", "minimax", "minimax-m3", "minimax_m3", "m3"]:
+        key = "openrouter"
+    if key in ["550b", "nemotron-ultra", "ultra"]:
+        key = "ultra"
+    if key in ["120b", "nemotron-super", "super"]:
+        key = "super"
 
     if key not in MODEL_REGISTRY:
         raise ValueError(f"Invalid model choice '{model_choice}'. Choose one of: {list(MODEL_REGISTRY.keys())}")
@@ -171,27 +258,57 @@ def query_llm(system_instruction: str, user_prompt: str, model_choice: str) -> s
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
-        model_name = config.get("model", "nvidia/nemotron-3-super-120b-a12b")
+        model_name = config.get("model", "nvidia/nemotron-3-ultra-550b-a55b")
+
+        eff_temp = float(temperature) if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "0.7"))
+        eff_budget = int(reasoning_budget) if reasoning_budget is not None else int(os.getenv("REASONING_BUDGET", "16000"))
+        eff_effort = str(reasoning_effort) if reasoning_effort is not None else os.getenv("REASONING_EFFORT", "high")
+
         payload = {
             "model": model_name,
             "messages": [
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": user_prompt}
             ],
-            "temperature": 1.0,
+            "temperature": eff_temp,
             "top_p": 0.95,
-            "max_tokens": 16000,
-            "reasoning_effort": "high",
-            "reasoning_budget": 16000
+            "max_tokens": eff_budget
         }
 
-        response = requests.post(url, headers=headers, json=payload, timeout=120)
-        if response.status_code != 200:
-            raise RuntimeError(f"NVIDIA API call failed ({response.status_code}): {response.text}")
+        # Nemotron-3 Super 120B supports explicit reasoning_budget/reasoning_effort;
+        # Nemotron-3 Ultra 550B uses vLLM V2 which reasons natively without these params
+        if "ultra" not in model_name.lower():
+            payload["reasoning_effort"] = eff_effort
+            payload["reasoning_budget"] = eff_budget
 
-        res_json = response.json()
-        content = res_json["choices"][0]["message"]["content"]
-        return clean_think_tags(content)
+        import time
+        last_error = None
+        for attempt in range(3):
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=120)
+                if response.status_code == 200:
+                    res_json = response.json()
+                    content = res_json["choices"][0]["message"].get("content") or ""
+                    return clean_think_tags(content)
+                elif response.status_code == 400 and "thinking_token_budget" in response.text:
+                    payload.pop("reasoning_effort", None)
+                    payload.pop("reasoning_budget", None)
+                    continue
+                elif response.status_code in [429, 502, 503, 504]:
+                    print(f"[llm_service] NVIDIA NIM model {model_name} returned {response.status_code}. Retrying ({attempt+1}/3)...")
+                    time.sleep(3)
+                    continue
+                else:
+                    raise RuntimeError(f"NVIDIA API call failed ({response.status_code}): {response.text}")
+            except requests.exceptions.RequestException as e:
+                last_error = e
+                print(f"[llm_service] NVIDIA connection error: {e}. Retrying ({attempt+1}/3)...")
+                time.sleep(3)
+                continue
+
+        if last_error:
+            raise last_error
+        raise RuntimeError(f"NVIDIA NIM API call failed after 3 attempts.")
 
     elif provider == "ollama_twostage":
         try:
@@ -313,6 +430,8 @@ Input Data:
         if not api_key:
             raise ValueError("GEMINI_API_KEY environment variable is not set in .env")
 
+        eff_temp = float(temperature) if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "0.2"))
+
         client = genai.Client(api_key=api_key)
         candidate_models = [config["primary"]] + config.get("fallbacks", [])
 
@@ -324,6 +443,7 @@ Input Data:
                     contents=user_prompt,
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
+                        temperature=eff_temp,
                         response_mime_type="application/json"
                     )
                 )
@@ -338,33 +458,71 @@ Input Data:
         if last_error:
             raise last_error
 
-    elif provider == "nvidia":
-        api_key = os.getenv("NVIDIA_API_KEY")
+    elif provider == "openrouter":
+        api_key = os.getenv("OPENROUTER_API_KEY")
         if not api_key:
-            raise ValueError("NVIDIA_API_KEY environment variable is not set in .env")
+            raise ValueError("OPENROUTER_API_KEY environment variable is not set in .env")
+
+        eff_temp = float(temperature) if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "0.2"))
 
         headers = {
             "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/bhavinthakkar/ai_trader_gemini",
+            "X-Title": "AI Trader Gemini"
         }
-        payload = {
-            "model": config["model"],
-            "messages": [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": user_prompt}
-            ],
-            "temperature": 0.2,
-            "top_p": 0.7
-        }
-        try:
-            response = requests.post(
-                "https://integrate.api.nvidia.com/v1/chat/completions",
-                json=payload,
-                headers=headers,
-                timeout=60
-            )
-            response.raise_for_status()
-            res_data = response.json()
-            return res_data["choices"][0]["message"]["content"]
-        except Exception as e:
-            raise RuntimeError(f"Error querying NVIDIA NIM API: {e}")
+
+        candidates = [config["model"]] + config.get("fallbacks", [])
+        last_error = None
+
+        for candidate_model in candidates:
+            payload = {
+                "model": candidate_model,
+                "messages": [
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": eff_temp,
+                "response_format": {"type": "json_object"}
+            }
+            try:
+                response = requests.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=120
+                )
+                if response.status_code == 200:
+                    res_json = response.json()
+                    choices = res_json.get("choices", [])
+                    actual_model = res_json.get("model", candidate_model)
+                    if choices and "message" in choices[0]:
+                        content = choices[0]["message"].get("content", "")
+                        cleaned = clean_think_tags(content)
+                        # Validate that returned text can be parsed as JSON
+                        try:
+                            _ = extract_json(cleaned)
+                            return cleaned
+                        except Exception as parse_err:
+                            print(f"[llm_service] OpenRouter model '{candidate_model}' (routed to '{actual_model}') returned non-JSON/invalid output ({parse_err}). Trying fallback...")
+                            last_error = parse_err
+                            continue
+                    else:
+                        print(f"[llm_service] OpenRouter model '{candidate_model}' returned empty choices. Trying fallback...")
+                        continue
+                elif response.status_code in [429, 502, 503, 504]:
+                    print(f"[llm_service] OpenRouter model {candidate_model} returned {response.status_code}: {response.text[:200]}. Trying fallback...")
+                    last_error = RuntimeError(f"OpenRouter call failed ({response.status_code}): {response.text}")
+                    continue
+                else:
+                    print(f"[llm_service] OpenRouter model {candidate_model} returned {response.status_code}. Trying fallback...")
+                    last_error = RuntimeError(f"OpenRouter API call failed ({response.status_code}): {response.text}")
+                    continue
+            except requests.exceptions.RequestException as e:
+                last_error = e
+                print(f"[llm_service] OpenRouter connection error with {candidate_model}: {e}. Trying fallback...")
+                continue
+
+        if last_error:
+            raise last_error
+        raise RuntimeError("OpenRouter query failed across all candidate models.")
