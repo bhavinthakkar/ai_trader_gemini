@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import json
-from db import init_db, get_latest_signals, get_signal_history, get_summary_stats
+from db import init_db, get_latest_signals, get_signal_history, get_summary_stats, get_outcome_performance_stats
 
 # Page Configuration
 st.set_page_config(
@@ -91,7 +91,8 @@ st.caption("Reporting dashboard reading analysis results from SQLite (`trader.db
 
 # Summary KPI Cards
 stats = get_summary_stats()
-col1, col2, col3, col4, col5 = st.columns(5)
+outcome_stats = get_outcome_performance_stats()
+col1, col2, col3, col4, col5, col6 = st.columns(6)
 
 with col1:
     st.metric(label="Tracked Stocks", value=stats["total_tracked"])
@@ -102,12 +103,20 @@ with col3:
 with col4:
     st.metric(label="⚪ Hold Signals", value=stats["hold_count"])
 with col5:
+    win_val = f"{outcome_stats['win_rate_pct']}%" if outcome_stats["total_evaluated"] > 0 else "Pending"
+    st.metric(label="🎯 Model Win Rate", value=win_val)
+with col6:
     st.metric(label="Last Analysis Run", value=stats["last_run"])
 
 st.markdown("---")
 
 # Main Content Tabs
-tab1, tab2, tab3 = st.tabs(["📊 Latest Signals", "🔍 Stock Deep-Dive", "📜 Signal History Log"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📊 Latest Signals",
+    "🔍 Stock Deep-Dive",
+    "📜 Signal History Log",
+    "🎯 Model Outcome Tracking"
+])
 
 latest_signals = get_latest_signals()
 
@@ -135,19 +144,36 @@ with tab1:
 
         if filtered_signals:
             df_display = pd.DataFrame(filtered_signals)
-            df_table = df_display[[
-                "symbol", "decision", "confidence", "pe_and_peg",
-                "risk_assessment", "investment_bank_coverage", "model_used", "timestamp"
-            ]].rename(columns={
+
+            cols_to_use = ["symbol", "decision", "confidence"]
+            col_renames = {
                 "symbol": "Ticker",
                 "decision": "Decision",
-                "confidence": "Confidence",
-                "pe_and_peg": "Fwd Valuation",
-                "risk_assessment": "Risk Profile",
-                "investment_bank_coverage": "Bank Coverage",
-                "model_used": "Model",
-                "timestamp": "Timestamp"
-            })
+                "confidence": "Confidence"
+            }
+
+            if "quant_score" in df_display.columns and df_display["quant_score"].notna().any():
+                cols_to_use.append("quant_score")
+                col_renames["quant_score"] = "Quant Score"
+
+            if "entry_price" in df_display.columns and df_display["entry_price"].notna().any():
+                cols_to_use.append("entry_price")
+                col_renames["entry_price"] = "Entry Price"
+
+            if "rvol_20d" in df_display.columns and df_display["rvol_20d"].notna().any():
+                cols_to_use.append("rvol_20d")
+                col_renames["rvol_20d"] = "RVOL"
+
+            if "us_10y_yield" in df_display.columns and df_display["us_10y_yield"].notna().any():
+                cols_to_use.append("us_10y_yield")
+                col_renames["us_10y_yield"] = "10Y Yield"
+
+            cols_to_use.extend(["pe_and_peg", "model_used", "timestamp"])
+            col_renames["pe_and_peg"] = "Fwd Valuation"
+            col_renames["model_used"] = "Model"
+            col_renames["timestamp"] = "Timestamp"
+
+            df_table = df_display[cols_to_use].rename(columns=col_renames)
 
             def format_decision(val):
                 if val == "BUY":
@@ -162,7 +188,7 @@ with tab1:
             st.warning("No signals match the selected filters.")
 
 with tab2:
-    st.subheader("Sub-Agent Intelligence & Synthesis Breakdown")
+    st.subheader("Deterministic 5-Pillar & Quantitative Synthesis Breakdown")
 
     if not latest_signals:
         st.info("No data available. Run `python main.py` in terminal to generate stock details.")
@@ -173,7 +199,7 @@ with tab2:
         stock_data = next((s for s in latest_signals if s["symbol"] == selected_stock), None)
 
         if stock_data:
-            c1, c2, c3 = st.columns([1, 1, 2])
+            c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
             with c1:
                 dec = stock_data["decision"]
                 badge_class = "badge-buy" if dec == "BUY" else ("badge-sell" if dec == "SELL" else "badge-hold")
@@ -184,15 +210,38 @@ with tab2:
                 st.metric("Model Confidence", f"{conf * 100:.0f}%" if conf else "N/A")
                 st.progress(min(max(float(conf or 0.0), 0.0), 1.0))
             with c3:
-                st.markdown(f"**Model Used:** `{stock_data.get('model_used', 'N/A')}`")
-                st.markdown(f"**Timestamp:** `{stock_data.get('timestamp', 'N/A')}`")
+                q_score = stock_data.get("quant_score")
+                st.metric("Deterministic Quant Score", f"{q_score}/100" if q_score is not None else "N/A")
+            with c4:
+                entry_p = stock_data.get("entry_price")
+                st.metric("Entry Price", f"${entry_p:.2f}" if entry_p else "N/A")
+
+            # 5-Pillar Quantitative Scores Display
+            if any(stock_data.get(k) is not None for k in ["trend_score", "sector_score", "alpha_score", "val_history_score", "peer_val_score"]):
+                st.markdown("#### 🧮 5-Pillar Quantitative Scores")
+                p1, p2, p3, p4, p5 = st.columns(5)
+                p1.metric("Trend (25%)", f"{stock_data.get('trend_score', 'N/A')}")
+                p2.metric("Sector Rel (20%)", f"{stock_data.get('sector_score', 'N/A')}")
+                p3.metric("Market Alpha (20%)", f"{stock_data.get('alpha_score', 'N/A')}")
+                p4.metric("Val History (15%)", f"{stock_data.get('val_history_score', 'N/A')}")
+                p5.metric("Peer Val (20%)", f"{stock_data.get('peer_val_score', 'N/A')}")
+
+            # Technical & Macro Snapshot Row
+            st.markdown("#### 📈 Execution & Macro Parameters")
+            m1, m2, m3, m4, m5, m6 = st.columns(6)
+            m1.metric("Stop Loss", f"${stock_data.get('stop_loss_price', 'N/A')}")
+            m2.metric("Target Price", f"${stock_data.get('target_price', 'N/A')}")
+            m3.metric("RSI14", f"{stock_data.get('rsi14', 'N/A')}")
+            m4.metric("RVOL (20d)", f"{stock_data.get('rvol_20d', 'N/A')}x")
+            m5.metric("US 10Y Yield", f"{stock_data.get('us_10y_yield', 'N/A')}%")
+            m6.metric("10Y-2Y Spread", f"{stock_data.get('yield_spread_10y2y', 'N/A')}%")
 
             st.markdown("---")
 
             col_left, col_right = st.columns(2)
             with col_left:
-                st.subheader("💡 Swing Setup Rationale")
-                st.info(stock_data.get("reason") or "No rationale provided.")
+                st.subheader("💡 Swing Setup Rationale (Bull Case)")
+                st.info(stock_data.get("bull_case") or stock_data.get("reason") or "No rationale provided.")
 
                 st.subheader("🏛️ SEC EDGAR Institutional & Filings")
                 st.write(stock_data.get("institutional_data") or "No SEC filing summary available.")
@@ -204,14 +253,18 @@ with tab2:
                 st.write(stock_data.get("news") or "No news catalyst summary reported.")
 
             with col_right:
+                st.subheader("⚠️ Downside Risks & Bear Case")
+                st.warning(stock_data.get("bear_case") or stock_data.get("risk_assessment") or "Low risk profile.")
+
                 st.subheader("🏦 Wall Street Bank Coverage")
                 st.write(stock_data.get("investment_bank_coverage") or "No bank rating changes recorded.")
 
-                st.subheader("⚠️ Risk Profile & Stop-Loss")
-                st.warning(stock_data.get("risk_assessment") or "Low risk profile.")
-
                 st.subheader("📊 Forward Valuation")
                 st.write(f"Forward P/E Ratio: `{stock_data.get('pe_and_peg', 'N/A')}`")
+
+                if stock_data.get("missing_information"):
+                    st.subheader("❓ Missing Information")
+                    st.caption(stock_data.get("missing_information"))
 
             with st.expander("🛠️ View Full JSON Payload"):
                 st.json(stock_data.get("raw_json") or json.dumps(stock_data))
@@ -235,3 +288,43 @@ with tab3:
             "reason": "Swing Setup Reason"
         })
         st.dataframe(df_hist, width="stretch", hide_index=True)
+
+with tab4:
+    st.subheader("🎯 Model Ground-Truth Outcome Tracking & Evaluation")
+    st.caption("Tracks how predictions performed over forward 1-to-10 trading days.")
+
+    from db import update_signal_outcomes, get_connection
+
+    if st.button("⚡ Evaluate Forward Outcomes Now"):
+        with st.spinner("Checking market bars and evaluating forward trade outcomes..."):
+            count = update_signal_outcomes()
+            st.success(f"Evaluated {count} pending signal outcomes!")
+            st.rerun()
+
+    p_col1, p_col2, p_col3, p_col4 = st.columns(4)
+    p_col1.metric("Total Trades Evaluated", outcome_stats["total_evaluated"])
+    p_col2.metric("Win Rate", f"{outcome_stats['win_rate_pct']}%")
+    p_col3.metric("Average Return", f"{outcome_stats['avg_return_pct']:+.2f}%")
+    p_col4.metric("Profitable / Losing", f"{outcome_stats['profitable_trades']} / {outcome_stats['losing_trades']}")
+
+    # Table of evaluated outcomes
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT o.id, s.timestamp as signal_date, s.symbol, s.decision,
+                   o.horizon_days, o.entry_price, o.exit_price,
+                   o.realized_return_pct, o.max_runup_pct, o.max_drawdown_pct,
+                   o.hit_target, o.hit_stop, o.is_profitable
+            FROM signal_outcomes o
+            JOIN signals s ON o.signal_id = s.id
+            ORDER BY o.id DESC;
+        """)
+        outcomes_rows = [dict(r) for r in cursor.fetchall()]
+
+    if outcomes_rows:
+        df_outcomes = pd.DataFrame(outcomes_rows)
+        df_outcomes["is_profitable"] = df_outcomes["is_profitable"].apply(lambda x: "🟢 Win" if x else "🔴 Loss")
+        st.dataframe(df_outcomes, width="stretch", hide_index=True)
+    else:
+        st.info("No trade outcomes evaluated yet. Signals need at least 1-10 trading days elapsed to compare against historical market bars.")
+

@@ -21,6 +21,42 @@ class InstitutionalDataService:
     def __init__(self):
         self.sec_headers = {'User-Agent': 'GloomberbTradingAgent admin@ai-trader.com'}
         self.finnhub_key = os.getenv("FINNHUB_API_KEY")
+        self._ticker_map = None
+
+    def _get_cik_from_symbol(self, symbol: str) -> str:
+        """Resolves stock ticker symbol to official 10-digit SEC CIK string."""
+        if self._ticker_map is None:
+            mapping = {}
+            cache_path = os.path.join(os.path.dirname(__file__), "sec_company_tickers.json")
+            if os.path.exists(cache_path):
+                try:
+                    with open(cache_path, "r", encoding="utf-8") as f:
+                        raw = json.load(f)
+                        for item in raw.values():
+                            t = str(item.get("ticker", "")).strip().upper()
+                            c = item.get("cik_str")
+                            if t and c is not None:
+                                mapping[t] = str(c).zfill(10)
+                except Exception as e:
+                    print(f"[InstitutionalDataService] Error reading local SEC tickers: {e}")
+
+            if not mapping:
+                try:
+                    res = requests.get("https://www.sec.gov/files/company_tickers.json", headers=self.sec_headers, timeout=5)
+                    if res.status_code == 200:
+                        raw = res.json()
+                        for item in raw.values():
+                            t = str(item.get("ticker", "")).strip().upper()
+                            c = item.get("cik_str")
+                            if t and c is not None:
+                                mapping[t] = str(c).zfill(10)
+                except Exception as e:
+                    print(f"[InstitutionalDataService] Error querying SEC company tickers: {e}")
+
+            self._ticker_map = mapping
+
+        clean_sym = symbol.strip().upper().split(".")[0]
+        return self._ticker_map.get(clean_sym)
 
     def fetch_ir_press_releases(self, symbol: str) -> list:
         """Sources official Investor-Relations (IR) press releases & announcements."""
@@ -87,8 +123,13 @@ class InstitutionalDataService:
         import datetime
         today_str = datetime.datetime.now().strftime("%Y-%m-%d")
         filings = []
+        cik = self._get_cik_from_symbol(symbol)
+        if not cik:
+            print(f"[InstitutionalDataService] SEC CIK not found for symbol {symbol} (non-US or unmapped).")
+            return filings
+
         try:
-            cik_url = f"https://data.sec.gov/submissions/CIK{symbol.zfill(10)}.json"
+            cik_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
             res = requests.get(cik_url, headers=self.sec_headers, timeout=5)
             if res.status_code == 200:
                 data = res.json()

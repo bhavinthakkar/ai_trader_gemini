@@ -607,7 +607,14 @@ Schema:
                 "rsi14": technical_data.get("rsi14"),
                 "ema20": technical_data.get("ema20"),
                 "ema50": technical_data.get("ema50"),
-                "atr": technical_data.get("atr")
+                "atr": technical_data.get("atr"),
+                "rvol_20d": technical_data.get("rvol_20d"),
+                "vol_20d_mean": technical_data.get("vol_20d_mean"),
+                "high_20d": technical_data.get("high_20d"),
+                "low_20d": technical_data.get("low_20d"),
+                "suggested_stop_loss": technical_data.get("suggested_stop_loss"),
+                "suggested_target_price": technical_data.get("suggested_target_price"),
+                "days_to_earnings": technical_data.get("days_to_earnings")
             }
         }
 

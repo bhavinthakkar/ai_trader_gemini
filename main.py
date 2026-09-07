@@ -7,7 +7,7 @@ import requests
 from dotenv import load_dotenv
 
 from llm_service import query_llm, get_model_label, extract_json
-from db import init_db, save_results
+from db import init_db, save_results, update_signal_outcomes
 from market_agent import MarketAgent
 from institutional_agent import InstitutionalDataAgent
 from macro_agent import MacroDataAgent
@@ -85,11 +85,15 @@ def _to_list_of_strings(val, default_str="None") -> list:
     return [default_str]
 
 
-def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None) -> dict:
+def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, macro_data: dict = None, gloomberb_payload: dict = None) -> dict:
     if not isinstance(data, dict):
         data = {}
     if not isinstance(m_data, dict):
         m_data = {}
+    if not isinstance(macro_data, dict):
+        macro_data = {}
+    if not isinstance(gloomberb_payload, dict):
+        gloomberb_payload = {}
 
     stock = data.get("stock") or data.get("symbol") or symbol
 
@@ -147,6 +151,32 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None) -
 
     data_completeness = _to_float(data.get("data_completeness"), 0.87)
 
+    # Market snapshot metrics for database and outcome tracking
+    entry_price = m_data.get("current_price")
+    stop_loss_price = m_data.get("suggested_stop_loss")
+    target_price = m_data.get("target_price") or m_data.get("suggested_target_price")
+    rsi14 = m_data.get("rsi14")
+    rvol_20d = m_data.get("rvol_20d")
+
+    # Macro & sentiment snapshots
+    us_10y_yield = macro_data.get("us_10y_yield")
+    yield_spread_10y2y = macro_data.get("yield_curve_spread_10y2y")
+    macro_summary = macro_data.get("summary", "")
+    fear_greed_score = gloomberb_payload.get("macro_econ", {}).get("fear_greed_score")
+    days_to_earnings = m_data.get("days_to_earnings")
+
+    # Summaries for backward compatibility in SQLite
+    news_items = gloomberb_payload.get("news", [])
+    news_summary = "; ".join(f"[{n.get('source', '')}] {n.get('title', '')}" for n in news_items[:3]) if news_items else "Standard news tape."
+    
+    analyst_info = gloomberb_payload.get("analyst_ratings", {})
+    bank_cov = f"Consensus: {analyst_info.get('recommendation_rating', 'N/A')}, Target: ${analyst_info.get('mean_target_price', 'N/A')}"
+    
+    filings = gloomberb_payload.get("filings", [])
+    inst_summary = "; ".join(f"{f.get('form')}: {f.get('summary')[:80]}" for f in filings[:2]) if filings else "Filings monitored."
+
+    forward_pe = m_data.get("forward_pe", "N/A")
+
     return {
         "stock": _ensure_str(stock),
         "decision": decision,
@@ -162,9 +192,23 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None) -
         "key_risks": key_risks,
         "missing_information": missing_info,
         "data_completeness": data_completeness,
+        "entry_price": entry_price,
+        "stop_loss_price": stop_loss_price,
+        "target_price": target_price,
+        "rsi14": rsi14,
+        "rvol_20d": rvol_20d,
+        "us_10y_yield": us_10y_yield,
+        "yield_spread_10y2y": yield_spread_10y2y,
+        "fear_greed_score": fear_greed_score,
+        "days_to_earnings": days_to_earnings,
         # Backward compatibility for SQLite DB string storage
         "reason": "; ".join(bull_case),
-        "risk_assessment": "; ".join(key_risks)
+        "risk_assessment": "; ".join(key_risks),
+        "institutional_data": inst_summary,
+        "macro_data": macro_summary,
+        "news": news_summary,
+        "investment_bank_coverage": bank_cov,
+        "PE_and_PEG": str(forward_pe)
     }
 
 
@@ -352,6 +396,7 @@ def main():
     print(f"=== Initializing Gloomberb RAG & Technical Analysis Pipeline (Model: {model_label}) ===")
     print(f"Target Watchlist: {', '.join(watchlist)}")
     market_agent = MarketAgent()
+    macro_agent = MacroDataAgent()
     gloomberb_service = GloomberbService()
     institutional_service = InstitutionalDataService()
     rag_service = RAGService()
@@ -361,22 +406,43 @@ def main():
     for idx, symbol in enumerate(watchlist, 1):
         print(f"\n--- [{idx}/{len(watchlist)}] Processing {symbol} ---")
 
-        # 1. Technical Data Collection (RSI / EMA / ATR)
+        # 1. Technical Data Collection (RSI / EMA / ATR / Volume / RVOL / Channels)
         m_data = market_agent.analyze(symbol)
         if not m_data:
             print(f"Skipping {symbol}: Insufficient price data.")
             continue
 
-        # 2. Gloomberb Data Source Stream (News, Filings, Financials, Options, Insiders, Peer Valuation)
-        gloomberb_payload = gloomberb_service.get_all_gloomberb_data(symbol)
+        # 2. Macro Data Stream (FRED Yield Curve, Spreads, 10Y Real Yield, 5d Velocity, Fed Funds, CFTC COT)
+        macro_data = macro_agent.analyze(symbol)
 
-        # 3. Institutional Multi-Source Data Stream (IR, SEC direct, Earnings calls, Press releases, Reputable news)
+        # 3. Gloomberb Data Source Stream (News, Filings, Financials, Options, Insiders, Peer Valuation)
+        gloomberb_payload = gloomberb_service.get_all_gloomberb_data(symbol)
+        if macro_data:
+            macro_econ = gloomberb_payload.setdefault("macro_econ", {})
+            iro = macro_econ.setdefault("interest_rate_outlook", {})
+            if iro.get("yield_10y") in ["N/A", None] and macro_data.get("us_10y_yield") != "N/A":
+                iro["yield_10y"] = macro_data.get("us_10y_yield")
+            if iro.get("yield_2y") in ["N/A", None] and macro_data.get("us_2y_yield") != "N/A":
+                iro["yield_2y"] = macro_data.get("us_2y_yield")
+            if iro.get("yield_curve_spread_2y10y") in ["N/A", None] and macro_data.get("yield_curve_spread_10y2y") != "N/A":
+                iro["yield_curve_spread_2y10y"] = macro_data.get("yield_curve_spread_10y2y")
+            if iro.get("yield_curve_status") in ["N/A", None] and macro_data.get("yield_curve_status") != "N/A":
+                iro["yield_curve_status"] = macro_data.get("yield_curve_status")
+            if macro_data.get("us_10y_real_yield"):
+                iro["yield_10y_real"] = macro_data.get("us_10y_real_yield")
+            if macro_data.get("us_10y_yield_5d_change"):
+                iro["yield_10y_5d_change"] = macro_data.get("us_10y_yield_5d_change")
+            if iro.get("fed_funds_rate") in ["N/A", None] and macro_data.get("fed_funds_rate") != "N/A":
+                iro["fed_funds_rate"] = macro_data.get("fed_funds_rate")
+            macro_econ["cftc_cot"] = macro_data.get("cftc_cot_summary", "")
+
+        # 4. Institutional Multi-Source Data Stream (IR, SEC direct, Earnings calls, Press releases, Reputable news)
         institutional_payload = institutional_service.get_all_institutional_data(symbol)
 
-        # 4. Dense Vector Embedding RAG & Prompt Payload Assembly
+        # 5. Dense Vector Embedding RAG & Prompt Payload Assembly
         context = rag_service.get_nemotron_payload(gloomberb_payload, technical_data=m_data, institutional_data=institutional_payload)
 
-        # 5. Model Reasoning Core & Market Analysis
+        # 6. Model Reasoning Core & Market Analysis
         print(f"[{model_label}] Executing market analysis for {symbol}...")
 
         try:
@@ -397,7 +463,13 @@ def main():
                 res_obj = parsed[0]
 
             if res_obj:
-                normalized_obj = normalize_master_trader_json(res_obj, symbol, m_data)
+                normalized_obj = normalize_master_trader_json(
+                    res_obj,
+                    symbol,
+                    m_data=m_data,
+                    macro_data=macro_data,
+                    gloomberb_payload=gloomberb_payload
+                )
                 all_results.append(normalized_obj)
                 print(f"[{model_label}] Final Decision for {symbol}: {normalized_obj.get('decision')} (Conf: {normalized_obj.get('confidence')})")
             else:
@@ -415,6 +487,14 @@ def main():
 
     # Auto-save results to SQLite DB
     save_results(all_results, model_used=model_label)
+
+    # Evaluate forward outcomes for past historical signals
+    try:
+        evaluated = update_signal_outcomes()
+        if evaluated:
+            print(f"[Outcome Tracker] Evaluated {evaluated} historical trade signals.")
+    except Exception as e:
+        print(f"[Outcome Tracker] Notice: {e}")
 
     # Send Telegram alerts
     if all_results and telegram_token:
