@@ -235,7 +235,6 @@ def query_llm(
     reasoning_effort: str = None
 ) -> str:
     """
-    [System: Do not output <think> tags or internal reasoning steps. Go directly to the answer.]
     Executes an LLM chat query based on the model short name.
     Supported model short names:
       - 'nemotron' / 'ultra' / '550b': Cloud Nemotron-3 Ultra 550B (NVIDIA API)
@@ -280,10 +279,7 @@ def query_llm(
         }
         model_name = config.get("model", "nvidia/nemotron-3-ultra-550b-a55b")
 
-        if "kimi" in model_name.lower():
-            eff_temp = float(temperature) if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "1.0"))
-        else:
-            eff_temp = float(temperature) if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "0.7"))
+        eff_temp = float(temperature) if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "0.6"))
         eff_budget = int(reasoning_budget) if reasoning_budget is not None else int(os.getenv("REASONING_BUDGET", "16000"))
         eff_effort = str(reasoning_effort) if reasoning_effort is not None else os.getenv("REASONING_EFFORT", "high")
 

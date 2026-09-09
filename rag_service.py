@@ -110,6 +110,31 @@ EXPLICIT SOURCE RELIABILITY HIERARCHY MANDATE:
   - 0.30: Social Media & Retail Forums -> LOW CONVICTION CHATTER
 - EVIDENCE AUTHORITY RULE: Higher reliability sources (SEC Filings @ 1.00, Company IR @ 0.95, Tier-1 Wires @ 0.90) strictly override lower reliability sources (General Media @ 0.70, Social Media @ 0.30). Never base a thesis on low-reliability chatter when contradicted by official SEC filings or IR releases.
 
+TEMPORAL REASONING & PUBLICATION DATE MANDATE:
+- Strict Chronological Verification: Compare every passage's [Metadata: Published=YYYY-MM-DD] and [Horizon] against the current date.
+- Recent Catalysts (<=14 days): Only passages published within the last 14 days may be considered active short-term catalysts.
+- Historical Precedents (>14 days): Articles or filings older than 14 days represent historical context, multi-year patterns, or prior-quarter execution. Never report prior-quarter results or stale headlines as immediate 24h/7d breaking events.
+- Earnings Context Disambiguation: Check 'days_to_earnings'. If an earnings report is upcoming (e.g. days_to_earnings <= 3), do NOT mistake news or commentary from the PREVIOUS quarter's earnings for the outcome of the UPCOMING earnings report.
+
+BINARY EVENT-RISK & IMPLIED VOLATILITY MANDATE:
+- If days_to_earnings <= 3:
+  - An earnings report within 3 days represents a high-risk binary event.
+  - If Implied Volatility is elevated (>80%) or put/call flow indicates high uncertainty, the options market is pricing in an extreme gap move.
+  - Backward-looking technical trend momentum (Trend Score = 100) does NOT guarantee post-earnings continuation and can reverse instantly.
+  - In such cases, exercise strict risk discipline: downgrade BUY conviction to HOLD or require an explicit post-earnings hedging and strict stop-loss thesis in the key_risks section.
+
+CROSS-PILLAR CONTRADICTION & DIVERGENCE RESOLUTION:
+- Actively resolve divergences across pillars and evidence:
+  - Technical Trend vs. Peer Valuation: If Trend is high (>80) but Peer Valuation is low (<55), explain whether multiple compression threatens technical momentum.
+  - Wall Street Price Targets vs. Insider Selling: If analyst targets are high but corporate executives are liquidating shares via Form 4, explicitly address whether insider selling signals management taking profits near cyclical highs.
+
+DEPTH OF REASONING & CHAIN-OF-THOUGHT MANDATE:
+- Conduct rigorous multi-step reasoning before formulating final JSON scores:
+  1. Technical Action: Price vs. EMA20/50, RSI14, ATR stop-loss boundaries.
+  2. Valuation Reality: Forward P/E vs. 3Y history and direct peers.
+  3. Qualitative Evidence: True recency of catalysts vs. structural headwinds.
+  4. Macro Climate: 10Y Treasury yield velocity, yield curve slope, and fear/greed regime.
+
 Output MUST be a valid JSON object matching the exact requested schema.
 
 Schema:
@@ -657,7 +682,13 @@ Target Ticker: {symbol}
         user_prompt += """
 ================ END PAYLOAD ================
 
-Synthesize the Structured Market Data, Deterministic 5-Pillar Scores, Current Context (Last 24h/7d), and Longer-Term Historical Context. Contrast recent short-term changes against multi-year historical execution. Anchor your decision around the Composite Quantitative Score. Return ONLY a valid JSON object matching the required schema.
+Synthesize the Structured Market Data, Deterministic 5-Pillar Scores, Current Context (Last 24h/7d), and Longer-Term Historical Context.
+Execute multi-step analytical reasoning:
+1. Chronological & Catalyst Verification: Verify the publication dates of all passages. Do NOT treat prior-quarter results or stale headlines as immediate 24h/7d catalysts.
+2. Event-Risk Assessment: If earnings are within 3 days (days_to_earnings <= 3) or implied volatility is high, evaluate the options market's binary gap risk. Do not rely solely on backward-looking momentum.
+3. Divergence Resolution: Reconcile any divergence between technical momentum and peer valuation multiples or insider transactions.
+4. Anchor your final decision and probabilities around the Composite Quantitative Score.
+Return a valid JSON object matching the required schema.
 """
 
         return {
