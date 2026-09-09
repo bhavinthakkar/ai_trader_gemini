@@ -42,6 +42,12 @@ class GloomberbService:
 
     def __init__(self):
         self.cli_bin = os.path.expanduser("~/.local/bin/gloomberb")
+        if not os.path.exists(self.cli_bin):
+            import shutil
+            which_bin = shutil.which("gloomberb")
+            if which_bin:
+                self.cli_bin = which_bin
+        self._cli_warned = False
         self.news_api_key = os.getenv("NEWS_API_KEY")
         self.fmp_api_key = os.getenv("FMP_API_KEY")
         self.sec_headers = {'User-Agent': 'GloomberbTradingAgent admin@ai-trader.com'}
@@ -49,6 +55,9 @@ class GloomberbService:
     def run_cli(self, *args, timeout: int = 10):
         """Executes official gloom-sh/gloomberb CLI subcommands with arbitrary arguments and --json output mode."""
         if not os.path.exists(self.cli_bin):
+            if not self._cli_warned:
+                print(f"[GloomberbService] Notice: CLI binary not found at '{self.cli_bin}' or in PATH. Operating in fallback mode (install via: curl -fsSL gloomberb.com/install | bash).")
+                self._cli_warned = True
             return None
         try:
             cmd = [self.cli_bin] + [str(a) for a in args] + ["--json"]
