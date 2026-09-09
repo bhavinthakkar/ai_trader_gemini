@@ -51,6 +51,20 @@ class GloomberbService:
         self.news_api_key = os.getenv("NEWS_API_KEY")
         self.fmp_api_key = os.getenv("FMP_API_KEY")
         self.sec_headers = {'User-Agent': 'GloomberbTradingAgent admin@ai-trader.com'}
+        self._ensure_gloomberb_initialized()
+
+    def _ensure_gloomberb_initialized(self):
+        """Initializes ~/.gloomberb/config.json if not present so headless CLI commands work out of the box."""
+        try:
+            gloomberb_dir = os.path.expanduser("~/.gloomberb")
+            config_file = os.path.join(gloomberb_dir, "config.json")
+            if not os.path.exists(config_file):
+                os.makedirs(gloomberb_dir, exist_ok=True)
+                with open(config_file, "w", encoding="utf-8") as f:
+                    json.dump({"dataDir": gloomberb_dir}, f, indent=2)
+                print(f"[GloomberbService] Initialized default Gloomberb config at '{config_file}'.")
+        except Exception as e:
+            print(f"[GloomberbService] Warning initializing Gloomberb config: {e}")
 
     def run_cli(self, *args, timeout: int = 25):
         """Executes official gloom-sh/gloomberb CLI subcommands with arbitrary arguments and --json output mode."""
