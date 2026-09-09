@@ -317,14 +317,26 @@ class GloomberbService:
         # 2. Direct SEC EDGAR Submissions API Fallback
         if not filings_data:
             try:
-                cik_res = requests.get("https://files.sec.gov/submissions/company_tickers.json", headers=self.sec_headers, timeout=6)
                 cik = None
                 clean_sym = symbol.split(".")[0].upper()
+                tickers = {}
 
-                if cik_res.status_code == 200:
-                    tickers = cik_res.json()
+                cache_path = os.path.join(os.path.dirname(__file__), "sec_company_tickers.json")
+                if os.path.exists(cache_path):
+                    try:
+                        with open(cache_path, "r", encoding="utf-8") as f:
+                            tickers = json.load(f)
+                    except Exception:
+                        pass
+
+                if not tickers:
+                    cik_res = requests.get("https://www.sec.gov/files/company_tickers.json", headers=self.sec_headers, timeout=6)
+                    if cik_res.status_code == 200:
+                        tickers = cik_res.json()
+
+                if isinstance(tickers, dict):
                     for key, val in tickers.items():
-                        if val.get("ticker") == clean_sym:
+                        if isinstance(val, dict) and val.get("ticker") == clean_sym:
                             cik = str(val.get("cik_str")).zfill(10)
                             break
 
