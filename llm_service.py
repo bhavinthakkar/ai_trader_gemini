@@ -25,41 +25,49 @@ MODEL_REGISTRY = {
     "kimi": {
         "provider": "nvidia",
         "model": "moonshotai/kimi-k3",
+        "fallbacks": ["nvidia/nemotron-3-ultra-550b-a55b", "nvidia/nemotron-3-super-120b-a12b"],
         "label": "Moonshot AI Kimi-K3 (NVIDIA)"
     },
     "kimi-k3": {
         "provider": "nvidia",
         "model": "moonshotai/kimi-k3",
+        "fallbacks": ["nvidia/nemotron-3-ultra-550b-a55b", "nvidia/nemotron-3-super-120b-a12b"],
         "label": "Moonshot AI Kimi-K3 (NVIDIA)"
     },
     "k3": {
         "provider": "nvidia",
         "model": "moonshotai/kimi-k3",
+        "fallbacks": ["nvidia/nemotron-3-ultra-550b-a55b", "nvidia/nemotron-3-super-120b-a12b"],
         "label": "Moonshot AI Kimi-K3 (NVIDIA)"
     },
     "nemotron": {
         "provider": "nvidia",
         "model": os.getenv("NEMOTRON_MODEL", "nvidia/nemotron-3-ultra-550b-a55b"),
+        "fallbacks": ["nvidia/nemotron-3-super-120b-a12b", "moonshotai/kimi-k3"],
         "label": "Nemotron-3 Ultra 550B (NVIDIA)"
     },
     "nvidia": {
         "provider": "nvidia",
         "model": os.getenv("NEMOTRON_MODEL", "nvidia/nemotron-3-ultra-550b-a55b"),
+        "fallbacks": ["nvidia/nemotron-3-super-120b-a12b", "moonshotai/kimi-k3"],
         "label": "Nemotron-3 Ultra 550B (NVIDIA)"
     },
     "super": {
         "provider": "nvidia",
         "model": "nvidia/nemotron-3-super-120b-a12b",
+        "fallbacks": ["nvidia/nemotron-3-ultra-550b-a55b", "moonshotai/kimi-k3"],
         "label": "Nemotron-3 Super 120B (NVIDIA)"
     },
     "nemotron-super": {
         "provider": "nvidia",
         "model": "nvidia/nemotron-3-super-120b-a12b",
+        "fallbacks": ["nvidia/nemotron-3-ultra-550b-a55b", "moonshotai/kimi-k3"],
         "label": "Nemotron-3 Super 120B (NVIDIA)"
     },
     "120b": {
         "provider": "nvidia",
         "model": "nvidia/nemotron-3-super-120b-a12b",
+        "fallbacks": ["nvidia/nemotron-3-ultra-550b-a55b", "moonshotai/kimi-k3"],
         "label": "Nemotron-3 Super 120B (NVIDIA)"
     },
     "gemini": {
@@ -277,61 +285,72 @@ def query_llm(
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
-        model_name = config.get("model", "nvidia/nemotron-3-ultra-550b-a55b")
-
+        candidates = [config.get("model")] + config.get("fallbacks", [])
         eff_temp = float(temperature) if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "0.6"))
         eff_budget = int(reasoning_budget) if reasoning_budget is not None else int(os.getenv("REASONING_BUDGET", "16000"))
         eff_effort = str(reasoning_effort) if reasoning_effort is not None else os.getenv("REASONING_EFFORT", "high")
 
-        payload = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": user_prompt}
-            ],
-            "temperature": eff_temp,
-            "top_p": 0.95,
-            "max_tokens": eff_budget
-        }
-
-        # Handle reasoning parameters per model architecture:
-        # - Kimi-K3 supports reasoning_effort ("max", "high", etc.)
-        # - Nemotron-3 Super 120B supports explicit reasoning_budget and reasoning_effort
-        # - Nemotron-3 Ultra 550B uses vLLM V2 which reasons natively without these params
-        if "kimi" in model_name.lower():
-            payload["reasoning_effort"] = eff_effort if eff_effort in ["low", "medium", "high", "max"] else "max"
-        elif "ultra" not in model_name.lower():
-            payload["reasoning_effort"] = eff_effort
-            payload["reasoning_budget"] = eff_budget
-
         import time
         last_error = None
-        for attempt in range(3):
-            try:
-                response = requests.post(url, headers=headers, json=payload, timeout=120)
-                if response.status_code == 200:
-                    res_json = response.json()
-                    content = res_json["choices"][0]["message"].get("content") or ""
-                    return clean_think_tags(content)
-                elif response.status_code == 400 and "thinking_token_budget" in response.text:
-                    payload.pop("reasoning_effort", None)
-                    payload.pop("reasoning_budget", None)
-                    continue
-                elif response.status_code in [429, 502, 503, 504]:
-                    print(f"[llm_service] NVIDIA NIM model {model_name} returned {response.status_code}. Retrying ({attempt+1}/3)...")
+
+        for model_idx, model_name in enumerate(candidates):
+            if not model_name:
+                continue
+
+            payload = {
+                "model": model_name,
+                "messages": [
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": eff_temp,
+                "top_p": 0.95,
+                "max_tokens": eff_budget
+            }
+
+            if "kimi" in model_name.lower():
+                payload["reasoning_effort"] = eff_effort if eff_effort in ["low", "medium", "high", "max"] else "max"
+            elif "ultra" not in model_name.lower():
+                payload["reasoning_effort"] = eff_effort
+                payload["reasoning_budget"] = eff_budget
+
+            for attempt in range(2):
+                try:
+                    response = requests.post(url, headers=headers, json=payload, timeout=120)
+                    if response.status_code == 200:
+                        res_json = response.json()
+                        content = res_json["choices"][0]["message"].get("content") or ""
+                        return clean_think_tags(content)
+                    elif response.status_code == 400 and "thinking_token_budget" in response.text:
+                        payload.pop("reasoning_effort", None)
+                        payload.pop("reasoning_budget", None)
+                        continue
+                    elif response.status_code == 429:
+                        if attempt == 0:
+                            print(f"[llm_service] NVIDIA NIM model '{model_name}' rate limited (429). Retrying in 2s...")
+                            time.sleep(2)
+                            continue
+                        elif model_idx < len(candidates) - 1:
+                            next_model = candidates[model_idx + 1]
+                            print(f"[llm_service] NVIDIA NIM model '{model_name}' rate limited (429). Switching to fallback model '{next_model}'...")
+                            break
+                        else:
+                            last_error = RuntimeError(f"NVIDIA NIM model '{model_name}' rate limited (429): {response.text}")
+                    elif response.status_code in [502, 503, 504]:
+                        print(f"[llm_service] NVIDIA NIM model '{model_name}' returned {response.status_code}. Retrying...")
+                        time.sleep(3)
+                        continue
+                    else:
+                        raise RuntimeError(f"NVIDIA API call failed ({response.status_code}): {response.text}")
+                except requests.exceptions.RequestException as e:
+                    last_error = e
+                    print(f"[llm_service] NVIDIA connection error for '{model_name}': {e}. Retrying...")
                     time.sleep(3)
                     continue
-                else:
-                    raise RuntimeError(f"NVIDIA API call failed ({response.status_code}): {response.text}")
-            except requests.exceptions.RequestException as e:
-                last_error = e
-                print(f"[llm_service] NVIDIA connection error: {e}. Retrying ({attempt+1}/3)...")
-                time.sleep(3)
-                continue
 
         if last_error:
             raise last_error
-        raise RuntimeError(f"NVIDIA NIM API call failed after 3 attempts.")
+        raise RuntimeError("All NVIDIA NIM candidate models failed or were rate-limited.")
 
     elif provider == "ollama_twostage":
         try:
