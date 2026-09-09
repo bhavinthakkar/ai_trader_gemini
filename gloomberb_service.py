@@ -263,7 +263,8 @@ class GloomberbService:
             target_etf = sector_info["sector_etf"]
             for s in sectors_data:
                 if s.get("symbol") == target_etf:
-                    sector_info["sector_change_pct"] = f"{s.get('changePercent', 0):+.2f}%"
+                    cp = s.get("changePercent")
+                    sector_info["sector_change_pct"] = f"{float(cp):+.2f}%" if cp is not None else "N/A"
                     break
         return sector_info
 
@@ -742,11 +743,12 @@ class GloomberbService:
             surprises = cli_events.get("earnings", []) or []
             for s in surprises:
                 if s.get("epsActual") is not None and s.get("epsEstimate") is not None:
+                    sp = s.get("surprisePercent")
                     events_data["historical_earnings_surprises"].append({
                         "date": s.get("date"),
                         "estimate": s.get("epsEstimate"),
                         "actual": s.get("epsActual"),
-                        "surprise_pct": f"{s.get('surprisePercent', 0):+.2f}%"
+                        "surprise_pct": f"{float(sp):+.2f}%" if sp is not None else "N/A"
                     })
             events_data["recent_dividends"] = cli_events.get("dividends", [])[:3]
 
@@ -758,11 +760,12 @@ class GloomberbService:
         indices_list = []
         if cli_indices and isinstance(cli_indices, list):
             for item in cli_indices:
+                cp = item.get("changePercent")
                 indices_list.append({
                     "symbol": item.get("symbol"),
                     "name": item.get("name"),
                     "price": item.get("price"),
-                    "change_pct": f"{item.get('changePercent', 0):+.2f}%"
+                    "change_pct": f"{float(cp):+.2f}%" if cp is not None else "N/A"
                 })
         return indices_list
 
@@ -772,12 +775,13 @@ class GloomberbService:
         movers_list = []
         if cli_movers and isinstance(cli_movers, list):
             for m in cli_movers[:5]:
+                cp = m.get("changePercent")
                 movers_list.append({
                     "symbol": m.get("symbol"),
                     "name": m.get("name"),
                     "price": m.get("price"),
-                    "change_pct": f"{m.get('changePercent', 0):+.2f}%",
-                    "volume_ratio": round(float(m.get("volumeRatio", 1.0)), 2) if m.get("volumeRatio") else "N/A"
+                    "change_pct": f"{float(cp):+.2f}%" if cp is not None else "N/A",
+                    "volume_ratio": round(float(m.get("volumeRatio", 1.0)), 2) if m.get("volumeRatio") is not None else "N/A"
                 })
         return movers_list
 
