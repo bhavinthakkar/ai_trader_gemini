@@ -176,20 +176,27 @@ Schema:
         symbol = gloomberb_payload.get("symbol", "N/A")
         today_str = datetime.datetime.now().strftime("%Y-%m-%d")
 
-        # 1. Gloomberb News Catalysts -> Horizon: CURRENT
+        # 1. Gloomberb News Catalysts -> Horizon: CURRENT (if <=14d) or HISTORICAL (if older)
         for item in gloomberb_payload.get("news", []):
             src = item.get('source', 'Gloomberb News')
             rel_score = 0.90 if any(w in src.lower() for w in ["reuters", "bloomberg", "wsj", "gloomberb"]) else 0.70
-            text = f"[{src} Catalyst] {item.get('title', '')}. Details: {item.get('summary', '')}"
+            pub_date = str(item.get('published_at') or item.get('publishedAt') or today_str)[:10]
+            try:
+                days_diff = (datetime.datetime.now() - datetime.datetime.strptime(pub_date, "%Y-%m-%d")).days
+                horizon = "CURRENT" if days_diff <= 14 else "HISTORICAL"
+            except Exception:
+                horizon = "CURRENT"
+
+            text = f"[{src} Catalyst (Published: {pub_date})] {item.get('title', '')}. Details: {item.get('summary', '')}"
             docs.append(Document(page_content=text, metadata={
                 "ticker": symbol,
                 "source": src,
                 "document_type": "AggregatedNews",
-                "published_at": today_str,
-                "effective_date": today_str,
+                "published_at": pub_date,
+                "effective_date": pub_date,
                 "reliability": rel_score,
                 "importance": 0.65,
-                "time_horizon": "CURRENT"
+                "time_horizon": horizon
             }))
 
         # 2. SEC EDGAR Filings (10-K = HISTORICAL, 10-Q / 8-K = CURRENT)

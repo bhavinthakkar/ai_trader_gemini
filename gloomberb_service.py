@@ -270,7 +270,9 @@ class GloomberbService:
 
     def fetch_news(self, symbol: str) -> list:
         """Sources live breaking news from official gloomberb CLI terminal feed, with Finnhub/Google News fallbacks."""
+        import datetime
         news_items = []
+        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
 
         # 1. Official gloom-sh/gloomberb CLI News Feed
         cli_news = self.run_cli("news", symbol)
@@ -280,11 +282,14 @@ class GloomberbService:
                 title = item.get("title")
                 source = item.get("source") or "Gloomberb CLI"
                 url = item.get("url", "")
+                pub_raw = item.get("publishedAt") or item.get("published_at") or ""
+                pub_date = str(pub_raw)[:10] if pub_raw else today_str
                 if title:
                     news_items.append({
                         "source": f"Gloomberb Terminal ({source})",
                         "title": title,
                         "summary": f"{title}. Full article available at {url[:100]}",
+                        "published_at": pub_date,
                         "category": "News"
                     })
 
@@ -292,7 +297,6 @@ class GloomberbService:
         finnhub_key = os.getenv("FINNHUB_API_KEY")
         if finnhub_key and len(news_items) < 4:
             try:
-                import datetime
                 today = datetime.datetime.now().strftime("%Y-%m-%d")
                 week_ago = (datetime.datetime.now() - datetime.timedelta(days=7)).strftime("%Y-%m-%d")
                 url = f"https://finnhub.io/api/v1/company-news?symbol={symbol}&from={week_ago}&to={today}&token={finnhub_key}"
@@ -303,14 +307,17 @@ class GloomberbService:
                         headline = a.get("headline")
                         summary = a.get("summary") or headline
                         source = a.get("source") or "Finnhub Live"
+                        dt_val = a.get("datetime")
+                        pub_date = datetime.datetime.fromtimestamp(dt_val).strftime("%Y-%m-%d") if dt_val else today
                         if headline and not any(n["title"] == headline for n in news_items):
                             news_items.append({
                                 "source": f"Finnhub Live ({source})",
                                 "title": headline,
                                 "summary": summary[:250] if summary else headline,
+                                "published_at": pub_date,
                                 "category": "News"
                             })
-            except Exception as e:
+            except Exception:
                 pass
 
         # 3. Yahoo Finance Live News Stream
@@ -321,11 +328,14 @@ class GloomberbService:
                 title = item.get("title") or item.get("content", {}).get("title")
                 publisher = item.get("publisher") or item.get("content", {}).get("provider", {}).get("displayName")
                 summary = item.get("summary") or item.get("content", {}).get("summary", "")
+                pub_time = item.get("providerPublishTime")
+                pub_date = datetime.datetime.fromtimestamp(pub_time).strftime("%Y-%m-%d") if pub_time else today_str
                 if title and not any(n["title"] == title for n in news_items):
                     news_items.append({
                         "source": publisher or "Yahoo Finance",
                         "title": title,
                         "summary": summary[:250] if summary else title,
+                        "published_at": pub_date,
                         "category": "News"
                     })
         except Exception:
@@ -336,6 +346,7 @@ class GloomberbService:
                 "source": "Gloomberb",
                 "title": f"Recent market coverage for {symbol}",
                 "summary": f"Standard market trading activity reported for {symbol}.",
+                "published_at": today_str,
                 "category": "News"
             })
 
