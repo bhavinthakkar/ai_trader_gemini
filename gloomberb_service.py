@@ -52,20 +52,43 @@ class GloomberbService:
         self.fmp_api_key = os.getenv("FMP_API_KEY")
         self.sec_headers = {'User-Agent': 'GloomberbTradingAgent admin@ai-trader.com'}
 
-    def run_cli(self, *args, timeout: int = 10):
+    def run_cli(self, *args, timeout: int = 25):
         """Executes official gloom-sh/gloomberb CLI subcommands with arbitrary arguments and --json output mode."""
         if not os.path.exists(self.cli_bin):
             if not self._cli_warned:
                 print(f"[GloomberbService] Notice: CLI binary not found at '{self.cli_bin}' or in PATH. Operating in fallback mode (install via: curl -fsSL gloomberb.com/install | bash).")
                 self._cli_warned = True
             return None
+        import tempfile
         try:
             cmd = [self.cli_bin] + [str(a) for a in args] + ["--json"]
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-            if res.returncode == 0 and res.stdout:
-                parsed = json.loads(res.stdout)
-                if isinstance(parsed, dict) and parsed.get("ok"):
-                    return parsed.get("data")
+            with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as out_f, tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as err_f:
+                res = subprocess.run(cmd, stdout=out_f, stderr=err_f, timeout=timeout)
+                out_f.seek(0)
+                stdout_str = out_f.read()
+                err_f.seek(0)
+                stderr_str = err_f.read().strip()
+
+                if res.returncode != 0:
+                    err_msg = stderr_str or stdout_str[:200]
+                    if err_msg:
+                        try:
+                            err_json = json.loads(err_msg)
+                            err_msg = err_json.get("error", {}).get("message", err_msg)
+                        except Exception:
+                            pass
+                    print(f"[GloomberbService] Official CLI non-zero exit ({res.returncode}) for '{' '.join(str(a) for a in args)}': {err_msg[:200]}")
+                    return None
+
+                if stdout_str:
+                    parsed = json.loads(stdout_str)
+                    if isinstance(parsed, dict):
+                        if parsed.get("ok"):
+                            return parsed.get("data")
+                        else:
+                            err_info = parsed.get("error")
+                            print(f"[GloomberbService] Official CLI returned error for '{' '.join(str(a) for a in args)}': {err_info}")
+                            return None
         except Exception as e:
             print(f"[GloomberbService] Official CLI warning for '{' '.join(str(a) for a in args)}': {e}")
         return None
@@ -882,7 +905,7 @@ class GloomberbService:
 
         print(f"[GloomberbService] Ingesting comprehensive Gloomberb data stream via official CLI for {symbol}...")
 
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        with ThreadPoolExecutor(max_workers=5) as executor:
             fut_quote = executor.submit(self.fetch_quote, symbol)
             fut_news = executor.submit(self.fetch_news, symbol)
             fut_filings = executor.submit(self.fetch_filings, symbol)
