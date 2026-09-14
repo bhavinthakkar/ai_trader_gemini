@@ -22,9 +22,8 @@ from quantitative_scoring_service import QuantitativeScoringService
 
 WATCHLIST = ["000660.KS"]
 
-CHAT_ID = "969601315"
-
 load_dotenv()
+CHAT_ID = os.getenv("TELEGRAM_CHANNEL_CHAT_ID", "969601315")
 telegram_token = os.getenv("TELEGRAM_CHANNEL_API_TOKEN")
 
 MASTER_TRADER_INSTRUCTION = """
