@@ -182,9 +182,10 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     except (ValueError, TypeError):
         horizon_days = 10
 
-    # Quantitative 5-Pillar Scores
+    # Quantitative 5-Pillar Scores. The deterministic composite computed from real market data is
+    # authoritative; the model's echoed quant_score is only a fallback when deterministics are absent.
     deterministic_scores = m_data.get("deterministic_5pillar_scores", {})
-    quant_score = _to_float(data.get("quant_score") or deterministic_scores.get("composite_quantitative_score"), 65.0)
+    quant_score = _to_float(deterministic_scores.get("composite_quantitative_score") or data.get("quant_score"), 65.0)
 
     raw_pillars = data.get("pillar_scores") or {}
     if not isinstance(raw_pillars, dict):
@@ -269,8 +270,63 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         )
 
     # Deterministic BUY gates: momentum/valuation anchors cannot override setup geometry or risk.
+    # Hard post-model rule: the model's BUY is advisory and is only certified when the
+    # DETERMINISTIC composite (computed from market data, not echoed by the model) is >= 70,
+    # the market snapshot is valid/fresh, data coverage is adequate, and reward:risk >= 1.5.
     if decision == "BUY":
-        if days_to_earnings is not None and days_to_earnings <= 3:
+        det_composite = deterministic_scores.get("composite_quantitative_score")
+        if det_composite is None:
+            det_composite = deterministic_scores.get("raw_composite")
+        try:
+            composite_ok = det_composite is not None and float(det_composite) >= 70.0
+        except (TypeError, ValueError):
+            composite_ok = False
+
+        price_v = _to_float(m_data.get("current_price"), 0.0)
+        atr_v = _to_float(m_data.get("atr"), 0.0)
+        stop_v = _to_float(m_data.get("suggested_stop_loss"), 0.0)
+        target_v = _to_float(m_data.get("suggested_target_price"), 0.0)
+        market_data_ok = (
+            price_v > 0.0 and atr_v > 0.0 and stop_v > 0.0 and target_v > 0.0
+            and (m_data.get("rsi14") is not None or m_data.get("rvol_20d") is not None)
+        )
+
+        # Adequate data coverage: reported completeness >= 80% AND a deterministic composite was
+        # actually computed (the model cannot certify a BUY on zero deterministic pillars).
+        coverage_ok = (
+            data_completeness >= 0.80
+            and deterministic_scores.get("composite_quantitative_score") is not None
+        )
+
+        # Reward:risk must exist and clear the 1.5 minimum (rr is None only if stop/target degenerate).
+        rr_ok = rr is not None and rr >= 1.5
+
+        gate_reasons = []
+        if not composite_ok:
+            if det_composite is None:
+                gate_reasons.append("deterministic composite could not be computed from market data")
+            else:
+                gate_reasons.append(f"deterministic composite {float(det_composite):.1f}/100 < 70")
+        if not market_data_ok:
+            gate_reasons.append("invalid or stale market data (price, ATR, stop, target must all be positive)")
+        if not coverage_ok:
+            if not deterministic_scores.get("composite_quantitative_score"):
+                gate_reasons.append("data coverage inadequate: no deterministic composite could be computed from market data")
+            else:
+                gate_reasons.append(f"data coverage {data_completeness * 100:.0f}% < 80% bar")
+        if not rr_ok:
+            if rr is None:
+                gate_reasons.append("reward:risk ratio unavailable from setup geometry")
+            else:
+                gate_reasons.append(f"reward:risk ratio {rr:.2f} < 1.5")
+
+        if gate_reasons:
+            decision = "HOLD"
+            gates_applied = True
+            _append_risk(
+                "BUY downgraded to HOLD (deterministic BUY eligibility): " + "; ".join(gate_reasons) + "."
+            )
+        elif days_to_earnings is not None and days_to_earnings <= 3:
             decision = "HOLD"
             gates_applied = True
             note = (
@@ -284,15 +340,6 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
             note = (
                 f"BUY downgraded to HOLD: extreme volatility (ATR {atr_pct}% of price, "
                 f"vol factor {vol_factor:.2f}); composite is dampened to {quant_score}/100."
-            )
-            _append_risk(note)
-        elif decision == "BUY" and rr is not None and rr < 1.5:
-            decision = "HOLD"
-            gates_applied = True
-            note = (
-                f"BUY downgraded to HOLD: reward:risk ratio {rr:.2f} below the 1.5 minimum "
-                f"(structural target ${_to_float(rr_info.get('structural_target'), 0.0):.2f} vs stop "
-                f"${_to_float(rr_info.get('structural_stop'), 0.0):.2f})."
             )
             _append_risk(note)
         elif analyst_rr is not None and analyst_rr < 1.0:
@@ -319,6 +366,10 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
             )
             decision = top_choices[0]
 
+    # A gate/realignment that lands on HOLD must not carry the conviction of a directional call.
+    if decision == "HOLD":
+        confidence = round(min(confidence, 0.60), 2)
+
     # Market snapshot metrics for database and outcome tracking
     entry_price = m_data.get("current_price")
     stop_loss_price = m_data.get("suggested_stop_loss")
@@ -334,7 +385,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
 
     # Summaries for backward compatibility in SQLite
     news_items = gloomberb_payload.get("news", [])
-    news_summary = "; ".join(f"[{n.get('source', '')}] {n.get('title', '')}" for n in news_items[:3]) if news_items else "Standard news tape."
+    news_summary = "; ".join(f"[{n.get('source', '')}] {n.get('title', '')}" for n in news_items[:3]) if news_items else "No news source available."
     
     analyst_info = gloomberb_payload.get("analyst_ratings", {})
     bank_cov = f"Consensus: {analyst_info.get('recommendation_rating', 'N/A')}, Target: ${analyst_info.get('mean_target_price', 'N/A')}"

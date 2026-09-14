@@ -630,8 +630,15 @@ Schema:
             technical_data.get("analyst_target_price")
         )
 
+        # Aggregated source availability so the LLM can distinguish "no data"
+        # from genuinely sourced material instead of fabricated/assumed content.
+        source_status = dict(gloomberb_payload.get("data_source_status", {}))
+        if institutional_data and isinstance(institutional_data, dict):
+            source_status.update(institutional_data.get("source_status", {}))
+
         market_benchmark_summary = {
             "symbol": symbol,
+            "data_source_status": source_status,
             "sector": profile.get("sector", "N/A"),
             "deterministic_5pillar_scores": quant_scores,
             "setup_geometry": {
@@ -708,6 +715,10 @@ Schema:
         }
 
         user_prompt = f"""
+================ 0. DATA SOURCE AVAILABILITY ================
+Channels marked "source_unavailable" in data_source_status above produced NO real document. Treat them as absent: do NOT invent, assume, or "aggregate" placeholder content for them, and do NOT cite them as evidence. Factor their absence into data_completeness and missing_information.
+Also, CURRENT CONTEXT passages (Section 2) only contain real, sourced documents (or an explicit "no passages" marker when none matched). If a category is empty, there is no supporting text — never fabricate one.
+
 ================ 1. STRUCTURED MARKET & QUANTITATIVE DATA ================
 Target Ticker: {symbol}
 

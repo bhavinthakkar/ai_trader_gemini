@@ -106,16 +106,7 @@ class InstitutionalDataService:
             pass
 
         if not items:
-            items.append({
-                "title": f"{symbol} Investor Relations Updates",
-                "summary": f"Aggregating latest investor relations releases and corporate updates for {symbol}.",
-                "source": "Investor Relations Feed",
-                "category": "InvestorRelations",
-                "document_type": "IRRelease",
-                "reliability": 0.95,
-                "importance": 0.85,
-                "published_at": today_str
-            })
+            print(f"[InstitutionalDataService] IR press release source unavailable for {symbol}.")
         return items[:4]
 
     def fetch_sec_edgar_direct(self, symbol: str) -> list:
@@ -162,33 +153,11 @@ class InstitutionalDataService:
 
     def fetch_earnings_call_highlights(self, symbol: str) -> list:
         """Sources recent Earnings Call Transcript highlights, CEO/CFO opening remarks, and Q&A takeaways."""
-        import datetime
-        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
         highlights = []
-        try:
-            ticker = yf.Ticker(symbol)
-            info = ticker.info or {}
-            rev_growth = f"{info.get('revenueGrowth', 0) * 100:.1f}%" if info.get('revenueGrowth') else "N/A"
-            earn_growth = f"{info.get('earningsGrowth', 0) * 100:.1f}%" if info.get('earningsGrowth') else "N/A"
-
-            highlight_text = (
-                f"Quarterly Earnings Call Takeaways for {symbol}: Reported Revenue Growth YoY: {rev_growth}, "
-                f"Earnings Growth YoY: {earn_growth}. Management highlighted demand momentum, operational efficiency, "
-                f"and strategic forward guidance during executive opening remarks and analyst Q&A session."
-            )
-            highlights.append({
-                "symbol": symbol,
-                "summary": highlight_text,
-                "source": "Earnings Call Transcript Feed",
-                "category": "EarningsCall",
-                "document_type": "EarningsTranscript",
-                "reliability": 0.90,
-                "importance": 0.90,
-                "published_at": today_str
-            })
-        except Exception as e:
-            print(f"[InstitutionalDataService] Earnings call fetch warning for {symbol}: {e}")
-
+        # NOTE: No fabricated "transcripts". yfinance `info` metrics (revenue/earnings growth)
+        # are real metadata but are NOT an earnings-call transcript; they must never be labeled
+        # as one. Return no document unless a genuine transcript source is available.
+        print(f"[InstitutionalDataService] Earnings call transcript source unavailable for {symbol} (no genuine transcript provider configured).")
         return highlights
 
     def fetch_official_press_releases(self, symbol: str) -> list:
@@ -217,16 +186,7 @@ class InstitutionalDataService:
             pass
 
         if not press_releases:
-            press_releases.append({
-                "title": f"{symbol} Official Corporate Announcement",
-                "summary": f"Official press releases detailing product launches, corporate partnerships, and operational milestones for {symbol}.",
-                "source": "PRNewswire / GlobeNewswire",
-                "category": "OfficialPressRelease",
-                "document_type": "PressRelease",
-                "reliability": 0.95,
-                "importance": 0.80,
-                "published_at": today_str
-            })
+            print(f"[InstitutionalDataService] Official press release source unavailable for {symbol}.")
         return press_releases[:4]
 
     def fetch_reputable_financial_news(self, symbol: str) -> list:
@@ -304,5 +264,12 @@ class InstitutionalDataService:
             "sec_edgar_direct": sec_direct,
             "earnings_calls": earnings_calls,
             "official_press_releases": official_prs,
-            "reputable_news": reputable_news
+            "reputable_news": reputable_news,
+            "source_status": {
+                "investor_relations": "available" if ir_prs else "source_unavailable",
+                "sec_edgar_direct": "available" if sec_direct else "source_unavailable",
+                "earnings_calls": "available" if earnings_calls else "source_unavailable",
+                "official_press_releases": "available" if official_prs else "source_unavailable",
+                "reputable_news": "available" if reputable_news else "source_unavailable"
+            }
         }

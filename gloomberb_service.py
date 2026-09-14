@@ -342,13 +342,7 @@ class GloomberbService:
             pass
 
         if not news_items:
-            news_items.append({
-                "source": "Gloomberb",
-                "title": f"Recent market coverage for {symbol}",
-                "summary": f"Standard market trading activity reported for {symbol}.",
-                "published_at": today_str,
-                "category": "News"
-            })
+            print(f"[GloomberbService] News source unavailable for {symbol}: no real items from CLI/Finnhub/Yahoo streams.")
 
         return news_items
 
@@ -427,12 +421,7 @@ class GloomberbService:
                 print(f"[GloomberbService] SEC filings API fallback warning for {symbol}: {e}")
 
         if not filings_data:
-            filings_data.append({
-                "form": "10-K / 10-Q",
-                "date": "Recent",
-                "summary": f"Form 10-K / 10-Q corporate disclosures evaluated for {symbol}.",
-                "category": "Filings"
-            })
+            print(f"[GloomberbService] SEC filings source unavailable for {symbol}: no real filings from CLI or SEC EDGAR feed.")
 
         return filings_data
 
@@ -986,5 +975,9 @@ class GloomberbService:
             "sector_benchmark": sector_bench,
             "market_indices": market_indices,
             "market_movers": market_movers,
-            "market_spy_correlation": spy_correlation
+            "market_spy_correlation": spy_correlation,
+            "data_source_status": {
+                "news": "available" if news else "source_unavailable",
+                "filings": "available" if filings else "source_unavailable"
+            }
         }
