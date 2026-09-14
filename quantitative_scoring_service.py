@@ -375,21 +375,39 @@ class QuantitativeScoringService:
         return f != 0.0
 
     @staticmethod
-    def _source_said(source_status, channel: str, counts) -> bool:
+    def _channel_available(status_entry, counts=None) -> bool:
         """
-        Check a gloomberb `data_source_status` style dict for a channel availability.
-        `counts` is one of source_status's keys containing fetched items.
+        Normalize a source-status entry that may be either a dict (`{available: bool,
+        status, source_unavailable, fetch_count}`) or a string (`"available"` /
+        `"source_unavailable"`). Anything else, including a missing entry, means the
+        source is NOT available -- never assume availability from silence.
         """
-        ch = (source_status or {}).get(channel) or {}
-        if ch.get("available") is False:
+        if isinstance(status_entry, str):
+            return status_entry.strip().lower() in ("available", "ok", "ready", "true", "1")
+        if status_entry is None:
             return False
-        if ch.get("status") == "unavailable":
+        if not isinstance(status_entry, dict):
             return False
-        if ch.get("source_unavailable") is True:
+        if status_entry.get("available") is False:
             return False
-        if counts and ch.get("fetch_count", 0) == 0:
+        if status_entry.get("status") == "unavailable":
+            return False
+        if status_entry.get("source_unavailable") is True:
+            return False
+        if counts and status_entry.get("fetch_count", 0) == 0:
             return False
         return True
+
+    @staticmethod
+    def _source_said(source_status, channel: str, counts) -> bool:
+        """
+        Check a `data_source_status` / `source_status` payload (strings or dicts) for a
+        channel's availability. A malformed/non-dict payload yields unavailable.
+        """
+        src = source_status or {}
+        if not isinstance(src, dict):
+            return False
+        return QuantitativeScoringService._channel_available(src.get(channel), counts)
 
     @staticmethod
     def _items_are_fresh(items, max_days: int, date_key: str) -> bool:
@@ -476,7 +494,8 @@ class QuantitativeScoringService:
             (gloomberb_payload.get("analyst_ratings") or {}).get("mean_target_price"))
 
         # Institutional ownership via weighted source_status channels.
-        inst_status = institutional_payload.get("source_status") or {}
+        inst_status = institutional_payload.get("source_status")
+        inst_status = inst_status if isinstance(inst_status, dict) else {}
         inst_channels = {
             "sec_edgar_direct": 0.40,
             "reputable_news": 0.30,
@@ -486,9 +505,7 @@ class QuantitativeScoringService:
         }
         inst_ok = 0.0
         for channel, weight in inst_channels.items():
-            ch = inst_status.get(channel) or {}
-            available = ch.get("available", False) and ch.get("source_unavailable", False) is False
-            if available:
+            if QuantitativeScoringService._channel_available(inst_status.get(channel)):
                 inst_ok += weight
 
         contributions = [
