@@ -104,6 +104,42 @@ def days_from_earnings_date(date_str, today=None) -> int:
         return None
 
 
+def gated_confidence(composite, pillar_scores: dict, data_completeness: float = 0.87) -> float:
+    """
+    Mechanistic decision confidence (0..1) derived from deterministic signal quality:
+    - distance of the composite from neutral 50: the more decisive the score, the higher the base.
+    - agreement among the 5 pillars: heavy dispersion (pillars contradict) drags confidence down.
+    - data completeness: missing data trims confidence.
+
+    Returns a float rounded to 2 decimals. Fully deterministic -- the model's own
+    stated confidence is recorded separately as model_confidence.
+    """
+    def _f(v, default=50.0):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return default
+
+    comp = _f(composite, 50.0)
+    keys = ["trend", "sector", "alpha", "valuation_history", "peer_valuation"]
+    values = [_f((pillar_scores or {}).get(k), 50.0) for k in keys]
+
+    distance = max(0.0, min(1.0, abs(comp - 50.0) / 50.0))
+    mean_p = sum(values) / len(values)
+    dispersion = sum(abs(v - mean_p) for v in values) / (len(values) * 50.0)
+    agreement = 1.0 - max(0.0, min(1.0, dispersion))
+
+    try:
+        completeness = max(0.0, min(1.0, float(data_completeness)))
+    except (TypeError, ValueError):
+        completeness = 0.87
+
+    edge_strength = 0.7 * distance + 0.3 * (agreement - 0.5)
+    base = 0.5 + 0.5 * edge_strength
+    conf = base * (0.5 + 0.5 * completeness)
+    return round(max(0.0, min(1.0, conf)), 2)
+
+
 def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, macro_data: dict = None, gloomberb_payload: dict = None) -> dict:
     if not isinstance(data, dict):
         data = {}
@@ -135,11 +171,12 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     else:
         decision = "HOLD"
 
-    # Normalize Confidence
+    # Normalize model confidence -- kept as a reference; the authoritative `confidence`
+    # is overwritten below by the deterministic gated_confidence() signal-quality formula.
     raw_conf = data.get("confidence") or buy_score or 0.70
-    confidence = _to_float(raw_conf, 0.70)
-    if confidence > 1.0:
-        confidence = round(confidence / 100.0, 2) if confidence <= 100 else 0.70
+    model_confidence = _to_float(raw_conf, 0.70)
+    if model_confidence > 1.0:
+        model_confidence = round(model_confidence / 100.0, 2) if model_confidence <= 100 else 0.70
 
     try:
         horizon_days = int(data.get("horizon_days") or 10)
@@ -156,7 +193,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
 
     pillar_scores = {
         "trend": _to_float(raw_pillars.get("trend") or deterministic_scores.get("trend_score"), 50.0),
-        "sector": _to_float(raw_pillars.get("sector") or deterministic_scores.get("sector_score"), 50.0),
+        "sector": _to_float(raw_pillars.get("sector") or deterministic_scores.get("sector_relative_score"), 50.0),
         "alpha": _to_float(raw_pillars.get("alpha") or deterministic_scores.get("market_alpha_score"), 50.0),
         "valuation_history": _to_float(raw_pillars.get("valuation_history") or deterministic_scores.get("valuation_history_score"), 50.0),
         "peer_valuation": _to_float(raw_pillars.get("peer_valuation") or deterministic_scores.get("peer_valuation_score"), 50.0)
@@ -169,6 +206,14 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     missing_info = _to_list_of_strings(data.get("missing_information"), "None")
 
     data_completeness = _to_float(data.get("data_completeness"), 0.87)
+
+    # Mechanistic confidence: a function of composite decisiveness, pillar agreement,
+    # and data completeness -- NOT the model's stated number. Deterministic pillars take
+    # priority over the model's echoed pillars. A HOLD never carries high conviction, so cap it.
+    conf_composite = (deterministic_scores.get("composite_quantitative_score") or quant_score or 50.0)
+    confidence = gated_confidence(conf_composite, pillar_scores, data_completeness)
+    if decision == "HOLD":
+        confidence = round(min(confidence, 0.60), 2)
 
     # Reward:Risk setup geometry -- deterministic, computed from market data, not the model.
     # Channel-anchored so the ratio varies with price position inside the 20-day range.
@@ -304,6 +349,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         "stock": _ensure_str(stock),
         "decision": decision,
         "confidence": confidence,
+        "model_confidence": model_confidence,
         "buy_score": buy_score,
         "hold_score": hold_score,
         "sell_score": sell_score,
@@ -587,6 +633,14 @@ def main():
 
         # 5. Dense Vector Embedding RAG & Prompt Payload Assembly
         context = rag_service.get_nemotron_payload(gloomberb_payload, technical_data=m_data, institutional_data=institutional_payload)
+
+        # Attach the deterministic 5-pillar scores to m_data so normalize can fall back to them
+        # instead of defaults (and so gated_confidence uses real pillar agreement).
+        if isinstance(m_data, dict):
+            m_data = dict(m_data)
+            m_data["deterministic_5pillar_scores"] = QuantitativeScoringService().compute_5pillar_scores(
+                m_data, gloomberb_payload, gloomberb_payload.get("sector_benchmark", {})
+            )
 
         # 6. Model Reasoning Core & Market Analysis
         print(f"[{model_label}] Executing market analysis for {symbol}...")

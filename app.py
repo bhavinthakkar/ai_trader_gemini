@@ -275,7 +275,14 @@ with tab2:
             fbu = stock_data.get("falsification_bull")
             if driver or fb or fbu:
                 st.markdown("#### 🧭 Decision Origin & Falsification")
-                st.metric("Primary Driver", f"`{driver}`")
+                c_drv, c_conf = st.columns([2, 1])
+                c_drv.metric("Primary Driver", f"`{driver}`")
+                mc = stock_data.get("model_confidence")
+                c_conf.metric(
+                    "Mechanistic Conf",
+                    f"{stock_data.get('confidence', 'N/A')}",
+                    help=f"Model's stated confidence: {mc}" if mc is not None else "Model confidence unavailable"
+                )
                 if fbu:
                     st.markdown(f"**Falsifies buy-side:** _{fbu}_")
                 if fb:

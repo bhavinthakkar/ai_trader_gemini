@@ -73,7 +73,8 @@ def init_db(db_path=DB_PATH):
             "atr_pct": "REAL",
             "primary_driver": "TEXT",
             "falsification_bull": "TEXT",
-            "falsification_bear": "TEXT"
+            "falsification_bear": "TEXT",
+            "model_confidence": "REAL"
         }
 
         cursor.execute("PRAGMA table_info(signals);")
@@ -143,6 +144,7 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
             stock = _ensure_str(item.get("stock", item.get("symbol", "N/A")))
             decision = str(item.get("decision", "HOLD")).upper()
             confidence = _to_float(item.get("confidence"), 0.0)
+            model_confidence = _to_float(item.get("model_confidence"))
 
             buy_score = _to_float(item.get("buy_score"))
             hold_score = _to_float(item.get("hold_score"))
@@ -210,8 +212,8 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                     days_to_earnings, bull_case, bear_case, key_risks, missing_information,
                     reward_risk_ratio, breakeven_win_rate, analyst_target_rr,
                     structural_stop_price, structural_target_price,
-                    vol_factor, atr_pct, primary_driver, falsification_bull, falsification_bear
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    vol_factor, atr_pct, primary_driver, falsification_bull, falsification_bear, model_confidence
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 timestamp, stock, decision, confidence, reason, inst_data, macro_data, news,
                 bank_coverage, risk_info, pe_peg, model_used, raw_json,
@@ -222,7 +224,7 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                 days_to_earnings, bull_case, bear_case, key_risks, missing_info,
                 reward_risk_ratio, breakeven_win_rate, analyst_target_rr,
                 structural_stop_price, structural_target_price,
-                vol_factor, atr_pct, primary_driver, falsification_bull, falsification_bear
+                vol_factor, atr_pct, primary_driver, falsification_bull, falsification_bear, model_confidence
             ))
         conn.commit()
     print(f"[DB] Successfully saved {len(results)} analysis records to database.")
