@@ -9,8 +9,10 @@ class QuantitativeScoringService:
     3. Market Alpha vs SPY (20%)
     4. Valuation vs History (15%)
     5. Peer Valuation Multiples (20%)
-    
-    Produces a weighted Composite Quantitative Score (0 to 100).
+
+    Produces a weighted Composite Quantitative Score (0 to 100), dampened
+    by a volatility factor so high-ATR names are mechanically pushed toward
+    HOLD/SELL even when momentum is strong.
     """
 
     @staticmethod
@@ -29,6 +31,135 @@ class QuantitativeScoringService:
             return float(s)
         except Exception:
             return default
+
+    @staticmethod
+    def compute_vol_factor(atr, price) -> float:
+        """
+        Returns a deterministic volatility dampening factor for the composite score.
+        Mirrors the RiskAgent's own ATR% threshold (risk_agent.py: ATR/price > 4% is
+        flagged HIGH) but as a graduated multiplier instead of a high/low cliff.
+
+        ATR% (daily, as % of price):
+          <= 1.5%  -> 1.00  (calm)
+          <= 2.5%  -> 0.95  (normal)
+          <= 4.0%  -> 0.85  (elevated)
+          >  4.0%  -> 0.70  (extreme -- mechanically pushed out of BUY range)
+        """
+        if atr is None or not price or price <= 0:
+            return 1.0
+        try:
+            atr_pct = (float(atr) / float(price)) * 100.0
+        except (TypeError, ValueError):
+            return 1.0
+
+        if atr_pct <= 1.5:
+            return 1.0
+        elif atr_pct <= 2.5:
+            return 0.95
+        elif atr_pct <= 4.0:
+            return 0.85
+        return 0.70
+
+    @staticmethod
+    def compute_reward_risk(entry_price, stop_loss, target_price) -> Dict:
+        """
+        Computes the setup reward:risk ratio and breakeven win rate for a long trade.
+
+        reward_risk_ratio = (target - entry) / (entry - stop)
+        breakeven_win_rate = 1 / (1 + reward_risk_ratio)   -- the minimum win rate
+        needed for the trade to be profitable on average.
+
+        Returns a dict with both values (None when the geometry is unavailable
+        or degenerate, e.g. stop >= entry). Always horizon-consistent: compute it
+        against the trade's own swing target and stop.
+        """
+        entry = QuantitativeScoringService._clean_float(entry_price, 0.0)
+        stop = QuantitativeScoringService._clean_float(stop_loss, None)
+        target = QuantitativeScoringService._clean_float(target_price, None)
+
+        if entry <= 0.0 or stop is None or target is None:
+            return {"reward_risk_ratio": None, "breakeven_win_rate": None}
+
+        downside = entry - stop
+        upside = target - entry
+        if downside <= 0.0:
+            return {"reward_risk_ratio": None, "breakeven_win_rate": None}
+
+        rr = round(upside / downside, 2)
+        breakeven = round(1.0 / (1.0 + rr), 3) if rr > 0.0 else None
+        return {"reward_risk_ratio": rr, "breakeven_win_rate": breakeven}
+
+    @staticmethod
+    def compute_channel_reward_risk(entry_price, atr, high_20d, low_20d, suggested_stop_loss=None, suggested_target_price=None) -> Dict:
+        """
+        Computes a channel-anchored reward:risk so the ratio actually varies with
+        where price sits inside its 20-day trading range, instead of collapsing to
+        the fixed 2.5/1.5 symmetric-ATR ratio.
+
+        Conservative geometry (never overstates reward):
+          structural_stop   = min(price - 1.5*ATR, low_20d  - 0.5*ATR)  -- larger honest downside
+          structural_target = min(price + 2.5*ATR, high_20d + 0.5*ATR)  -- capped at real resistance
+
+        Returns a dict with structural_stop, structural_target, reward_risk_ratio,
+        breakeven_win_rate, distance_to_resistance_atr, distance_to_support_atr.
+        """
+        entry = QuantitativeScoringService._clean_float(entry_price, 0.0)
+        atr_v = QuantitativeScoringService._clean_float(atr, None)
+        high = QuantitativeScoringService._clean_float(high_20d, None)
+        low = QuantitativeScoringService._clean_float(low_20d, None)
+        vol_stop = QuantitativeScoringService._clean_float(suggested_stop_loss, None)
+        vol_tgt = QuantitativeScoringService._clean_float(suggested_target_price, None)
+
+        empty = {
+            "structural_stop": None,
+            "structural_target": None,
+            "reward_risk_ratio": None,
+            "breakeven_win_rate": None,
+            "distance_to_resistance_atr": None,
+            "distance_to_support_atr": None
+        }
+        if entry <= 0.0:
+            return empty
+
+        # Conservative stop: the lower bound (bigger downside = never overstated RR).
+        stop_candidates = []
+        if vol_stop is not None:
+            stop_candidates.append(vol_stop)
+        if low is not None and atr_v is not None:
+            stop_candidates.append(low - 0.5 * atr_v)
+        elif low is not None:
+            stop_candidates.append(low)
+        valid_stops = [s for s in stop_candidates if s < entry]
+        structural_stop = min(valid_stops) if valid_stops else None
+
+        # Conservative target: the higher bound of the capped value (min of candidates)
+        tgt_candidates = []
+        if vol_tgt is not None:
+            tgt_candidates.append(vol_tgt)
+        if high is not None and atr_v is not None:
+            tgt_candidates.append(high + 0.5 * atr_v)
+        elif high is not None:
+            tgt_candidates.append(high)
+        valid_tgts = [t for t in tgt_candidates if t > entry]
+        structural_target = min(valid_tgts) if valid_tgts else None
+
+        rr_info = QuantitativeScoringService.compute_reward_risk(entry, structural_stop, structural_target)
+
+        dist_res, dist_sup = None, None
+        if atr_v is not None and atr_v > 0:
+            if high is not None:
+                dist_res = round((high - entry) / atr_v, 2)
+            if low is not None:
+                dist_sup = round((entry - low) / atr_v, 2)
+
+        return {
+            "structural_stop": structural_stop,
+            "structural_target": structural_target,
+            "reward_risk_ratio": rr_info.get("reward_risk_ratio"),
+            "breakeven_win_rate": rr_info.get("breakeven_win_rate"),
+            "distance_to_resistance_atr": dist_res,
+            "distance_to_support_atr": dist_sup
+        }
 
     def calculate_trend_score(self, technical_data: Dict) -> float:
         """
@@ -202,7 +333,14 @@ class QuantitativeScoringService:
         s_val_hist = self.calculate_valuation_history_score(gloomberb_payload)
         s_peer_val = self.calculate_peer_valuation_score(gloomberb_payload)
 
-        composite = (0.25 * s_trend) + (0.20 * s_sector) + (0.20 * s_alpha) + (0.15 * s_val_hist) + (0.20 * s_peer_val)
+        raw_composite = (0.25 * s_trend) + (0.20 * s_sector) + (0.20 * s_alpha) + (0.15 * s_val_hist) + (0.20 * s_peer_val)
+
+        # Volatility dampening: the composite must reflect risk-adjusted quality, not raw momentum.
+        vol_factor = QuantitativeScoringService.compute_vol_factor(
+            technical_data.get("atr") if technical_data else None,
+            technical_data.get("current_price") if technical_data else None
+        )
+        composite = round(raw_composite * vol_factor, 2)
 
         if composite >= 70.0:
             signal = "Strong Bullish Quant Signal (BUY candidate if fundamental RAG confirms)"
@@ -217,6 +355,8 @@ class QuantitativeScoringService:
             "market_alpha_score": round(s_alpha, 2),
             "valuation_history_score": round(s_val_hist, 2),
             "peer_valuation_score": round(s_peer_val, 2),
-            "composite_quantitative_score": round(composite, 2),
+            "raw_composite": round(raw_composite, 2),
+            "vol_factor": vol_factor,
+            "composite_quantitative_score": composite,
             "quant_signal": signal
         }

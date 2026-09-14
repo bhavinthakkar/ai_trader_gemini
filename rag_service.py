@@ -98,7 +98,15 @@ CRITICAL QUANTITATIVE SCORE MANDATE:
   - Composite Score >= 70.0: Strong quantitative alignment for BUY (confirm with fundamental RAG evidence).
   - Composite Score 45.0 - 69.9: Neutral / Mixed alignment. Default to HOLD unless an extraordinary high-reliability SEC/Earnings catalyst exists.
   - Composite Score < 45.0: Weak / Overvalued alignment. Default to SELL or HOLD.
+- The reported composite_quantitative_score is ALREADY volatility-adjusted: it is the raw_composite multiplied by vol_factor (1.00 calm / 0.95 normal / 0.85 elevated / 0.70 extreme ATR%). A momentum stock with extreme volatility shows a dampened score BY DESIGN -- do not mentally 'un-dampen' it or restore the raw_composite when forming your decision. High volatility is itself a reason to cap conviction.
 - DO NOT turn isolated positive facts into an unearned BUY decision if the composite quantitative score is neutral or weak.
+
+REWARD:RISK & SETUP GEOMETRY MANDATE:
+- The payload's setup_geometry block reports the trade's reward_risk_ratio computed from CONSERVATIVE channel-anchored levels: structural_stop = min(price - 1.5*ATR, 20d low - 0.5*ATR) and structural_target = min(price + 2.5*ATR, 20d high + 0.5*ATR), plus the breakeven_win_rate = 1/(1+RR) required to be profitable on average.
+- BUY REQUIRES reward_risk_ratio >= 1.5. Never issue BUY on a setup whose 10-day reward does not clear the stop by at least 1.5x, regardless of the quantitative composite score.
+- distance_to_resistance_atr tells you how many ATRs price sits below the 20-day high. Values below ~1.0 mean the profit zone is thin and the entry is likely a chase of an extended move -- downgrade conviction; a price near the top of its 20d range with thin reward:risk is a poor BUY regardless of trend momentum.
+- If wall_street_target_rr < 1.0 (the Wall Street mean target sits BELOW the entry price), that is a hard contradiction to any BUY thesis -- street consensus sees no upside above your entry. Flag it in key_risks and downgrade conviction.
+- Treat wall_street_mean_target_12m as a 12-month directional reference only. NEVER use it to inflate a 10-day reward:risk calculation or to justify a short-term BUY.
 
 EXPLICIT SOURCE RELIABILITY HIERARCHY MANDATE:
 - Every retrieved passage contains a [Metadata] header specifying its source and Reliability Score (1.00 to 0.30):
@@ -118,10 +126,9 @@ TEMPORAL REASONING & PUBLICATION DATE MANDATE:
 
 BINARY EVENT-RISK & IMPLIED VOLATILITY MANDATE:
 - If days_to_earnings <= 3:
-  - An earnings report within 3 days represents a high-risk binary event.
-  - If Implied Volatility is elevated (>80%) or put/call flow indicates high uncertainty, the options market is pricing in an extreme gap move.
+  - An earnings report within 3 days is a binary gap-risk event. BUY is MECHANICALLY ENFORCED to HOLD in normalize; do not issue a BUY output for this symbol -- it will be overridden.
   - Backward-looking technical trend momentum (Trend Score = 100) does NOT guarantee post-earnings continuation and can reverse instantly.
-  - In such cases, exercise strict risk discipline: downgrade BUY conviction to HOLD or require an explicit post-earnings hedging and strict stop-loss thesis in the key_risks section.
+  - If your quant analysis strongly disagrees with the mechanical hold, document why in key_risks and retain the HOLD; do not attempt to circumvent the earnings gate.
 
 CROSS-PILLAR CONTRADICTION & DIVERGENCE RESOLUTION:
 - Actively resolve divergences across pillars and evidence:
@@ -586,10 +593,40 @@ Schema:
         quant_service = QuantitativeScoringService()
         quant_scores = quant_service.compute_5pillar_scores(technical_data, gloomberb_payload, sector_bench)
 
+        # Channel-anchored Reward:Risk setup geometry -- varies with where price
+        # sits inside its 20-day range (conservative stop/target), not fixed 2.5/1.5.
+        struct_rr_info = QuantitativeScoringService.compute_channel_reward_risk(
+            technical_data.get("current_price"),
+            technical_data.get("atr"),
+            technical_data.get("high_20d"),
+            technical_data.get("low_20d"),
+            technical_data.get("suggested_stop_loss"),
+            technical_data.get("suggested_target_price")
+        )
+        # Wall Street mean target as a 12-month directional sanity check, NOT a 10-day reward.
+        analyst_rr_info = QuantitativeScoringService.compute_reward_risk(
+            technical_data.get("current_price"),
+            technical_data.get("suggested_stop_loss"),
+            technical_data.get("analyst_target_price")
+        )
+
         market_benchmark_summary = {
             "symbol": symbol,
             "sector": profile.get("sector", "N/A"),
             "deterministic_5pillar_scores": quant_scores,
+            "setup_geometry": {
+                "entry_price": technical_data.get("current_price"),
+                "stop_loss": technical_data.get("suggested_stop_loss"),
+                "swing_target_10d": technical_data.get("suggested_target_price"),
+                "structural_stop": struct_rr_info.get("structural_stop"),
+                "structural_target": struct_rr_info.get("structural_target"),
+                "distance_to_resistance_atr": struct_rr_info.get("distance_to_resistance_atr"),
+                "distance_to_support_atr": struct_rr_info.get("distance_to_support_atr"),
+                "reward_risk_ratio": struct_rr_info.get("reward_risk_ratio"),
+                "breakeven_win_rate": struct_rr_info.get("breakeven_win_rate"),
+                "wall_street_mean_target_12m": technical_data.get("analyst_target_price"),
+                "wall_street_target_rr": analyst_rr_info.get("reward_risk_ratio")
+            },
             "current_price": technical_data.get("current_price"),
             "change_5d_pct": technical_data.get("change_5d_pct"),
             "market_spy_5d_pct": technical_data.get("market_spy_5d_pct"),
@@ -688,6 +725,7 @@ Execute multi-step analytical reasoning:
 2. Event-Risk Assessment: If earnings are within 3 days (days_to_earnings <= 3) or implied volatility is high, evaluate the options market's binary gap risk. Do not rely solely on backward-looking momentum.
 3. Divergence Resolution: Reconcile any divergence between technical momentum and peer valuation multiples or insider transactions.
 4. Anchor your final decision and probabilities around the Composite Quantitative Score.
+5. Fold in setup_geometry: a BUY requires reward_risk_ratio >= 1.5 as computed from the channel-anchored structural stop and target (capped by the 20-day range); if distance_to_resistance_atr < 1.0, the entry is likely a chase. If Wall Street's 12-month mean target implies wall_street_target_rr < 1.0, treat it as a directional contradiction to any BUY.
 Return a valid JSON object matching the required schema.
 """
 

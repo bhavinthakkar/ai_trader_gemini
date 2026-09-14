@@ -18,6 +18,7 @@ from analyst_agent import AnalystAgent
 from gloomberb_service import GloomberbService
 from institutional_data_service import InstitutionalDataService
 from rag_service import RAGService
+from quantitative_scoring_service import QuantitativeScoringService
 
 WATCHLIST = ["000660.KS"]
 
@@ -85,6 +86,24 @@ def _to_list_of_strings(val, default_str="None") -> list:
     return [default_str]
 
 
+def days_from_earnings_date(date_str, today=None) -> int:
+    """
+    Parses a 'YYYY-MM-DD' earnings_date string (e.g. from the Gloomberb earnings
+    channel) and returns calendar days until that date. Returns None when the date
+    is missing, unparsable, or in the past (earnings already reported).
+    """
+    if not date_str or str(date_str).strip().upper() in ("N/A", "NONE", ""):
+        return None
+    try:
+        import datetime
+        target_dt = datetime.date.fromisoformat(str(date_str)[:10])
+        now = today or datetime.date.today()
+        diff = (target_dt - now).days
+        return diff if diff >= 0 else None
+    except Exception:
+        return None
+
+
 def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, macro_data: dict = None, gloomberb_payload: dict = None) -> dict:
     if not isinstance(data, dict):
         data = {}
@@ -129,7 +148,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
 
     # Quantitative 5-Pillar Scores
     deterministic_scores = m_data.get("deterministic_5pillar_scores", {})
-    quant_score = _to_float(data.get("quant_score") or deterministic_scores.get("composite_score"), 65.0)
+    quant_score = _to_float(data.get("quant_score") or deterministic_scores.get("composite_quantitative_score"), 65.0)
 
     raw_pillars = data.get("pillar_scores") or {}
     if not isinstance(raw_pillars, dict):
@@ -151,6 +170,78 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
 
     data_completeness = _to_float(data.get("data_completeness"), 0.87)
 
+    # Reward:Risk setup geometry -- deterministic, computed from market data, not the model.
+    # Channel-anchored so the ratio varies with price position inside the 20-day range.
+    rr_info = QuantitativeScoringService.compute_channel_reward_risk(
+        m_data.get("current_price"),
+        m_data.get("atr"),
+        m_data.get("high_20d"),
+        m_data.get("low_20d"),
+        m_data.get("suggested_stop_loss"),
+        m_data.get("suggested_target_price")
+    )
+    analyst_rr_info = QuantitativeScoringService.compute_reward_risk(
+        m_data.get("current_price"),
+        m_data.get("suggested_stop_loss"),
+        m_data.get("analyst_target_price")
+    )
+    rr = rr_info.get("reward_risk_ratio")
+    breakeven = rr_info.get("breakeven_win_rate")
+    analyst_rr = analyst_rr_info.get("reward_risk_ratio")
+    dist_resistance = rr_info.get("distance_to_resistance_atr")
+
+    # Volatility risk profile -- deterministic ATR dampener, mirrors RiskAgent's HIGH threshold.
+    vol_factor = QuantitativeScoringService.compute_vol_factor(m_data.get("atr"), m_data.get("current_price"))
+    try:
+        atr_pct = round((float(m_data.get("atr") or 0.0) / float(m_data.get("current_price") or 1.0)) * 100.0, 2)
+    except (TypeError, ValueError):
+        atr_pct = 0.0
+
+    # Earnings recency -- primary source is MarketAgent's yfinance calendar; fall back to the
+    # Gloomberb earnings_date string when the calendar is unavailable.
+    days_to_earnings = m_data.get("days_to_earnings")
+    if days_to_earnings is None:
+        days_to_earnings = days_from_earnings_date(
+            gloomberb_payload.get("earnings", {}).get("earnings_date")
+        )
+
+    # Deterministic BUY gates: momentum/valuation anchors cannot override setup geometry or risk.
+    if decision == "BUY":
+        if days_to_earnings is not None and days_to_earnings <= 3:
+            decision = "HOLD"
+            note = (
+                f"BUY downgraded to HOLD: earnings report in {days_to_earnings} day(s) is a "
+                f"binary gap-risk event; do not initiate a fresh position into it."
+            )
+            if note not in key_risks:
+                key_risks.append(note)
+        elif vol_factor < 0.85:
+            decision = "HOLD"
+            note = (
+                f"BUY downgraded to HOLD: extreme volatility (ATR {atr_pct}% of price, "
+                f"vol factor {vol_factor:.2f}); composite is dampened to {quant_score}/100."
+            )
+            if note not in key_risks:
+                key_risks.append(note)
+        elif decision == "BUY" and rr is not None and rr < 1.5:
+            decision = "HOLD"
+            note = (
+                f"BUY downgraded to HOLD: reward:risk ratio {rr:.2f} below the 1.5 minimum "
+                f"(structural target ${_to_float(rr_info.get('structural_target'), 0.0):.2f} vs stop "
+                f"${_to_float(rr_info.get('structural_stop'), 0.0):.2f})."
+            )
+            if note not in key_risks:
+                key_risks.append(note)
+        elif analyst_rr is not None and analyst_rr < 1.0:
+            decision = "HOLD"
+            note = (
+                f"BUY downgraded to HOLD: Wall Street mean target "
+                f"${_to_float(m_data.get('analyst_target_price'), 0.0):.2f} is below entry "
+                f"${_to_float(m_data.get('current_price'), 0.0):.2f} (analyst RR {analyst_rr:.2f})."
+            )
+            if note not in key_risks:
+                key_risks.append(note)
+
     # Market snapshot metrics for database and outcome tracking
     entry_price = m_data.get("current_price")
     stop_loss_price = m_data.get("suggested_stop_loss")
@@ -163,7 +254,6 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     yield_spread_10y2y = macro_data.get("yield_curve_spread_10y2y")
     macro_summary = macro_data.get("summary", "")
     fear_greed_score = gloomberb_payload.get("macro_econ", {}).get("fear_greed_score")
-    days_to_earnings = m_data.get("days_to_earnings")
 
     # Summaries for backward compatibility in SQLite
     news_items = gloomberb_payload.get("news", [])
@@ -186,7 +276,16 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         "sell_score": sell_score,
         "horizon_days": horizon_days,
         "quant_score": quant_score,
+        "raw_composite": deterministic_scores.get("raw_composite"),
+        "vol_factor": vol_factor,
+        "atr_pct": atr_pct,
         "pillar_scores": pillar_scores,
+        "reward_risk_ratio": rr,
+        "breakeven_win_rate": breakeven,
+        "analyst_target_rr": analyst_rr,
+        "structural_stop_price": rr_info.get("structural_stop"),
+        "structural_target_price": rr_info.get("structural_target"),
+        "distance_to_resistance_atr": dist_resistance,
         "bull_case": bull_case,
         "bear_case": bear_case,
         "key_risks": key_risks,
@@ -230,7 +329,15 @@ def format_telegram_digest(results, model_label="Nemotron-3 Super 120B"):
         emoji = emoji_map.get(decision, "⚪")
 
         lines.append(f"{emoji} *{stock}* | *{decision}* (Conf: {confidence} | {horizon}d Horizon)")
-        lines.append(f"• *Quant Score:* `{quant_score}/100` | *Data Coverage:* `{int(completeness * 100)}%`")
+        vol_factor = item.get("vol_factor", 1.0)
+        atr_pct = item.get("atr_pct", 0.0)
+        lines.append(f"• *Quant Score:* `{quant_score}/100` | *Vol Factor:* `{vol_factor}` (ATR {atr_pct}%) | *Data Coverage:* `{int(completeness * 100)}%`")
+
+        rr = item.get("reward_risk_ratio")
+        breakeven = item.get("breakeven_win_rate")
+        if rr is not None:
+            be_str = f"{breakeven * 100:.0f}%" if isinstance(breakeven, (int, float)) else "N/A"
+            lines.append(f"• *Reward:Risk:* `{rr}` (breakeven win rate: `{be_str}`)")
         lines.append(f"• *Pillars:* Trend: {pillars.get('trend', 0)} | Sector: {pillars.get('sector', 0)} | Alpha: {pillars.get('alpha', 0)} | ValHist: {pillars.get('valuation_history', 0)} | PeerVal: {pillars.get('peer_valuation', 0)}")
         lines.append(f"• *Probabilities:* Buy: {buy_score} | Hold: {hold_score} | Sell: {sell_score}")
 

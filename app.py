@@ -164,6 +164,10 @@ with tab1:
                 cols_to_use.append("rvol_20d")
                 col_renames["rvol_20d"] = "RVOL"
 
+            if "reward_risk_ratio" in df_display.columns and df_display["reward_risk_ratio"].notna().any():
+                cols_to_use.append("reward_risk_ratio")
+                col_renames["reward_risk_ratio"] = "Reward:Risk"
+
             if "us_10y_yield" in df_display.columns and df_display["us_10y_yield"].notna().any():
                 cols_to_use.append("us_10y_yield")
                 col_renames["us_10y_yield"] = "10Y Yield"
@@ -234,7 +238,36 @@ with tab2:
             m3.metric("RSI14", f"{stock_data.get('rsi14', 'N/A')}")
             m4.metric("RVOL (20d)", f"{stock_data.get('rvol_20d', 'N/A')}x")
             m5.metric("US 10Y Yield", f"{stock_data.get('us_10y_yield', 'N/A')}%")
-            m6.metric("10Y-2Y Spread", f"{stock_data.get('yield_spread_10y2y', 'N/A')}%")
+            m6.metric("Days to Earnings", f"{stock_data.get('days_to_earnings', 'N/A')}d")
+
+            # Reward:Risk setup geometry
+            st.markdown("#### ⚖️ Reward:Risk & Setup Geometry")
+            g1, g2, g3, g4, g5 = st.columns(5)
+            g1.metric("Reward:Risk", stock_data.get('reward_risk_ratio', 'N/A'))
+            g2.metric("Breakeven Win Rate", f"{stock_data.get('breakeven_win_rate', 0) * 100:.0f}%" if stock_data.get("breakeven_win_rate") is not None else "N/A")
+            g3.metric("Wall St Target RR", stock_data.get('analyst_target_rr', 'N/A'))
+            g4.metric("Structural Stop", f"${stock_data.get('structural_stop_price', 'N/A')}")
+            g5.metric("Structural Target", f"${stock_data.get('structural_target_price', 'N/A')}")
+
+            # Volatility risk profile (deterministic ATR dampener)
+            st.markdown("#### 🎢 Volatility Risk Profile")
+            v1, v2, v3 = st.columns(3)
+            vf = stock_data.get("vol_factor") or stock_data.get("vol_factor", 1.0)
+            atr_p = stock_data.get("atr_pct")
+            v1.metric("Vol Factor", f"{vf}")
+            v2.metric("ATR (% of price)", f"{atr_p}%" if atr_p is not None else "N/A")
+            v3.metric("Raw Composite", stock_data.get('raw_composite', 'N/A'))
+
+            # Earnings calendar & mechanical gate status
+            dte = stock_data.get("days_to_earnings")
+            gate_armed = (dte is not None and dte <= 3)
+            gate_label = f"ARMED ({dte}d) -- BUY mechanically capped to HOLD" if gate_armed else (
+                f"{dte} day(s)" if dte is not None else "N/A"
+            )
+            st.markdown(
+                f"**📅 Earnings Calendar:** `{gate_label}`"
+                + (" ⚠️" if gate_armed else "")
+            )
 
             st.markdown("---")
 

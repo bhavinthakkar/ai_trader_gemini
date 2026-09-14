@@ -137,7 +137,8 @@ class MarketAgent:
                 "earnings_growth_yoy": f"{earnings_growth * 100:.1f}%" if earnings_growth else "N/A",
                 "revenue_growth_yoy": f"{rev_growth * 100:.1f}%" if rev_growth else "N/A",
                 "wall_street_consensus": recommendation_key.upper() if recommendation_key else "N/A",
-                "target_price": round(float(target_mean_price), 2) if target_mean_price else suggested_target_price
+                "target_price": round(float(target_mean_price), 2) if target_mean_price else suggested_target_price,
+                "analyst_target_price": round(float(target_mean_price), 2) if target_mean_price else None
             }
         except Exception as e:
             print(f"[MarketAgent] Error analyzing {symbol}: {e}")
