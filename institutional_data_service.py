@@ -1,11 +1,42 @@
 import os
 import json
+import datetime
 import requests
 import xml.etree.ElementTree as ET
 import yfinance as yf
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def _parse_rss_pubdate(pub_elem) -> str:
+    """RSS <pubDate> (RFC-822, e.g. 'Mon, 14 Sep 2026 09:00:00 GMT') -> YYYY-MM-DD, else None."""
+    if pub_elem is None or not getattr(pub_elem, "text", None):
+        return None
+    from email.utils import parsedate_to_datetime
+    try:
+        return parsedate_to_datetime(pub_elem.text).strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+
+def _parse_news_timestamp(ts) -> str:
+    """Unix timestamp (seconds) -> YYYY-MM-DD, else None."""
+    if not ts:
+        return None
+    try:
+        return datetime.datetime.fromtimestamp(int(ts)).strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+
+def _yf_news_pub_date(item) -> str:
+    """yfinance news item publication date; prefers provider_publish_time (top-level or content)."""
+    ts = item.get("provider_publish_time")
+    if not ts and isinstance(item.get("content"), dict):
+        ts = item["content"].get("provider_publish_time")
+    return _parse_news_timestamp(ts)
+
 
 class InstitutionalDataService:
     """
@@ -71,6 +102,7 @@ class InstitutionalDataService:
                 for item in root.findall('.//item')[:3]:
                     title = item.find('title').text if item.find('title') is not None else ""
                     desc = item.find('description').text if item.find('description') is not None else ""
+                    pub_date = _parse_rss_pubdate(item.find('pubDate')) or today_str
                     if title and symbol.upper() in title.upper():
                         items.append({
                             "title": title,
@@ -80,7 +112,7 @@ class InstitutionalDataService:
                             "document_type": "IRRelease",
                             "reliability": 0.95,
                             "importance": 0.85,
-                            "published_at": today_str
+                            "published_at": pub_date
                         })
         except Exception:
             pass
@@ -100,7 +132,7 @@ class InstitutionalDataService:
                         "document_type": "IRRelease",
                         "reliability": 0.95,
                         "importance": 0.85,
-                        "published_at": today_str
+                        "published_at": _yf_news_pub_date(n) or today_str
                     })
         except Exception:
             pass
@@ -180,7 +212,7 @@ class InstitutionalDataService:
                         "document_type": "PressRelease",
                         "reliability": 0.95,
                         "importance": 0.80,
-                        "published_at": today_str
+                        "published_at": _yf_news_pub_date(item) or today_str
                     })
         except Exception:
             pass
@@ -239,7 +271,7 @@ class InstitutionalDataService:
                         "document_type": "ReputableNews",
                         "reliability": rel_score,
                         "importance": 0.75,
-                        "published_at": today_str
+                        "published_at": _yf_news_pub_date(item) or today_str
                     })
         except Exception:
             pass
