@@ -205,42 +205,75 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
             gloomberb_payload.get("earnings", {}).get("earnings_date")
         )
 
+    # Decision origin: a trade's edge must come from price structure + composite + setup geometry,
+    # never from a headline. News/macro/geopolitical events can confirm or veto, but cannot initiate.
+    primary_driver = str(data.get("primary_driver") or "QUANT_STRUCTURE").upper()
+    gates_applied = False
+
+    def _append_risk(note):
+        if note not in key_risks:
+            key_risks.append(note)
+
+    if decision in ("BUY", "SELL") and primary_driver in ("NEWS_CATALYST", "MACRO_EVENT"):
+        decision = "HOLD"
+        gates_applied = True
+        _append_risk(
+            f"{'BUY' if decision == 'HOLD' and buy_score > sell_score else 'SELL'} capped to HOLD: "
+            f"primary_driver '{primary_driver}' is an external event; news/geopolitical/macro "
+            f"headlines can confirm or veto but cannot initiate a directional trade. "
+            f"Re-anchor the trade on price structure + composite + setup geometry."
+        )
+
     # Deterministic BUY gates: momentum/valuation anchors cannot override setup geometry or risk.
     if decision == "BUY":
         if days_to_earnings is not None and days_to_earnings <= 3:
             decision = "HOLD"
+            gates_applied = True
             note = (
                 f"BUY downgraded to HOLD: earnings report in {days_to_earnings} day(s) is a "
                 f"binary gap-risk event; do not initiate a fresh position into it."
             )
-            if note not in key_risks:
-                key_risks.append(note)
+            _append_risk(note)
         elif vol_factor < 0.85:
             decision = "HOLD"
+            gates_applied = True
             note = (
                 f"BUY downgraded to HOLD: extreme volatility (ATR {atr_pct}% of price, "
                 f"vol factor {vol_factor:.2f}); composite is dampened to {quant_score}/100."
             )
-            if note not in key_risks:
-                key_risks.append(note)
+            _append_risk(note)
         elif decision == "BUY" and rr is not None and rr < 1.5:
             decision = "HOLD"
+            gates_applied = True
             note = (
                 f"BUY downgraded to HOLD: reward:risk ratio {rr:.2f} below the 1.5 minimum "
                 f"(structural target ${_to_float(rr_info.get('structural_target'), 0.0):.2f} vs stop "
                 f"${_to_float(rr_info.get('structural_stop'), 0.0):.2f})."
             )
-            if note not in key_risks:
-                key_risks.append(note)
+            _append_risk(note)
         elif analyst_rr is not None and analyst_rr < 1.0:
             decision = "HOLD"
+            gates_applied = True
             note = (
                 f"BUY downgraded to HOLD: Wall Street mean target "
                 f"${_to_float(m_data.get('analyst_target_price'), 0.0):.2f} is below entry "
                 f"${_to_float(m_data.get('current_price'), 0.0):.2f} (analyst RR {analyst_rr:.2f})."
             )
-            if note not in key_risks:
-                key_risks.append(note)
+            _append_risk(note)
+
+    # Decision-probability consistency (Point 4): unless a hard gate overrode the model, the decision
+    # must equal the argmax of its own buy/hold/sell probabilities. A unique max is required; ties keep
+    # the model's stated decision.
+    if not gates_applied:
+        prob_map = {"BUY": buy_score, "HOLD": hold_score, "SELL": sell_score}
+        top_score = max(prob_map.values())
+        top_choices = [k for k, v in prob_map.items() if v == top_score]
+        if len(top_choices) == 1 and top_choices[0] != decision:
+            _append_risk(
+                f"Decision realigned: probabilities imply {top_choices[0]} (buy {buy_score}/hold "
+                f"{hold_score}/sell {sell_score}) but model stated {decision}."
+            )
+            decision = top_choices[0]
 
     # Market snapshot metrics for database and outcome tracking
     entry_price = m_data.get("current_price")
@@ -279,6 +312,9 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         "raw_composite": deterministic_scores.get("raw_composite"),
         "vol_factor": vol_factor,
         "atr_pct": atr_pct,
+        "primary_driver": primary_driver,
+        "falsification_bull": str(data.get("falsification_bull") or ""),
+        "falsification_bear": str(data.get("falsification_bear") or ""),
         "pillar_scores": pillar_scores,
         "reward_risk_ratio": rr,
         "breakeven_win_rate": breakeven,
@@ -340,6 +376,9 @@ def format_telegram_digest(results, model_label="Nemotron-3 Super 120B"):
             lines.append(f"• *Reward:Risk:* `{rr}` (breakeven win rate: `{be_str}`)")
         lines.append(f"• *Pillars:* Trend: {pillars.get('trend', 0)} | Sector: {pillars.get('sector', 0)} | Alpha: {pillars.get('alpha', 0)} | ValHist: {pillars.get('valuation_history', 0)} | PeerVal: {pillars.get('peer_valuation', 0)}")
         lines.append(f"• *Probabilities:* Buy: {buy_score} | Hold: {hold_score} | Sell: {sell_score}")
+        driver = item.get("primary_driver")
+        if driver and str(driver).strip() and str(driver).strip().upper() != "NONE":
+            lines.append(f"• *Primary Driver:* `{driver}`")
 
         bull_items = item.get("bull_case", [])
         if bull_items:

@@ -130,6 +130,23 @@ BINARY EVENT-RISK & IMPLIED VOLATILITY MANDATE:
   - Backward-looking technical trend momentum (Trend Score = 100) does NOT guarantee post-earnings continuation and can reverse instantly.
   - If your quant analysis strongly disagrees with the mechanical hold, document why in key_risks and retain the HOLD; do not attempt to circumvent the earnings gate.
 
+DECISION ORIGIN MANDATE:
+- Classify primary_driver BEFORE deciding. A trade's edge must come from PRICE STRUCTURE + QUANT COMPOSITE + SETUP GEOMETRY, not from a headline.
+- primary_driver values: "QUANT_STRUCTURE" (price/technical/setup edge), "FUNDAMENTAL" (valuation/multiples/insider-13F edge), "NEWS_CATALYST", "MACRO_EVENT" (geopolitical, rates, macro regime), "EARNINGS_CATALYST".
+- News, sentiment, and geopolitical/macro events CANNOT independently initiate a directional BUY or SELL. They may only:
+  1. CONFIRM an already-valid structure/fundamental decision (raise confidence, never flip direction).
+  2. VETO or weaken it (you may downgrade a BUY to HOLD on a material company-specific adverse event).
+  3. Reduce confidence and add to key_risks.
+- If your stated decision is driven primarily by a headline or a macro/geopolitical event, your primary_driver MUST be "NEWS_CATALYST" or "MACRO_EVENT" -- and the decision will be mechanically capped to HOLD.
+- Geopolitical/macro events are NOT a Sell signal for a structurally sound name; they are risk flags.
+
+FALSIFICATION & PRE-MORTEM MANDATE:
+- Before finalizing, construct the strongest possible argument AGAINST your own decision and write it into falsification_bull / falsification_bear (the fields are named from the FINAL decision's perspective -- you reject the case that you are NOT taking).
+  - If decision = BUY: falsification_bear = the single strongest reason a fresh BUY here would fail and the exact price/event/condition that invalidates the thesis.
+  - If decision = SELL: falsification_bull = the strongest reason a SELL would fail and the exact trigger that would nullify it.
+  - If decision = HOLD: populate BOTH.
+- A thesis you cannot articulate a falsification condition for is not a thesis -- degrade confidence accordingly.
+
 CROSS-PILLAR CONTRADICTION & DIVERGENCE RESOLUTION:
 - Actively resolve divergences across pillars and evidence:
   - Technical Trend vs. Peer Valuation: If Trend is high (>80) but Peer Valuation is low (<55), explain whether multiple compression threatens technical momentum.
@@ -148,12 +165,15 @@ Schema:
 {
   "stock": "Ticker Symbol",
   "decision": "BUY|SELL|HOLD",
+  "primary_driver": "QUANT_STRUCTURE|FUNDAMENTAL|NEWS_CATALYST|MACRO_EVENT|EARNINGS_CATALYST",
   "confidence": 0.70,
   "buy_score": 0.20,
   "hold_score": 0.65,
   "sell_score": 0.15,
   "horizon_days": 10,
   "quant_score": 64.8,
+  "falsification_bull": "Strongest reason the SELL/aversion case is wrong + exact trigger that nullifies it",
+  "falsification_bear": "Strongest reason the BUY case fails + exact price/event condition that invalidates the thesis",
   "pillar_scores": {
     "trend": 55.36,
     "sector": 26.25,

@@ -70,7 +70,10 @@ def init_db(db_path=DB_PATH):
             "structural_stop_price": "REAL",
             "structural_target_price": "REAL",
             "vol_factor": "REAL",
-            "atr_pct": "REAL"
+            "atr_pct": "REAL",
+            "primary_driver": "TEXT",
+            "falsification_bull": "TEXT",
+            "falsification_bear": "TEXT"
         }
 
         cursor.execute("PRAGMA table_info(signals);")
@@ -182,6 +185,9 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
             structural_target_price = _to_float(item.get("structural_target_price"))
             vol_factor = _to_float(item.get("vol_factor"), 1.0)
             atr_pct = _to_float(item.get("atr_pct"), 0.0)
+            primary_driver = _ensure_str(item.get("primary_driver"), "")
+            falsification_bull = _ensure_str(item.get("falsification_bull"), "")
+            falsification_bear = _ensure_str(item.get("falsification_bear"), "")
 
             # Backward-compatible text summaries
             reason = _ensure_str(item.get("reason") or bull_case)
@@ -204,8 +210,8 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                     days_to_earnings, bull_case, bear_case, key_risks, missing_information,
                     reward_risk_ratio, breakeven_win_rate, analyst_target_rr,
                     structural_stop_price, structural_target_price,
-                    vol_factor, atr_pct
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    vol_factor, atr_pct, primary_driver, falsification_bull, falsification_bear
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 timestamp, stock, decision, confidence, reason, inst_data, macro_data, news,
                 bank_coverage, risk_info, pe_peg, model_used, raw_json,
@@ -216,7 +222,7 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                 days_to_earnings, bull_case, bear_case, key_risks, missing_info,
                 reward_risk_ratio, breakeven_win_rate, analyst_target_rr,
                 structural_stop_price, structural_target_price,
-                vol_factor, atr_pct
+                vol_factor, atr_pct, primary_driver, falsification_bull, falsification_bear
             ))
         conn.commit()
     print(f"[DB] Successfully saved {len(results)} analysis records to database.")

@@ -269,6 +269,18 @@ with tab2:
                 + (" ⚠️" if gate_armed else "")
             )
 
+            # Decision origin & falsification
+            driver = stock_data.get("primary_driver") or "QUANT_STRUCTURE"
+            fb = stock_data.get("falsification_bear")
+            fbu = stock_data.get("falsification_bull")
+            if driver or fb or fbu:
+                st.markdown("#### 🧭 Decision Origin & Falsification")
+                st.metric("Primary Driver", f"`{driver}`")
+                if fbu:
+                    st.markdown(f"**Falsifies buy-side:** _{fbu}_")
+                if fb:
+                    st.markdown(f"**Falsifies bear-side:** _{fb}_")
+
             st.markdown("---")
 
             col_left, col_right = st.columns(2)
