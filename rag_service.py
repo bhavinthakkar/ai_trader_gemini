@@ -161,6 +161,13 @@ DEPTH OF REASONING & CHAIN-OF-THOUGHT MANDATE:
 
 Output MUST be a valid JSON object matching the exact requested schema.
 
+=== STRICT OUTPUT CONTRACT ===
+- buy_score / hold_score / sell_score must each be a number in [0,1] and must SUM to approximately 1.0 (within 0.05) -- a BUY requires buy_score to actually be the probability mass.
+- data_completeness is computed DETERMINISTICALLY by the system from live provider availability; your estimate is recorded for reference only and never governs the signal. Report it honestly; inflating it changes nothing.
+- A directional BUY can only be certified if the deterministic criteria hold (quant composite >= 70, fresh valid market data, data coverage >= 80%, reward:risk >= 1.5, liquid market). If you cannot honestly support a BUY, return "HOLD".
+- The system may issue an explicit no_trade_reason code on a forced downgrade: INSUFFICIENT_EVIDENCE, EARNINGS_BLACKOUT, LOW_LIQUIDITY, RR_TOO_LOW, SCHEMA_INVALID.
+- Output must parse as valid JSON with exactly the keys above; schema violations trigger an automatic corrective retry then a deterministic HOLD.
+
 Schema:
 {
   "stock": "Ticker Symbol",

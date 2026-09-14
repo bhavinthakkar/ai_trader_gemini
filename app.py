@@ -209,6 +209,9 @@ with tab2:
                 badge_class = "badge-buy" if dec == "BUY" else ("badge-sell" if dec == "SELL" else "badge-hold")
                 st.markdown(f"### **{stock_data['symbol']}**")
                 st.markdown(f"**Decision:** <span class='{badge_class}'>{dec}</span>", unsafe_allow_html=True)
+                ntr = stock_data.get("no_trade_reason")
+                if ntr:
+                    st.markdown(f"**No-Trade Reason:** `{ntr}`")
             with c2:
                 conf = stock_data.get("confidence", 0.0)
                 st.metric("Model Confidence", f"{conf * 100:.0f}%" if conf else "N/A")

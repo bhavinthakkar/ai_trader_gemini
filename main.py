@@ -19,6 +19,7 @@ from gloomberb_service import GloomberbService
 from institutional_data_service import InstitutionalDataService
 from rag_service import RAGService
 from quantitative_scoring_service import QuantitativeScoringService
+from signal_schema import validate_signal_json
 
 WATCHLIST = ["000660.KS"]
 
@@ -182,22 +183,34 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     except (ValueError, TypeError):
         horizon_days = 10
 
-    # Quantitative 5-Pillar Scores. The deterministic composite computed from real market data is
-    # authoritative; the model's echoed quant_score is only a fallback when deterministics are absent.
+    # Quantitative 5-Pillar Scores. The deterministic composite calculated from real market data is
+    # authoritative for decisions and confidence. The model's echoed values are stored separately
+    # (model_quant_score / model_pillar_scores) for reference only and never drive the signal.
     deterministic_scores = m_data.get("deterministic_5pillar_scores", {})
-    quant_score = _to_float(deterministic_scores.get("composite_quantitative_score") or data.get("quant_score"), 65.0)
+    det_quant = deterministic_scores.get("composite_quantitative_score")
+    quant_score = _to_float(det_quant if det_quant is not None else data.get("quant_score"), None)
+    if quant_score is None:
+        quant_score = 50.0  # neutral fallback for display only; BUY gate uses the deterministic composite
+    model_quant_score = _to_float(data.get("quant_score"), None)
 
     raw_pillars = data.get("pillar_scores") or {}
     if not isinstance(raw_pillars, dict):
         raw_pillars = {}
 
-    pillar_scores = {
-        "trend": _to_float(raw_pillars.get("trend") or deterministic_scores.get("trend_score"), 50.0),
-        "sector": _to_float(raw_pillars.get("sector") or deterministic_scores.get("sector_relative_score"), 50.0),
-        "alpha": _to_float(raw_pillars.get("alpha") or deterministic_scores.get("market_alpha_score"), 50.0),
-        "valuation_history": _to_float(raw_pillars.get("valuation_history") or deterministic_scores.get("valuation_history_score"), 50.0),
-        "peer_valuation": _to_float(raw_pillars.get("peer_valuation") or deterministic_scores.get("peer_valuation_score"), 50.0)
-    }
+    pillar_scores = {}
+    model_pillar_scores = {}
+    for det_key, model_key, out_key in (
+        ("trend_score", "trend", "trend"),
+        ("sector_relative_score", "sector", "sector"),
+        ("market_alpha_score", "alpha", "alpha"),
+        ("valuation_history_score", "valuation_history", "valuation_history"),
+        ("peer_valuation_score", "peer_valuation", "peer_valuation"),
+    ):
+        det_val = deterministic_scores.get(det_key)
+        # Deterministic pillar wins whenever it was computed; the model value is only a fallback
+        # when the deterministic score is absent (e.g., standalone normalize calls).
+        pillar_scores[out_key] = _to_float(det_val if det_val is not None else raw_pillars.get(model_key), 50.0)
+        model_pillar_scores[out_key] = _to_float(raw_pillars.get(model_key), None)
 
     # Array Fields
     bull_case = _to_list_of_strings(data.get("bull_case") or data.get("reason"), "Bullish trade setup and vector RAG catalysts evaluated.")
@@ -205,12 +218,24 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     key_risks = _to_list_of_strings(data.get("key_risks") or data.get("key_risk"), "Volatile market conditions and stop-loss boundaries.")
     missing_info = _to_list_of_strings(data.get("missing_information"), "None")
 
-    data_completeness = _to_float(data.get("data_completeness"), 0.87)
+    # Data completeness is computed DETERMINISTICALLY by the pipeline from live provider
+    # availability (QuantitativeScoringService.compute_data_coverage) and attached to
+    # m_data["deterministic_data_completeness"]. The model's stated value is kept only as a
+    # reference (model_data_completeness); an absent provider set is treated as 0.0, never
+    # invented (the old 0.87 default could let a malformed BUY pass the coverage bar).
+    model_data_completeness = _to_float(data.get("data_completeness"), None)
+    deterministic_completeness = _to_float(m_data.get("deterministic_data_completeness"), None)
+    if deterministic_completeness is not None:
+        data_completeness = deterministic_completeness
+    else:
+        data_completeness = _to_float(model_data_completeness, 0.0)
 
     # Mechanistic confidence: a function of composite decisiveness, pillar agreement,
-    # and data completeness -- NOT the model's stated number. Deterministic pillars take
-    # priority over the model's echoed pillars. A HOLD never carries high conviction, so cap it.
-    conf_composite = (deterministic_scores.get("composite_quantitative_score") or quant_score or 50.0)
+    # and data completeness -- NOT the model's stated number. Deterministic pillars are
+    # authoritative for confidence. A HOLD never carries high conviction, so cap it.
+    conf_composite = deterministic_scores.get("composite_quantitative_score")
+    if conf_composite is None:
+        conf_composite = quant_score or 50.0
     confidence = gated_confidence(conf_composite, pillar_scores, data_completeness)
     if decision == "HOLD":
         confidence = round(min(confidence, 0.60), 2)
@@ -259,9 +284,41 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         if note not in key_risks:
             key_risks.append(note)
 
+    # NO_TRADE reason codes: set whenever a deterministic gate vetoes a directional call.
+    # None means the decision is the model's own signal, not a forced downgrade.
+    no_trade_reason = None
+
+    # Defense-in-depth: a directional call needs real probabilities. If none were provided
+    # (missing/non-numeric/all-zero), the model cannot initiate a BUY/SELL -- degrade to HOLD.
+    # Schema validation rejects this upstream in the pipeline; this catches any other path.
+    if decision != "HOLD":
+        prob_fields_present = all(
+            data.get(k) is not None and isinstance(data.get(k), (int, float))
+            for k in ("buy_score", "hold_score", "sell_score")
+        )
+        if not prob_fields_present or (buy_score == 0.0 and hold_score == 0.0 and sell_score == 0.0):
+            decision = "HOLD"
+            gates_applied = True
+            no_trade_reason = "INSUFFICIENT_EVIDENCE"
+            _append_risk(
+                "Directional decision downgraded to HOLD: no valid buy/hold/sell probabilities were provided."
+            )
+
+    # Deterministic liquidity bar (BUY-only): a long needs tradeable turnover. RVOL below 0.5x
+    # or 20d avg dollar volume below $1M means entries/exits are unreliable -- veto the BUY.
+    LIQUIDITY_MIN_RVOL_20D = 0.5
+    LIQUIDITY_MIN_AVG_DOLLAR_VOL_20D = 1_000_000.0
+    rvol_20d_val = _to_float(m_data.get("rvol_20d"), None)
+    avg_dollar_vol_20d_val = _to_float(m_data.get("avg_dollar_vol_20d"), None)
+    liquidity_ok = (
+        (rvol_20d_val is None or rvol_20d_val >= LIQUIDITY_MIN_RVOL_20D)
+        and (avg_dollar_vol_20d_val is None or avg_dollar_vol_20d_val >= LIQUIDITY_MIN_AVG_DOLLAR_VOL_20D)
+    )
+
     if decision in ("BUY", "SELL") and primary_driver in ("NEWS_CATALYST", "MACRO_EVENT"):
         decision = "HOLD"
         gates_applied = True
+        no_trade_reason = "INSUFFICIENT_EVIDENCE"
         _append_risk(
             f"{'BUY' if decision == 'HOLD' and buy_score > sell_score else 'SELL'} capped to HOLD: "
             f"primary_driver '{primary_driver}' is an external event; news/geopolitical/macro "
@@ -323,12 +380,16 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         if gate_reasons:
             decision = "HOLD"
             gates_applied = True
+            no_trade_reason = (
+                "RR_TOO_LOW" if any("reward:risk" in r for r in gate_reasons) else "INSUFFICIENT_EVIDENCE"
+            )
             _append_risk(
                 "BUY downgraded to HOLD (deterministic BUY eligibility): " + "; ".join(gate_reasons) + "."
             )
         elif days_to_earnings is not None and days_to_earnings <= 3:
             decision = "HOLD"
             gates_applied = True
+            no_trade_reason = "EARNINGS_BLACKOUT"
             note = (
                 f"BUY downgraded to HOLD: earnings report in {days_to_earnings} day(s) is a "
                 f"binary gap-risk event; do not initiate a fresh position into it."
@@ -337,14 +398,29 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         elif vol_factor < 0.85:
             decision = "HOLD"
             gates_applied = True
+            no_trade_reason = "INSUFFICIENT_EVIDENCE"
             note = (
                 f"BUY downgraded to HOLD: extreme volatility (ATR {atr_pct}% of price, "
                 f"vol factor {vol_factor:.2f}); composite is dampened to {quant_score}/100."
             )
             _append_risk(note)
+        elif not liquidity_ok:
+            decision = "HOLD"
+            gates_applied = True
+            no_trade_reason = "LOW_LIQUIDITY"
+            note = (
+                f"BUY downgraded to HOLD: insufficient liquidity "
+                f"(RVOL {rvol_20d_val if rvol_20d_val is not None else 'N/A'}x, "
+                f"20d avg dollar volume "
+                f"${avg_dollar_vol_20d_val if avg_dollar_vol_20d_val is not None else 'N/A'}); "
+                f"entries/exits unreliable below "
+                f"{LIQUIDITY_MIN_RVOL_20D}x RVOL / ${LIQUIDITY_MIN_AVG_DOLLAR_VOL_20D / 1_000_000:.0f}M."
+            )
+            _append_risk(note)
         elif analyst_rr is not None and analyst_rr < 1.0:
             decision = "HOLD"
             gates_applied = True
+            no_trade_reason = "INSUFFICIENT_EVIDENCE"
             note = (
                 f"BUY downgraded to HOLD: Wall Street mean target "
                 f"${_to_float(m_data.get('analyst_target_price'), 0.0):.2f} is below entry "
@@ -405,6 +481,10 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         "sell_score": sell_score,
         "horizon_days": horizon_days,
         "quant_score": quant_score,
+        "model_quant_score": model_quant_score,
+        "no_trade_reason": no_trade_reason,
+        "deterministic_data_completeness": deterministic_completeness,
+        "model_data_completeness": model_data_completeness,
         "raw_composite": deterministic_scores.get("raw_composite"),
         "vol_factor": vol_factor,
         "atr_pct": atr_pct,
@@ -412,6 +492,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         "falsification_bull": str(data.get("falsification_bull") or ""),
         "falsification_bear": str(data.get("falsification_bear") or ""),
         "pillar_scores": pillar_scores,
+        "model_pillar_scores": model_pillar_scores,
         "reward_risk_ratio": rr,
         "breakeven_win_rate": breakeven,
         "analyst_target_rr": analyst_rr,
@@ -461,6 +542,9 @@ def format_telegram_digest(results, model_label="Nemotron-3 Super 120B"):
         emoji = emoji_map.get(decision, "⚪")
 
         lines.append(f"{emoji} *{stock}* | *{decision}* (Conf: {confidence} | {horizon}d Horizon)")
+        no_trade_reason = item.get("no_trade_reason")
+        if no_trade_reason:
+            lines.append(f"• *No-Trade:* `{no_trade_reason}`")
         vol_factor = item.get("vol_factor", 1.0)
         atr_pct = item.get("atr_pct", 0.0)
         lines.append(f"• *Quant Score:* `{quant_score}/100` | *Vol Factor:* `{vol_factor}` (ATR {atr_pct}%) | *Data Coverage:* `{int(completeness * 100)}%`")
@@ -691,6 +775,11 @@ def main():
             m_data["deterministic_5pillar_scores"] = QuantitativeScoringService().compute_5pillar_scores(
                 m_data, gloomberb_payload, gloomberb_payload.get("sector_benchmark", {})
             )
+            # Deterministic data completeness: computed from live provider availability once.
+            # The LLM's own claim (model_data_completeness) is stored separately and never authoritative.
+            m_data["deterministic_data_completeness"] = QuantitativeScoringService.compute_data_coverage(
+                m_data, macro_data, gloomberb_payload, institutional_payload
+            )
 
         # 6. Model Reasoning Core & Market Analysis
         print(f"[{model_label}] Executing market analysis for {symbol}...")
@@ -712,16 +801,85 @@ def main():
             elif isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], dict):
                 res_obj = parsed[0]
 
+            schema_failed = False
             if res_obj:
-                normalized_obj = normalize_master_trader_json(
-                    res_obj,
-                    symbol,
-                    m_data=m_data,
-                    macro_data=macro_data,
-                    gloomberb_payload=gloomberb_payload
-                )
+                validated, errors = validate_signal_json(res_obj)
+
+                # One constrained corrective retry on strict schema violations.
+                if errors:
+                    print(f"[{model_label}] Schema validation failed for {symbol}; issuing one corrective retry...")
+                    retry_prompt = (
+                        f"{context['user_prompt']}\n\n"
+                        "=== SCHEMA VALIDATION FAILED -- RESUBMIT ONLY THE FIXED JSON ===\n"
+                        "Your previous response failed strict schema validation. Correct EVERY "
+                        "violation below and return ONLY a single valid JSON object with the exact "
+                        "same golden keys (decision, primary_driver, buy_score, hold_score, "
+                        "sell_score, horizon_days, quant_score, pillar_scores, data_completeness, "
+                        "falsification_bull, falsification_bear, bull_case, bear_case, key_risks, "
+                        "missing_information). buy_score/hold_score/sell_score must each be in "
+                        "[0,1] and sum to ~1.0.\n"
+                        f"Violations:\n- " + "\n- ".join(errors) + "\n"
+                    )
+                    retry_content = query_llm(
+                        system_instruction=context["system_instruction"],
+                        user_prompt=retry_prompt,
+                        model_choice=model_choice,
+                        temperature=args.temperature,
+                        reasoning_budget=args.reasoning_budget,
+                        reasoning_effort=args.reasoning_effort
+                    )
+                    retry_parsed = extract_json(retry_content)
+                    retry_obj = None
+                    if isinstance(retry_parsed, dict):
+                        retry_obj = retry_parsed
+                    elif isinstance(retry_parsed, list) and len(retry_parsed) > 0 and isinstance(retry_parsed[0], dict):
+                        retry_obj = retry_parsed[0]
+                    if retry_obj:
+                        validated, errors = validate_signal_json(retry_obj)
+
+                if not errors:
+                    normalized_obj = normalize_master_trader_json(
+                        validated,
+                        symbol,
+                        m_data=m_data,
+                        macro_data=macro_data,
+                        gloomberb_payload=gloomberb_payload
+                    )
+                else:
+                    # Audit path: a still-invalid signal never passes through normalize unvalidated.
+                    # Record a deterministic HOLD so the event is visible, not silently dropped.
+                    schema_failed = True
+                    fallback_res = {
+                        "decision": "HOLD",
+                        "primary_driver": "QUANT_STRUCTURE",
+                        "buy_score": 0.0,
+                        "hold_score": 1.0,
+                        "sell_score": 0.0,
+                        "horizon_days": 10,
+                        "quant_score": None,
+                        "data_completeness": None,
+                        "missing_information": [
+                            "Model output failed strict schema validation; reverted to HOLD."
+                        ],
+                        "key_risks": [
+                            "Schema validation failed after one corrective retry: " + "; ".join(errors)
+                        ],
+                    }
+                    normalized_obj = normalize_master_trader_json(
+                        fallback_res,
+                        symbol,
+                        m_data=m_data,
+                        macro_data=macro_data,
+                        gloomberb_payload=gloomberb_payload
+                    )
+                    normalized_obj["no_trade_reason"] = "SCHEMA_INVALID"
+                    normalized_obj["decision"] = "HOLD"
+
                 all_results.append(normalized_obj)
-                print(f"[{model_label}] Final Decision for {symbol}: {normalized_obj.get('decision')} (Conf: {normalized_obj.get('confidence')})")
+                if schema_failed:
+                    print(f"[{model_label}] Schema failure for {symbol}; recorded deterministic HOLD (SCHEMA_INVALID).")
+                else:
+                    print(f"[{model_label}] Final Decision for {symbol}: {normalized_obj.get('decision')} (Conf: {normalized_obj.get('confidence')})")
             else:
                 print(f"Warning: Model returned empty output for {symbol}.")
 

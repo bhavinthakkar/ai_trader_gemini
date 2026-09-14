@@ -360,3 +360,146 @@ class QuantitativeScoringService:
             "composite_quantitative_score": composite,
             "quant_signal": signal
         }
+
+    @staticmethod
+    def _looks_real(val) -> bool:
+        """True only when a value is a genuine number (not 'N/A', '-', empty, 0 sentinel)."""
+        if val is None:
+            return False
+        if isinstance(val, bool):
+            return False
+        try:
+            f = float(val)
+        except (TypeError, ValueError):
+            return False
+        return f != 0.0
+
+    @staticmethod
+    def _source_said(source_status, channel: str, counts) -> bool:
+        """
+        Check a gloomberb `data_source_status` style dict for a channel availability.
+        `counts` is one of source_status's keys containing fetched items.
+        """
+        ch = (source_status or {}).get(channel) or {}
+        if ch.get("available") is False:
+            return False
+        if ch.get("status") == "unavailable":
+            return False
+        if ch.get("source_unavailable") is True:
+            return False
+        if counts and ch.get("fetch_count", 0) == 0:
+            return False
+        return True
+
+    @staticmethod
+    def _items_are_fresh(items, max_days: int, date_key: str) -> bool:
+        if not items:
+            return False
+        from datetime import datetime
+        now = datetime.utcnow()
+        for item in items:
+            stamp = (item or {}).get(date_key)
+            if not stamp:
+                continue
+            try:
+                ts = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=None)
+                ref = now.replace(tzinfo=None)
+                age = (ref - ts.replace(tzinfo=None)).days
+                if 0 <= age <= max_days:
+                    return True
+            except (TypeError, ValueError):
+                continue
+        return False
+
+    @staticmethod
+    def compute_data_coverage(m_data=None, macro_data=None, gloomberb_payload=None, institutional_payload=None) -> float:
+        """
+        Deterministic data coverage (0..1) that the system computes itself, once, from
+        live provider availability -- never echoed by the model.
+
+        Each provider earns its full weight only when it actually returned a real,
+        (where relevant) timely payload:
+          technical (price/ATR/stop/target fresh)  0.25
+          macro snapshot present                    0.10
+          news channel available + fresh            0.10
+          SEC filings channel available              0.10
+          earnings-call/schedule available           0.05
+          fundamentals financials real               0.10
+          analyst consensus present                  0.10
+          institutional ownership sources (weighted) 0.20
+                                                     1.00
+
+        Everything that is missing is simply dropped from the numerator, so missing
+        providers lower coverage instead of inflating it.
+        """
+        m_data = m_data or {}
+        macro_data = macro_data or {}
+        gloomberb_payload = gloomberb_payload or {}
+        institutional_payload = institutional_payload or {}
+
+        try:
+            price = float(m_data.get("current_price") or 0.0)
+            atr = float(m_data.get("atr") or 0.0)
+            stop = float(m_data.get("suggested_stop_loss") or 0.0)
+            target = float(m_data.get("suggested_target_price") or m_data.get("target_price") or 0.0)
+            tech_ok = price > 0.0 and atr > 0.0 and stop > 0.0 and target > 0.0 \
+                and (m_data.get("rsi14") is not None or m_data.get("rvol_20d") is not None)
+        except (TypeError, ValueError):
+            tech_ok = False
+
+        macro_ok = bool(macro_data)
+
+        src_status = gloomberb_payload.get("data_source_status") or {}
+        news_ok = QuantitativeScoringService._source_said(
+            src_status, "news", ["fetch_count"])
+        if news_ok:
+            news_ok = QuantitativeScoringService._items_are_fresh(
+                gloomberb_payload.get("news") or [], max_days=7, date_key="published_at")
+
+        filings_ok = QuantitativeScoringService._source_said(
+            src_status, "filings", ["fetch_count"])
+
+        earnings_ok = False
+        earnings_dt = (gloomberb_payload.get("earnings") or {}).get("earnings_date")
+        if earnings_dt is not None and str(earnings_dt).strip().upper() not in ("N/A", "-", ""):
+            earnings_ok = True
+
+        fin_ok = False
+        fin_pillars = (gloomberb_payload.get("financials") or {}).get("key_ratios") or {}
+        if isinstance(fin_pillars, dict) and any(
+            QuantitativeScoringService._looks_real(v) for v in fin_pillars.values()):
+            fin_ok = True
+
+        analyst_ok = QuantitativeScoringService._looks_real(
+            (gloomberb_payload.get("analyst_ratings") or {}).get("mean_target_price"))
+
+        # Institutional ownership via weighted source_status channels.
+        inst_status = institutional_payload.get("source_status") or {}
+        inst_channels = {
+            "sec_edgar_direct": 0.40,
+            "reputable_news": 0.30,
+            "investor_relations": 0.15,
+            "official_press_releases": 0.10,
+            "earnings_calls": 0.05,
+        }
+        inst_ok = 0.0
+        for channel, weight in inst_channels.items():
+            ch = inst_status.get(channel) or {}
+            available = ch.get("available", False) and ch.get("source_unavailable", False) is False
+            if available:
+                inst_ok += weight
+
+        contributions = [
+            (0.25, tech_ok),
+            (0.10, macro_ok),
+            (0.10, news_ok),
+            (0.10, filings_ok),
+            (0.05, earnings_ok),
+            (0.10, fin_ok),
+            (0.10, analyst_ok),
+            (0.20, inst_ok),
+        ]
+        numerator = sum(w * float(ok) for w, ok in contributions)
+        return round(min(1.0, numerator), 3)
