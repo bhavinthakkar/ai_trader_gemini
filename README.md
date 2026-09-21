@@ -260,6 +260,12 @@ To ensure strict system reliability and guarantee that raw LLM text is never for
 ./venv/bin/python main.py twostage NVDA
 ```
 
+### **Run Portfolio Risk Review (Investment-Committee Memo)**
+```bash
+./venv/bin/python main.py portfolio gemini
+```
+Runs a portfolio-level risk review using the holdings from the Gloomberb CLI portfolio list. It injects the live Fed/rate macro outlook (FRED yield curve, real yields, fed funds rate, yield velocity, CFTC COT — the same `interest_rate_outlook` block the single-stock workflow uses) into the portfolio payload, then analyzes it with the `PORTFOLIO_SYSTEM_INSTRUCTION` (concentration/exposure mapping, stress tests, Fed policy assessment, diversification gaps, resilience options). Results are saved to the `portfolio_reviews` table and rendered in the Streamlit dashboard's "📁 Portfolio Risk Review" tab.
+
 ---
 
 ## 🛠️ Technology Stack

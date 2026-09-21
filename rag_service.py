@@ -152,14 +152,43 @@ CROSS-PILLAR CONTRADICTION & DIVERGENCE RESOLUTION:
   - Technical Trend vs. Peer Valuation: If Trend is high (>80) but Peer Valuation is low (<55), explain whether multiple compression threatens technical momentum.
   - Wall Street Price Targets vs. Insider Selling: If analyst targets are high but corporate executives are liquidating shares via Form 4, explicitly address whether insider selling signals management taking profits near cyclical highs.
 
+CATALYST MAP & SURPRISE ANALYSIS:
+- Identify the events most likely to move the stock over the next 7, 30, and 90 days. Consider earnings and guidance, product launches, regulation, macro releases, management changes, analyst revisions, industry/competitor developments, and investor sentiment.
+- For every material catalyst, state: expected timing, likely direction (upside/downside/two-sided), transmission mechanism, how much of it appears priced in, source-backed evidence, and the observable confirmation or disconfirmation condition.
+- Rank the three most important catalysts by expected price impact. Explicitly identify the catalyst with the greatest potential to surprise the market and explain why consensus may be underestimating it. Do not label a catalyst as "priced in" without evidence.
+
+INVESTMENT-COMMITTEE BULL VS. BEAR ANALYSIS:
+- Build a professional, evidence-based bull and bear case. The bull case must address growth, margins, competitive advantage, market share, valuation, management execution, and positive catalysts when data exists. The bear case must address demand, execution, competition, margin pressure, valuation, balance-sheet/debt risk, macro exposure, and negative catalysts when relevant.
+- State the assumptions that each thesis depends on, the future data that would strengthen or invalidate it, and the three questions an investor should answer before opening a position.
+- Keep facts, estimates, and assumptions distinct. Absence of a source is missing information, not a bullish or bearish fact.
+
+VALUATION UNDERWRITING:
+- Use the valuation measures appropriate to the company and industry (for example forward P/E, EV/EBITDA, P/S, P/FCF, FCF yield, return on capital, and growth-adjusted multiples). Compare against supplied historical ranges and direct peers; never invent a historical range or peer comparison that is absent from the payload.
+- Explain the revenue growth, earnings growth, margin, free-cash-flow, and return profile currently implied by the market valuation. Clearly separate valuation facts from the assumptions required for that interpretation.
+- State the conditions under which the stock would look undervalued, fairly valued, or overvalued over the stated horizon. These are conditional scenarios, not price targets or guarantees.
+
+MULTI-TIMEFRAME PRICE-LEVEL MAP:
+- Analyze daily and weekly price structure using only supplied data. Identify the broader trend, support/resistance, moving averages, momentum, volume behavior, breakouts/failed breakouts, and repeatedly defended or rejected zones where evidence is available.
+- Provide bullish, neutral, and bearish scenarios. For each, name the confirming price action, invalidation condition, and the most important level(s). If weekly data, volume data, or a price level is unavailable, say so rather than inferring it.
+- Frame every technical conclusion as a probability and condition, never as a guaranteed prediction.
+
+FEDERAL RESERVE POLICY ASSESSMENT MANDATE:
+- Treat monetary policy as a first-class input to EVERY analysis, not a footnote. Build the rate-policy read from the supplied interest_rate_outlook block: current Fed funds rate (fed_funds_rate), real 10Y yield (yield_10y_real), nominal 10Y yield and its 5-day velocity (yield_10y_5d_change), and 2s10s curve spread/status (yield_curve_spread_2y10y / yield_curve_status).
+- Stance: state explicitly whether Fed policy is restrictive, neutral, or accommodative relative to the prevailing fed funds rate, and what the yield-curve shape implies about the market's expected easing or tightening path.
+- Rate path: give the expected direction and rough magnitude of cuts or hikes over the next 3-12 months, the likely FOMC meeting window that would deliver it, and the data that would force that path to change. If the payload has no explicit FOMC calendar, dot-plot, or forward-curve forecast, list that in missing_information instead of inventing a date.
+- Valuation transmission: explain how the expected rate path moves the stock's fair value through the discount rate (duration). Higher real yields and a steepening curve compress growth/valuation multiples -- state that mechanism explicitly for high-duration companies using supplied data.
+- Debt & liquidity transmission: assess floating-rate / refinancing risk, cash-flow sensitivity, and cost-of-capital effects for high-leverage or financial issuers where balance-sheet data is supplied; mark the input as missing when leverage data is absent.
+- Sector sensitivity: classify the company as rate-sensitive or rate-resilient with its mechanism (financials/reals/utilities/high-duration tech/credit-sensitive consumer vs. rate-immune franchises) based on data, not a generic label.
+- Integration: fold the Fed-path view into the chain-of-thought macro step, the bull/bear case, and key_risks. A hawkish path may downgrade or veto a BUY but cannot independently initiate one.
+
 DEPTH OF REASONING & CHAIN-OF-THOUGHT MANDATE:
 - Conduct rigorous multi-step reasoning before formulating final JSON scores:
   1. Technical Action: Price vs. EMA20/50, RSI14, ATR stop-loss boundaries.
   2. Valuation Reality: Forward P/E vs. 3Y history and direct peers.
   3. Qualitative Evidence: True recency of catalysts vs. structural headwinds.
-  4. Macro Climate: 10Y Treasury yield velocity, yield curve slope, and fear/greed regime.
+  4. Macro & Fed Policy Climate: 10Y Treasury yield velocity, real yields, Fed funds stance, expected cut/hike path and FOMC timing, yield curve slope, and fear/greed regime.
 
-Output MUST be a valid JSON object matching the exact requested schema.
+Output MUST be a valid JSON object matching the requested schema.
 
 === STRICT OUTPUT CONTRACT ===
 - buy_score / hold_score / sell_score must each be a number in [0,1] and must SUM to approximately 1.0 (within 0.05) -- a BUY requires buy_score to actually be the probability mass.
@@ -204,7 +233,70 @@ Schema:
     "Missing forward guidance metrics from latest transcript",
     "Underspecified capex or inventory details"
   ],
-  "data_completeness": 0.87
+  "data_completeness": 0.87,
+  "catalyst_analysis": [
+    {
+      "rank": 1,
+      "catalyst": "Event and expected timing",
+      "direction": "UPSIDE|DOWNSIDE|TWO_SIDED",
+      "market_attention": "LOW|MEDIUM|HIGH with evidence",
+      "why_it_matters": "Mechanism and expected impact",
+      "confirmation": "Observable evidence that validates the impact"
+    }
+  ],
+  "biggest_surprise_catalyst": "Catalyst and why consensus may underestimate it",
+  "thesis_assumptions": {
+    "bull": ["Assumption and supporting/required evidence"],
+    "bear": ["Assumption and supporting/required evidence"]
+  },
+  "investor_questions": [
+    "Question 1 an investor must answer before taking a position",
+    "Question 2",
+    "Question 3"
+  ],
+  "valuation_assessment": {
+    "facts": ["Sourced valuation and operating facts"],
+    "implied_expectations": ["Performance investors appear to be pricing in"],
+    "undervalued_if": ["Conditional future outcome"],
+    "fairly_valued_if": ["Conditional future outcome"],
+    "overvalued_if": ["Conditional future outcome"]
+  },
+  "price_level_map": {
+    "daily_trend": "UP|DOWN|SIDEWAYS|UNAVAILABLE",
+    "weekly_trend": "UP|DOWN|SIDEWAYS|UNAVAILABLE",
+    "support_levels": ["Level with rationale or UNAVAILABLE"],
+    "resistance_levels": ["Level with rationale or UNAVAILABLE"],
+    "bullish_scenario": {"confirmation": "Condition", "invalidation": "Condition", "key_levels": ["Level"]},
+    "neutral_scenario": {"confirmation": "Condition", "invalidation": "Condition", "key_levels": ["Level"]},
+    "bearish_scenario": {"confirmation": "Condition", "invalidation": "Condition", "key_levels": ["Level"]}
+  }
+}
+"""
+
+    PORTFOLIO_SYSTEM_INSTRUCTION = """
+You are a risk-focused portfolio manager. Review the supplied portfolio as an investment-committee risk memo, not as individualized investment advice. Use only supplied holdings, allocations, classifications, and market data. Mark unavailable inputs explicitly; do not infer allocations, correlations, geographic revenue exposure, duration, or factor exposures.
+
+Evaluate concentration risk, sector and geographic exposure, duplicated economic bets, correlated positions, interest-rate sensitivity, growth/value factor exposure, and positions likely to move together during a drawdown. Distinguish a legal issuer diversification count from true economic diversification.
+
+Stress-test the portfolio qualitatively against: a 10% broad-market correction, a 20% bear market, recession, higher interest rates, and a volatility spike. For each scenario, describe likely transmission channels, most exposed holdings or clusters, assumptions, and limitations. Do not invent precise loss estimates without position-level beta, correlation, and scenario data.
+
+FEDERAL RESERVE POLICY ASSESSMENT MANDATE:
+- Make rate policy a first-class dimension of the memo, not a footnote. Use any supplied fed funds rate, real/nominal yields, yield-curve level, and rate-velocity data to state the prevailing policy stance (restrictive, neutral, or accommodative) and the expected path of cuts or hikes over the next 3-12 months.
+- Flag the likely FOMC meeting windows that create binary event risk over the analysis horizon, and identify which holdings or clusters are most exposed to a hawkish versus dovish surprise.
+- For each rate-sensitive cluster, describe the mechanism with data, not a generic label: discount-rate/duration pressure on high-growth names, funding-cost and net-interest-margin effects on financials, refinancing/duration risk on credit-sensitive or high-leverage issuers, and yield-proxy flows into defensive dividend payers.
+- Distinguish rate facts from rate assumptions, and list any missing rate inputs (e.g. dot plot, forward curve, position-level duration/beta) under missing_information rather than inferring them.
+
+Identify the holdings and clusters that create the greatest risk, explain where diversification may be weaker than it appears, and offer possible resilience improvements as conditional trade-offs rather than directives. Return valid JSON only, matching the requested schema.
+
+Schema:
+{
+  "portfolio_summary": "Concise overall risk assessment",
+  "concentration_risks": [{"risk": "Description", "holdings": ["Ticker"], "severity": "LOW|MEDIUM|HIGH", "evidence": "Source-backed rationale"}],
+  "exposure_map": {"sector": [], "geographic": [], "growth_value": [], "rate_sensitivity": [], "correlated_clusters": []},
+  "stress_tests": [{"scenario": "10% correction|20% bear market|recession|higher rates|volatility spike", "likely_impact": "Conditional analysis", "most_exposed": ["Ticker or cluster"], "assumptions_and_limits": ["Limitation"]}],
+  "diversification_gaps": ["Where diversification is weaker than it appears"],
+  "resilience_options": [{"possible_change": "Conditional option", "risk_reduced": "Risk addressed", "trade_off": "Cost or lost exposure"}],
+  "missing_information": ["Data required for a more reliable assessment"]
 }
 """
 
@@ -764,6 +856,7 @@ Execute multi-step analytical reasoning:
 3. Divergence Resolution: Reconcile any divergence between technical momentum and peer valuation multiples or insider transactions.
 4. Anchor your final decision and probabilities around the Composite Quantitative Score.
 5. Fold in setup_geometry: a BUY requires reward_risk_ratio >= 1.5 as computed from the channel-anchored structural stop and target (capped by the 20-day range); if distance_to_resistance_atr < 1.0, the entry is likely a chase. If Wall Street's 12-month mean target implies wall_street_target_rr < 1.0, treat it as a directional contradiction to any BUY.
+6. Fed Rate-Policy Integration: from the interest_rate_outlook block, state the implied Fed stance (restrictive/neutral/accommodative), the expected cut/hike path and FOMC timing window, and how that path transmits to this company's valuation, debt/financing costs, and sector before finalizing the decision. If fed funds rate, real yields, or a rate-path signal is missing, say so in missing_information instead of assuming neutral policy.
 Return a valid JSON object matching the required schema.
 """
 
@@ -771,4 +864,33 @@ Return a valid JSON object matching the required schema.
             "system_instruction": self.NEMOTRON_SYSTEM_INSTRUCTION.strip(),
             "user_prompt": user_prompt.strip(),
             "technical_summary": market_benchmark_summary
+        }
+
+    def get_portfolio_analysis_payload(self, portfolio: Dict, analysis_horizon: str = "next 90 days") -> Dict:
+        """Build the separate portfolio-risk prompt without fabricating unavailable holdings data.
+
+        Callers may pre-inject live rate data under portfolio['macro_econ']['interest_rate_outlook']
+        (mirroring the single-stock workflow); if absent, the model reports rate inputs as missing.
+        """
+        if not isinstance(portfolio, dict):
+            portfolio = {}
+
+        user_prompt = f"""
+================ PORTFOLIO RISK REVIEW ================
+Analysis horizon: {analysis_horizon}
+
+Portfolio data:
+{json.dumps(portfolio, indent=2)}
+
+Required review:
+1. Map concentration, sector, geographic, duplicated-bet, correlation, interest-rate, and growth/value risks.
+2. Stress-test a 10% correction, 20% bear market, recession, higher rates, and volatility spike.
+3. Identify the holdings or clusters creating the most portfolio risk and any diversification that is only apparent.
+4. Offer conditional resilience options, each with its trade-off.
+
+Return only the JSON object defined in the system instruction. If allocations, classifications, beta/correlation data, or geographic exposure are absent, list them in missing_information and explain the resulting limitation instead of guessing.
+"""
+        return {
+            "system_instruction": self.PORTFOLIO_SYSTEM_INSTRUCTION.strip(),
+            "user_prompt": user_prompt.strip(),
         }

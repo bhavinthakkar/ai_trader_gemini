@@ -7,7 +7,7 @@ import requests
 from dotenv import load_dotenv
 
 from llm_service import query_llm, get_model_label, extract_json
-from db import init_db, save_results, update_signal_outcomes
+from db import init_db, save_results, save_portfolio_review, update_signal_outcomes
 from market_agent import MarketAgent
 from institutional_agent import InstitutionalDataAgent
 from macro_agent import MacroDataAgent
@@ -217,6 +217,12 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     bear_case = _to_list_of_strings(data.get("bear_case") or data.get("risk_assessment"), "Bearish trade setup and downside risks evaluated.")
     key_risks = _to_list_of_strings(data.get("key_risks") or data.get("key_risk"), "Volatile market conditions and stop-loss boundaries.")
     missing_info = _to_list_of_strings(data.get("missing_information"), "None")
+    catalyst_analysis = data.get("catalyst_analysis") if isinstance(data.get("catalyst_analysis"), list) else []
+    biggest_surprise_catalyst = str(data.get("biggest_surprise_catalyst") or "")
+    thesis_assumptions = data.get("thesis_assumptions") if isinstance(data.get("thesis_assumptions"), dict) else {}
+    investor_questions = _to_list_of_strings(data.get("investor_questions"), "None")
+    valuation_assessment = data.get("valuation_assessment") if isinstance(data.get("valuation_assessment"), dict) else {}
+    price_level_map = data.get("price_level_map") if isinstance(data.get("price_level_map"), dict) else {}
 
     # Data completeness is computed DETERMINISTICALLY by the pipeline from live provider
     # availability (QuantitativeScoringService.compute_data_coverage) and attached to
@@ -503,6 +509,13 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         "bear_case": bear_case,
         "key_risks": key_risks,
         "missing_information": missing_info,
+        # These richer prompt outputs are retained in raw_json for downstream consumers.
+        "catalyst_analysis": catalyst_analysis,
+        "biggest_surprise_catalyst": biggest_surprise_catalyst,
+        "thesis_assumptions": thesis_assumptions,
+        "investor_questions": investor_questions,
+        "valuation_assessment": valuation_assessment,
+        "price_level_map": price_level_map,
         "data_completeness": data_completeness,
         "entry_price": entry_price,
         "stop_loss_price": stop_loss_price,
@@ -633,10 +646,78 @@ def send_telegram_digest(token, chat_id, text):
             time.sleep(1)
 
 
+def run_portfolio_review(llm_choice: str, temperature: float = None, reasoning_budget: int = None, reasoning_effort: str = None) -> dict:
+    """
+    Portfolio risk-review mode: reads the terminal portfolio (raw, as-is), injects the live
+    macro/Fed rate outlook (mirroring the stock workflow's interest_rate_outlook enrichment),
+    builds the portfolio-risk prompt, runs the chosen LLM, persists the review, and returns the parsed JSON.
+    """
+    from rag_service import RAGService
+    from macro_agent import MacroDataAgent
+
+    init_db()
+
+    print("[Portfolio] Fetching terminal portfolio via Gloomberb CLI...")
+    portfolio = GloomberbService().get_portfolio()
+    if not portfolio:
+        print("[Portfolio] No portfolio data available from Gloomberb CLI. Nothing to review.")
+        return {}
+
+    # Enrich the portfolio payload with live Fed/rate data (FRED + CFTC), matching the
+    # interest_rate_outlook block the single-stock workflow injects. Best-effort: if the
+    # macro feed fails, the payload simply omits it and the model reports it as missing.
+    try:
+        macro_data = MacroDataAgent().analyze()
+        interest_rate_outlook = {
+            "yield_10y": macro_data.get("us_10y_yield", "N/A"),
+            "yield_2y": macro_data.get("us_2y_yield", "N/A"),
+            "yield_curve_spread_2y10y": macro_data.get("yield_curve_spread_10y2y", "N/A"),
+            "yield_curve_status": macro_data.get("yield_curve_status", "Unknown"),
+            "yield_10y_real": macro_data.get("us_10y_real_yield", "N/A"),
+            "yield_10y_5d_change": macro_data.get("us_10y_yield_5d_change", "N/A"),
+            "fed_funds_rate": macro_data.get("fed_funds_rate", "N/A"),
+            "unemployment_rate": macro_data.get("unemployment_rate", "N/A"),
+            "cftc_cot": macro_data.get("cftc_cot_summary", "")
+        }
+        if isinstance(portfolio, dict):
+            portfolio = dict(portfolio)
+            portfolio.setdefault("macro_econ", {})["interest_rate_outlook"] = interest_rate_outlook
+            print("[Portfolio] Injected live Fed/rate macro outlook into portfolio payload.")
+    except Exception as e:
+        print(f"[Portfolio] Warning: could not inject macro rate data ({e}); the model will report rates as missing.")
+
+    rag_service = RAGService()
+    payload = rag_service.get_portfolio_analysis_payload(portfolio)
+
+    print(f"[Portfolio] Executing portfolio risk review with {get_model_label(llm_choice)}...")
+    res_content = query_llm(
+        system_instruction=payload["system_instruction"],
+        user_prompt=payload["user_prompt"],
+        model_choice=llm_choice,
+        temperature=temperature,
+        reasoning_budget=reasoning_budget,
+        reasoning_effort=reasoning_effort
+    )
+
+    try:
+        parsed = extract_json(res_content)
+        if not isinstance(parsed, dict):
+            parsed = {"review": parsed, "raw": res_content}
+    except Exception as e:
+        print(f"[Portfolio] Failed to parse LLM output as JSON: {e}")
+        parsed = {"parse_error": str(e), "raw": res_content}
+
+    review_id = save_portfolio_review(parsed, portfolio, model_used=get_model_label(llm_choice))
+    print(f"[Portfolio] Saved portfolio review #{review_id} to database.")
+    print("\n================ Portfolio Risk Review ================")
+    print(json.dumps(parsed, indent=2))
+    return parsed
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="6-Agent Stock Swing Trading Analysis Pipeline",
-        usage="python main.py {nemotron|ultra|kimi|super|gemini|openrouter|twostage|gemma|qwen} [ticker]"
+        usage="python main.py {nemotron|ultra|kimi|super|gemini|openrouter|twostage|gemma|qwen} [ticker] | python main.py portfolio {model}"
     )
     parser.add_argument(
         "model_arg",
@@ -654,7 +735,7 @@ def main():
         "--model", "-m",
         dest="model_opt",
         default=None,
-        help="Model short name: 'nemotron', 'ultra', 'kimi', 'super', 'gemini', 'openrouter', 'free', 'twostage', 'gemma', or 'qwen'"
+        help="Model short name: 'nemotron', 'ultra', 'kimi', 'super', 'gemini', 'openrouter', 'free', 'twostage', 'gemma', 'qwen', or 'portfolio'"
     )
     parser.add_argument(
         "--ticker", "-t",
@@ -687,6 +768,7 @@ def main():
     if not raw_model:
         print("\n❌ ERROR: Model argument is required!")
         print("Usage: python main.py {nemotron|ultra|kimi|super|gemini|openrouter|twostage|gemma|qwen} [ticker]")
+        print("       python main.py portfolio {model}")
         print("  - nemotron / ultra : Cloud Nemotron-3 Ultra 550B (NVIDIA)")
         print("  - kimi             : Moonshot AI Kimi-K3 (NVIDIA)")
         print("  - super            : Cloud Nemotron-3 Super 120B (NVIDIA)")
@@ -704,12 +786,25 @@ def main():
         "super", "nemotron-super", "120b",
         "gemini", "openrouter", "free", "openrouter/free",
         "minimax", "minimax-m3", "minimax_m3", "m3",
-        "twostage", "gemma", "qwen", "local"
+        "twostage", "gemma", "qwen", "local", "portfolio"
     ]
     if model_choice not in valid_models:
         print(f"\n❌ ERROR: Invalid model choice '{raw_model}'!")
-        print("Supported choices are: 'nemotron' (Ultra 550B), 'kimi' (Kimi-K3), 'super' (120B), 'gemini', 'openrouter', 'twostage', 'gemma', 'qwen'\n")
+        print("Supported choices are: 'nemotron' (Ultra 550B), 'kimi' (Kimi-K3), 'super' (120B), 'gemini', 'openrouter', 'twostage', 'gemma', 'qwen', 'portfolio'\n")
         sys.exit(1)
+
+    if model_choice == "portfolio":
+        llm_choice = args.model_opt or args.ticker_arg
+        if not llm_choice or str(llm_choice).strip().lower() not in [m for m in valid_models if m != "portfolio"]:
+            print("\n❌ ERROR: Portfolio review requires an LLM model choice, e.g. `python main.py portfolio gemini`.")
+            sys.exit(1)
+        run_portfolio_review(
+            llm_choice,
+            temperature=args.temperature,
+            reasoning_budget=args.reasoning_budget,
+            reasoning_effort=args.reasoning_effort
+        )
+        return
 
     raw_ticker = args.ticker_opt or args.ticker_arg
     if raw_ticker:

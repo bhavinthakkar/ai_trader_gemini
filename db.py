@@ -88,6 +88,18 @@ def init_db(db_path=DB_PATH):
             if col_name not in existing_cols:
                 cursor.execute(f"ALTER TABLE signals ADD COLUMN {col_name} {col_type};")
 
+        # Create Portfolio Risk Review Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS portfolio_reviews (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                model_used TEXT,
+                portfolio_json TEXT,
+                review_json TEXT,
+                raw_json TEXT
+            );
+        """)
+
         # Create Ground-Truth Outcome Evaluation Table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS signal_outcomes (
@@ -423,6 +435,46 @@ def update_signal_outcomes(db_path=DB_PATH) -> int:
     if evaluated_count > 0:
         print(f"[DB] Successfully evaluated {evaluated_count} trade outcomes.")
     return evaluated_count
+
+
+def save_portfolio_review(review: dict, portfolio: dict, model_used: str = "gemini", db_path=DB_PATH) -> int:
+    """
+    Saves a portfolio risk review result into the portfolio_reviews table.
+    Returns the new record id.
+    """
+    init_db(db_path)
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO portfolio_reviews (timestamp, model_used, portfolio_json, review_json, raw_json)
+            VALUES (?, ?, ?, ?, ?)
+        """, (
+            timestamp,
+            str(model_used),
+            json.dumps(portfolio or {}),
+            json.dumps(review or {}),
+            json.dumps({"review": review, "portfolio": portfolio})
+        ))
+        conn.commit()
+        return cursor.lastrowid
+
+
+def get_latest_portfolio_reviews(limit: int = 20, db_path=DB_PATH) -> list:
+    """
+    Returns the most recent portfolio risk reviews sorted newest first.
+    """
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM portfolio_reviews
+            ORDER BY id DESC
+            LIMIT ?;
+        """, (limit,))
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
 
 
 def get_outcome_performance_stats(db_path=DB_PATH) -> dict:

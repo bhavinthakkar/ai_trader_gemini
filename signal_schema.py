@@ -28,7 +28,11 @@ PROBABILITY_SUM_TOLERANCE = 0.05
 
 PILLAR_KEYS = ("trend", "sector", "alpha", "valuation_history", "peer_valuation")
 
-LIST_KEYS = ("bull_case", "bear_case", "key_risks", "missing_information", "key_risk")
+LIST_KEYS = (
+    "bull_case", "bear_case", "key_risks", "missing_information", "key_risk",
+    "catalyst_analysis", "investor_questions",
+)
+OBJECT_KEYS = ("thesis_assumptions", "valuation_assessment", "price_level_map")
 
 
 def _to_float(val, default=None):
@@ -154,5 +158,9 @@ def validate_signal_json(obj):
     for key in LIST_KEYS:
         if key in norm and norm[key] is not None and not isinstance(norm[key], (list, tuple, str)):
             errors.append(f"{key} must be a list")
+
+    for key in OBJECT_KEYS:
+        if key in norm and norm[key] is not None and not isinstance(norm[key], dict):
+            errors.append(f"{key} must be an object")
 
     return norm, errors

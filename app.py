@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import json
-from db import init_db, get_latest_signals, get_signal_history, get_summary_stats, get_outcome_performance_stats
+from db import init_db, get_latest_signals, get_signal_history, get_summary_stats, get_outcome_performance_stats, get_latest_portfolio_reviews
 
 # Page Configuration
 st.set_page_config(
@@ -79,6 +79,8 @@ To run a new pipeline analysis, execute in your terminal:
 - `python main.py qwen <TICKER>` (Local Qwen2.5 14B)
 
 *Example:* `python main.py kimi NVDA` or `python main.py nemotron AAPL`
+
+**Portfolio risk review:** `python main.py portfolio gemini`
 """)
 
 st.sidebar.markdown("---")
@@ -111,11 +113,12 @@ with col6:
 st.markdown("---")
 
 # Main Content Tabs
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 Latest Signals",
     "🔍 Stock Deep-Dive",
     "📜 Signal History Log",
-    "🎯 Model Outcome Tracking"
+    "🎯 Model Outcome Tracking",
+    "📁 Portfolio Risk Review"
 ])
 
 latest_signals = get_latest_signals()
@@ -382,4 +385,103 @@ with tab4:
         st.dataframe(df_outcomes, width="stretch", hide_index=True)
     else:
         st.info("No trade outcomes evaluated yet. Signals need at least 1-10 trading days elapsed to compare against historical market bars.")
+
+with tab5:
+    st.subheader("📁 Portfolio Risk Review (Investment-Committee Memo)")
+    st.caption("Stored portfolio risk memos generated via `python main.py portfolio <model>`.")
+
+    portfolio_reviews = get_latest_portfolio_reviews(limit=20)
+
+    if not portfolio_reviews:
+        st.info("No portfolio reviews found. Run `python main.py portfolio gemini` in your terminal to generate one.")
+    else:
+        for rev in portfolio_reviews:
+            with st.expander(f"🕐 {rev['timestamp']} — Model: {rev.get('model_used', 'N/A')}"):
+                try:
+                    review = json.loads(rev.get("review_json") or "{}")
+                except Exception:
+                    review = {}
+                portfolio = {}
+                try:
+                    portfolio = json.loads(rev.get("portfolio_json") or "{}")
+                except Exception:
+                    pass
+
+                if not review:
+                    st.warning("Review payload is empty or unparsable.")
+                    if rev.get("raw_json"):
+                        st.json(rev["raw_json"])
+                    continue
+
+                summary = review.get("portfolio_summary") or "No summary provided."
+                st.markdown(f"**Overview:** {summary}")
+
+                if portfolio:
+                    st.markdown("#### 💼 Supplied Portfolio")
+                    st.json(portfolio)
+
+                c_risks = review.get("concentration_risks")
+                if c_risks:
+                    st.markdown("#### ⚠️ Concentration Risks")
+                    if isinstance(c_risks, list):
+                        for r in c_risks:
+                            if isinstance(r, dict):
+                                sev = str(r.get("severity", ""))
+                                emoji = "🔴" if sev == "HIGH" else ("🟡" if sev == "MEDIUM" else "🟢")
+                                st.markdown(f"- {emoji} **{r.get('risk', 'N/A')}** `{sev}` — {r.get('evidence', '')}")
+                                if r.get("holdings"):
+                                    st.caption(f"Holdings: {', '.join(str(h) for h in r['holdings'])}")
+                    else:
+                        st.write(c_risks)
+
+                exp_map = review.get("exposure_map")
+                if exp_map and isinstance(exp_map, dict):
+                    st.markdown("#### 🗺️ Exposure Map")
+                    for key, val in exp_map.items():
+                        if val:
+                            st.caption(f"**{key.replace('_', ' ').title()}:** {', '.join(str(x) for x in val) if isinstance(val, list) else val}")
+
+                s_tests = review.get("stress_tests")
+                if s_tests:
+                    st.markdown("#### 🧪 Stress Tests")
+                    if isinstance(s_tests, list):
+                        for t in s_tests:
+                            if isinstance(t, dict):
+                                st.markdown(f"- **{t.get('scenario', 'N/A')}** — {t.get('likely_impact', 'N/A')}")
+                                if t.get("most_exposed"):
+                                    st.caption(f"Most exposed: {', '.join(str(x) for x in t['most_exposed'])}")
+                                if t.get("assumptions_and_limits"):
+                                    st.caption(f"Limits: {', '.join(str(x) for x in t['assumptions_and_limits'])}")
+                    else:
+                        st.write(s_tests)
+
+                d_gaps = review.get("diversification_gaps")
+                if d_gaps:
+                    st.markdown("#### 🤔 Diversification Gaps")
+                    if isinstance(d_gaps, list):
+                        for g in d_gaps:
+                            st.markdown(f"- {g}")
+                    else:
+                        st.write(d_gaps)
+
+                r_options = review.get("resilience_options")
+                if r_options:
+                    st.markdown("#### 🛡️ Resilience Options")
+                    if isinstance(r_options, list):
+                        for o in r_options:
+                            if isinstance(o, dict):
+                                st.markdown(f"- **{o.get('possible_change', 'N/A')}** — reduces {o.get('risk_reduced', 'risk')} (trade-off: {o.get('trade_off', 'N/A')})")
+                    else:
+                        st.write(r_options)
+
+                m_info = review.get("missing_information")
+                if m_info:
+                    st.markdown("#### ❓ Missing Information")
+                    if isinstance(m_info, list):
+                        st.caption(", ".join(str(x) for x in m_info))
+                    else:
+                        st.caption(str(m_info))
+
+                with st.expander("🔍 View Full JSON Review"):
+                    st.json(review)
 
