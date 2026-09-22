@@ -86,6 +86,26 @@ MODEL_REGISTRY = {
         "model": "qwen2.5:14b",
         "label": "qwen2.5:14b (Ollama)"
     },
+    "minicpm": {
+        "provider": "ollama",
+        "model": os.getenv("MINICPM_MODEL", "openbmb/minicpm5-2b"),
+        "label": "MiniCPM5-2B 2.5B (Ollama)"
+    },
+    "minicpm5": {
+        "provider": "ollama",
+        "model": os.getenv("MINICPM_MODEL", "openbmb/minicpm5-2b"),
+        "label": "MiniCPM5-2B 2.5B (Ollama)"
+    },
+    "minicpm5-2b": {
+        "provider": "ollama",
+        "model": os.getenv("MINICPM_MODEL", "openbmb/minicpm5-2b"),
+        "label": "MiniCPM5-2B 2.5B (Ollama)"
+    },
+    "openbmb/minicpm5-2b": {
+        "provider": "ollama",
+        "model": os.getenv("MINICPM_MODEL", "openbmb/minicpm5-2b"),
+        "label": "MiniCPM5-2B 2.5B (Ollama)"
+    },
     "twostage": {
         "provider": "ollama_twostage",
         "extraction_model": os.getenv("TWOSTAGE_EXTRACTION_MODEL", "qwen2.5:14b"),
@@ -133,12 +153,15 @@ MODEL_REGISTRY = {
 
 def clean_think_tags(text: str) -> str:
     """
-    Strips <think>...</think> reasoning tokens from reasoning models (e.g., DeepSeek-R1)
+    Strips reasoning tokens from reasoning models before JSON parsing:
+    - XML-style <think>...</think> blocks
+    - Qwen3/MiniCPM/DeepSeek-style " thinking ... response " markers
     and removes markdown code fence blocks if present.
     """
     if not text:
         return ""
-    cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+    cleaned = re.sub(r'<think(?:ing)?>.*?</think(?:ing)?>', '', text, flags=re.DOTALL)
+    cleaned = re.sub(r' thinking.*? response', '', cleaned, flags=re.DOTALL)
     cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned, flags=re.MULTILINE)
     cleaned = re.sub(r'\s*```$', '', cleaned, flags=re.MULTILINE)
     return cleaned.strip()
@@ -229,6 +252,8 @@ def get_model_label(model_choice: str) -> str:
         key = "super"
     if key in ["kimi", "kimi-k3", "k3", "moonshot"]:
         key = "kimi"
+    if key in ["cpm", "minicpm5", "minicpm5-2b", "openbmb/minicpm5-2b"]:
+        key = "minicpm"
     if key in MODEL_REGISTRY:
         return MODEL_REGISTRY[key]["label"]
     return model_choice
@@ -253,9 +278,10 @@ def query_llm(
       - 'twostage' / 'local': 2-Stage Local (Stage 1 extraction via qwen2.5:14b, Stage 2 reasoning via qwen3:30b-a3b-instruct-2507-q4_K_M)
       - 'gemma': Local Ollama model 'gemma4:12b'
       - 'qwen': Local Ollama model 'qwen2.5:14b'
+      - 'minicpm' / 'minicpm5' / 'minicpm5-2b': Local Ollama model 'openbmb/minicpm5-2b' (override tag via MINICPM_MODEL; reasoning forced on via MINICPM_THINK=1; context 32768 via MINICPM_CONTEXT; output cap 8192 via MINICPM_NUM_PREDICT)
     """
     if not model_choice or not str(model_choice).strip():
-        raise ValueError("Model choice argument is required. Valid choices: 'nemotron', 'ultra', 'kimi', 'gemini', 'openrouter', 'twostage', 'gemma', 'qwen'")
+        raise ValueError("Model choice argument is required. Valid choices: 'nemotron', 'ultra', 'kimi', 'gemini', 'openrouter', 'twostage', 'gemma', 'qwen', 'minicpm'")
 
     key = str(model_choice).strip().lower()
     if key == "local":
@@ -268,6 +294,8 @@ def query_llm(
         key = "super"
     if key in ["kimi", "kimi-k3", "k3", "moonshot"]:
         key = "kimi"
+    if key in ["cpm", "minicpm5", "minicpm5-2b", "openbmb/minicpm5-2b"]:
+        key = "minicpm"
 
     if key not in MODEL_REGISTRY:
         raise ValueError(f"Invalid model choice '{model_choice}'. Choose one of: {list(MODEL_REGISTRY.keys())}")
@@ -451,14 +479,34 @@ Input Data:
             raise ImportError("The 'ollama' python package is required for local model execution. Run: pip install ollama")
 
         model_name = config["model"]
-        response_obj = ollama_chat(
-            model=model_name,
-            messages=[
+        chat_kwargs = {
+            "model": model_name,
+            "messages": [
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": user_prompt}
             ],
-            format="json"
-        )
+            "format": "json"
+        }
+        # Hybrid Think/No-Think model: force reasoning on; disable via MINICPM_THINK=0/false/off.
+        # JSON grammar conflicts with the reasoning stream (Ollama PEG 500), so rely on extract_json() when thinking.
+        # Full pipeline prompts exceed the Modelfile's 4096 num_ctx, so raise it; override via MINICPM_CONTEXT.
+        # num_predict caps runaway generation on dense prompts; override via MINICPM_NUM_PREDICT.
+        if key == "minicpm":
+            think_flag = os.getenv("MINICPM_THINK", "1").strip().lower()
+            thinking_on = think_flag not in ("0", "false", "no", "off")
+            chat_kwargs["think"] = thinking_on
+            if thinking_on:
+                chat_kwargs.pop("format")
+            try:
+                num_ctx = int(os.getenv("MINICPM_CONTEXT", "32768"))
+            except ValueError:
+                num_ctx = 32768
+            try:
+                num_predict = int(os.getenv("MINICPM_NUM_PREDICT", "8192"))
+            except ValueError:
+                num_predict = 8192
+            chat_kwargs["options"] = {"num_ctx": num_ctx, "num_predict": num_predict}
+        response_obj = ollama_chat(**chat_kwargs)
         return clean_think_tags(response_obj["message"]["content"])
 
     elif provider == "gemini":

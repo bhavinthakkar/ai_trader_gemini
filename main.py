@@ -717,13 +717,13 @@ def run_portfolio_review(llm_choice: str, temperature: float = None, reasoning_b
 def main():
     parser = argparse.ArgumentParser(
         description="6-Agent Stock Swing Trading Analysis Pipeline",
-        usage="python main.py {nemotron|ultra|kimi|super|gemini|openrouter|twostage|gemma|qwen} [ticker] | python main.py portfolio {model}"
+        usage="python main.py {nemotron|ultra|kimi|super|gemini|openrouter|twostage|gemma|qwen|minicpm} [ticker] | python main.py portfolio {model}"
     )
     parser.add_argument(
         "model_arg",
         nargs="?",
         default=None,
-        help="Required model short name: 'nemotron' / 'ultra' (Nemotron-3 Ultra 550B), 'kimi' (Moonshot AI Kimi-K3), 'super' (Nemotron-3 Super 120B), 'gemini' (Gemini 3.1 Pro), 'openrouter' (OpenRouter Free Models Router - openrouter/free), 'twostage' (Qwen2.5 14B + DeepSeek-R1 14B), 'gemma' (gemma4:12b), or 'qwen' (qwen2.5:14b)"
+        help="Required model short name: 'nemotron' / 'ultra' (Nemotron-3 Ultra 550B), 'kimi' (Moonshot AI Kimi-K3), 'super' (Nemotron-3 Super 120B), 'gemini' (Gemini 3.1 Pro), 'openrouter' (OpenRouter Free Models Router - openrouter/free), 'twostage' (Qwen2.5 14B + DeepSeek-R1 14B), 'gemma' (gemma4:12b), 'qwen' (qwen2.5:14b), or 'minicpm' (openbmb/minicpm5-2b)"
     )
     parser.add_argument(
         "ticker_arg",
@@ -735,7 +735,7 @@ def main():
         "--model", "-m",
         dest="model_opt",
         default=None,
-        help="Model short name: 'nemotron', 'ultra', 'kimi', 'super', 'gemini', 'openrouter', 'free', 'twostage', 'gemma', 'qwen', or 'portfolio'"
+        help="Model short name: 'nemotron', 'ultra', 'kimi', 'super', 'gemini', 'openrouter', 'free', 'twostage', 'gemma', 'qwen', 'minicpm', or 'portfolio'"
     )
     parser.add_argument(
         "--ticker", "-t",
@@ -767,7 +767,7 @@ def main():
     raw_model = args.model_opt or args.model_arg
     if not raw_model:
         print("\n❌ ERROR: Model argument is required!")
-        print("Usage: python main.py {nemotron|ultra|kimi|super|gemini|openrouter|twostage|gemma|qwen} [ticker]")
+        print("Usage: python main.py {nemotron|ultra|kimi|super|gemini|openrouter|twostage|gemma|qwen|minicpm} [ticker]")
         print("       python main.py portfolio {model}")
         print("  - nemotron / ultra : Cloud Nemotron-3 Ultra 550B (NVIDIA)")
         print("  - kimi             : Moonshot AI Kimi-K3 (NVIDIA)")
@@ -776,7 +776,8 @@ def main():
         print("  - openrouter       : OpenRouter Free Models Router (openrouter/free)")
         print("  - twostage         : 2-Stage Local (qwen2.5:14b extraction + qwen3:30b-a3b-instruct-2507-q4_K_M reasoning)")
         print("  - gemma            : Local Ollama gemma4:12b")
-        print("  - qwen             : Local Ollama qwen2.5:14b\n")
+        print("  - qwen             : Local Ollama qwen2.5:14b")
+        print("  - minicpm          : Local Ollama openbmb/minicpm5-2b\n")
         sys.exit(1)
 
     model_choice = str(raw_model).strip().lower()
@@ -786,11 +787,13 @@ def main():
         "super", "nemotron-super", "120b",
         "gemini", "openrouter", "free", "openrouter/free",
         "minimax", "minimax-m3", "minimax_m3", "m3",
-        "twostage", "gemma", "qwen", "local", "portfolio"
+        "twostage", "gemma", "qwen", "local",
+        "minicpm", "minicpm5", "minicpm5-2b", "cpm",
+        "portfolio"
     ]
     if model_choice not in valid_models:
         print(f"\n❌ ERROR: Invalid model choice '{raw_model}'!")
-        print("Supported choices are: 'nemotron' (Ultra 550B), 'kimi' (Kimi-K3), 'super' (120B), 'gemini', 'openrouter', 'twostage', 'gemma', 'qwen', 'portfolio'\n")
+        print("Supported choices are: 'nemotron' (Ultra 550B), 'kimi' (Kimi-K3), 'super' (120B), 'gemini', 'openrouter', 'twostage', 'gemma', 'qwen', 'minicpm', 'portfolio'\n")
         sys.exit(1)
 
     if model_choice == "portfolio":

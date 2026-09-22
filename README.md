@@ -260,6 +260,12 @@ To ensure strict system reliability and guarantee that raw LLM text is never for
 ./venv/bin/python main.py twostage NVDA
 ```
 
+### **Run Pipeline with Local MiniCPM5-2B (Ollama)**
+```bash
+./venv/bin/python main.py minicpm NVDA
+```
+> Uses OpenBMB's `openbmb/minicpm5-2b` (2.5B, 128K context, hybrid Think/No-Think reasoning) via the official [Ollama library](https://ollama.com/openbmb/minicpm5-2b) entry. Default tag is `Q4_K_M` (~1.6GB); override the tag with the `MINICPM_MODEL` environment variable (e.g. `MINICPM_MODEL=openbmb/minicpm5-2b:q5_K_M`). Pull it with `ollama pull openbmb/minicpm5-2b`. Reasoning mode is forced ON for analysis (disable with `MINICPM_THINK=0`); context window is raised to 32768 tokens for pipeline prompts (override with `MINICPM_CONTEXT`) and output is capped at 8192 tokens (override with `MINICPM_NUM_PREDICT`). Note: this 2.5B model may struggle with large structured pipeline payloads — for full 9K+ token pipeline runs, prefer `twostage` (Qwen3 30B).
+
 ### **Run Portfolio Risk Review (Investment-Committee Memo)**
 ```bash
 ./venv/bin/python main.py portfolio gemini
@@ -270,7 +276,7 @@ Runs a portfolio-level risk review using the holdings from the Gloomberb CLI por
 
 ## 🛠️ Technology Stack
 
-* **LLM Reasoning**: Moonshot AI Kimi-K3 (`moonshotai/kimi-k3` via NVIDIA NIM), NVIDIA Nemotron-3 Ultra 550B (`nvidia/nemotron-3-ultra-550b-a55b`) & Super 120B (`nvidia/nemotron-3-super-120b`), OpenRouter Free Models Router (`openrouter/free`, 200k context window), Gemini 3.1 Pro, Ollama Qwen 2.5 14B / Qwen 3 30B.
+* **LLM Reasoning**: Moonshot AI Kimi-K3 (`moonshotai/kimi-k3` via NVIDIA NIM), NVIDIA Nemotron-3 Ultra 550B (`nvidia/nemotron-3-ultra-550b-a55b`) & Super 120B (`nvidia/nemotron-3-super-120b`), OpenRouter Free Models Router (`openrouter/free`, 200k context window), Gemini 3.1 Pro, Ollama Qwen 2.5 14B / Qwen 3 30B, OpenBMB MiniCPM5-2B (`openbmb/minicpm5-2b`, 128K context).
 * **Vector Embeddings**: FastEmbed (`BAAI/bge-small-en-v1.5`, 384-dimensional dense vectors).
 * **CLI Terminal Feed**: Official `gloom-sh/gloomberb` CLI.
 * **Macro Data**: FRED API (US Treasury Yield Curve) & CNN Fear & Greed Index.
