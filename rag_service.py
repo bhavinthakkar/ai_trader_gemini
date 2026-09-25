@@ -2,7 +2,15 @@ import os
 import json
 import datetime
 import numpy as np
-from typing import List, Dict
+from collections.abc import Mapping
+from typing import List, Dict, TypeAlias
+
+_JSONScalar: TypeAlias = str | int | float | bool | None
+_JSONValue: TypeAlias = _JSONScalar | list["_JSONValue"] | dict[str, "_JSONValue"]
+
+
+class RAGPromptProfileError(ValueError):
+    """Raised when a RAG prompt profile is not supported."""
 
 # FastEmbed Dense Vector Embeddings
 try:
@@ -74,6 +82,61 @@ def compute_hybrid_score(sim_score: float, reliability: float, importance: float
     """
     sim_clamped = max(0.01, sim_score)
     return sim_clamped * reliability * importance * recency
+
+
+def _clip_prompt_text(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    marker = " [...EVIDENCE TRUNCATED...] "
+    available = max_chars - len(marker)
+    if available < 120:
+        return text[:max_chars]
+    head_chars = int(available * 0.72)
+    return f"{text[:head_chars]}{marker}{text[-(available - head_chars):]}"
+
+
+def _bounded_json_value(
+    value: _JSONValue,
+    *,
+    depth: int = 0,
+    max_depth: int = 6,
+    max_items: int = 12,
+    max_string_chars: int = 500,
+) -> _JSONValue:
+    """Return valid, bounded JSON data for a compact prompt without mutating inputs."""
+    if depth >= max_depth:
+        return _clip_prompt_text(str(value), max_string_chars)
+    if isinstance(value, str):
+        return _clip_prompt_text(value, max_string_chars)
+    if isinstance(value, Mapping):
+        bounded: dict[str, _JSONValue] = {}
+        items = list(value.items())
+        for raw_key, item in items[:max_items]:
+            bounded[str(raw_key)] = _bounded_json_value(
+                item,
+                depth=depth + 1,
+                max_depth=max_depth,
+                max_items=max_items,
+                max_string_chars=max_string_chars,
+            )
+        if len(items) > max_items:
+            bounded["_omitted_key_count"] = len(items) - max_items
+        return bounded
+    if isinstance(value, (list, tuple)):
+        bounded_list = [
+            _bounded_json_value(
+                item,
+                depth=depth + 1,
+                max_depth=max_depth,
+                max_items=max_items,
+                max_string_chars=max_string_chars,
+            )
+            for item in value[:max_items]
+        ]
+        if len(value) > max_items:
+            bounded_list.append({"_omitted_item_count": len(value) - max_items})
+        return bounded_list
+    return value
 
 
 class RAGService:
@@ -270,6 +333,67 @@ Schema:
     "neutral_scenario": {"confirmation": "Condition", "invalidation": "Condition", "key_levels": ["Level"]},
     "bearish_scenario": {"confirmation": "Condition", "invalidation": "Condition", "key_levels": ["Level"]}
   }
+}
+"""
+
+    LOCAL_QWEN_SYSTEM_INSTRUCTION = """
+You are a senior swing trader and quantitative risk manager. Analyze only the supplied 1-10 day trading payload. Never invent missing market, portfolio, macro, or source data.
+
+DECISION RULES:
+- Treat the deterministic five-pillar composite score, setup geometry, and reward/risk as authoritative.
+- BUY requires composite >= 70, data completeness >= 0.80, reward/risk >= 1.5, non-extreme volatility, and no earnings blackout. Otherwise return HOLD unless the evidence clearly supports SELL.
+- SELL requires a weak quantitative structure or a high-reliability adverse catalyst confirmed by the supplied data.
+- If days_to_earnings <= 3, return HOLD and identify the binary event risk.
+- Treat news and macro as confirmation, vetoes, or risk flags; they cannot independently initiate a directional trade.
+- Prefer SEC and company IR evidence over media and social commentary. Verify publication dates and never call stale evidence current.
+- Explain divergences between trend, valuation, analyst targets, insider activity, and macro conditions.
+- Provide concise, falsifiable bull/bear cases. State assumptions and missing information explicitly.
+- Do not expose chain-of-thought. Return conclusions and concise evidence only.
+
+STRICT OUTPUT CONTRACT:
+Return exactly one JSON object with these keys and no markdown or commentary:
+{
+  "stock": "Ticker",
+  "decision": "BUY|SELL|HOLD",
+  "primary_driver": "QUANT_STRUCTURE|FUNDAMENTAL|NEWS_CATALYST|MACRO_EVENT|EARNINGS_CATALYST",
+  "confidence": 0.0,
+  "buy_score": 0.0,
+  "hold_score": 0.0,
+  "sell_score": 0.0,
+  "horizon_days": 10,
+  "quant_score": 0.0,
+  "pillar_scores": {
+    "trend": 0.0,
+    "sector": 0.0,
+    "alpha": 0.0,
+    "valuation_history": 0.0,
+    "peer_valuation": 0.0
+  },
+  "falsification_bull": "Condition that invalidates the SELL/HOLD case",
+  "falsification_bear": "Condition that invalidates the BUY case",
+  "bull_case": ["Concise bullish point"],
+  "bear_case": ["Concise bearish point"],
+  "key_risks": ["Concise risk"],
+  "missing_information": ["Missing input or None"],
+  "data_completeness": 0.0
+}
+buy_score, hold_score, and sell_score must each be in [0,1] and sum to approximately 1.0. pillar_scores and quant_score must be in [0,100]. confidence and data_completeness must be in [0,1].
+"""
+
+    LOCAL_PORTFOLIO_SYSTEM_INSTRUCTION = """
+You are a risk-focused portfolio manager. Use only supplied holdings, allocations, classifications, and market data. Mark unavailable inputs explicitly and do not infer exposures that are not supplied.
+
+Assess concentration, sector/geographic exposure, duplicated economic bets, correlation, growth/value and interest-rate sensitivity. Stress-test a 10% correction, 20% bear market, recession, higher rates, and volatility spike. Explain transmission channels, most exposed holdings, assumptions, limitations, diversification gaps, and conditional resilience options. Treat Fed policy as a first-class risk factor, but never invent dates, correlations, or exposures.
+
+Return exactly one JSON object and no markdown:
+{
+  "portfolio_summary": "Concise overall risk assessment",
+  "concentration_risks": [{"risk": "Description", "holdings": ["Ticker"], "severity": "LOW|MEDIUM|HIGH", "evidence": "Supplied evidence"}],
+  "exposure_map": {"sector": [], "geographic": [], "growth_value": [], "rate_sensitivity": [], "correlated_clusters": []},
+  "stress_tests": [{"scenario": "10% correction|20% bear market|recession|higher rates|volatility spike", "likely_impact": "Conditional analysis", "most_exposed": ["Ticker or cluster"], "assumptions_and_limits": ["Limitation"]}],
+  "diversification_gaps": ["Gap"],
+  "resilience_options": [{"possible_change": "Conditional change", "risk_reduced": "Risk", "trade_off": "Trade-off"}],
+  "missing_information": ["Missing input"]
 }
 """
 
@@ -693,13 +817,25 @@ Schema:
             flat_list.extend(passages)
         return flat_list
 
-    def get_nemotron_payload(self, gloomberb_payload: Dict, technical_data: Dict, institutional_data: Dict = None) -> Dict:
-        """
-        Directly generates Nemotron-3 Super prompt payload.
-        Passes Multi-Query Dual-Horizon RAG Knowledge partitioned into CURRENT CONTEXT vs LONGER-TERM HISTORICAL CONTEXT.
-        """
+    def get_nemotron_payload(
+        self,
+        gloomberb_payload: Dict,
+        technical_data: Dict,
+        institutional_data: Dict = None,
+        prompt_profile: str = "full",
+    ) -> Dict:
+        """Build a full cloud prompt or a compact 8K local-model prompt."""
+        if prompt_profile not in {"full", "compact"}:
+            raise RAGPromptProfileError("prompt_profile must be 'full' or 'compact'")
+
+        compact = prompt_profile == "compact"
         symbol = gloomberb_payload.get("symbol", "N/A")
-        categorized_rag = self.retrieve_knowledge_by_questions(gloomberb_payload, technical_data, institutional_data, max_per_question=2)
+        categorized_rag = self.retrieve_knowledge_by_questions(
+            gloomberb_payload,
+            technical_data,
+            institutional_data,
+            max_per_question=1 if compact else 2,
+        )
 
         profile = gloomberb_payload.get("profile", {})
         peer_val = gloomberb_payload.get("peer_valuation", {})
@@ -813,7 +949,66 @@ Schema:
             }
         }
 
-        user_prompt = f"""
+        analyst = gloomberb_payload.get("analyst_ratings", {})
+        earnings = gloomberb_payload.get("earnings", {})
+        insider_institutional = gloomberb_payload.get("insider_institutional", {})
+        interest_rate_outlook = macro_econ.get("interest_rate_outlook", macro_econ)
+
+        if compact:
+            market_benchmark_summary = _bounded_json_value(
+                {
+                    "symbol": symbol,
+                    "sector": profile.get("sector", "N/A"),
+                    "source_status": source_status,
+                    "deterministic_5pillar_scores": quant_scores,
+                    "setup_geometry": market_benchmark_summary["setup_geometry"],
+                    "price_action": {
+                        "current_price": technical_data.get("current_price"),
+                        "change_5d_pct": technical_data.get("change_5d_pct"),
+                        "market_spy_5d_pct": technical_data.get("market_spy_5d_pct"),
+                        "relative_alpha_5d": technical_data.get("relative_alpha_5d"),
+                        "sector_etf_benchmark": sector_bench,
+                        "return_1y": profile.get("return_1y", "N/A"),
+                    },
+                    "technicals": market_benchmark_summary["technical_indicators"],
+                    "valuation": market_benchmark_summary["valuation_multiples"],
+                    "direct_peers": peer_val.get("direct_peer_benchmarks", []),
+                    "growth_and_margins": market_benchmark_summary["growth_and_margins"],
+                    "analyst": {
+                        "mean_target_price": analyst.get("mean_target_price"),
+                        "recommendation_rating": analyst.get("recommendation_rating"),
+                        "recent_major_bank_actions": analyst.get("recent_major_bank_actions", [])[:3],
+                    },
+                    "earnings": {
+                        "earnings_date": earnings.get("earnings_date"),
+                        "timing": earnings.get("timing"),
+                        "eps_estimate": earnings.get("eps_estimate"),
+                        "revenue_estimate": earnings.get("revenue_estimate"),
+                        "days_to_earnings": technical_data.get("days_to_earnings"),
+                    },
+                    "options": market_benchmark_summary["granular_options_flow"],
+                    "institutional": {
+                        "top_holders": insider_institutional.get("top_institutional_holders", [])[:2],
+                        "insider_transactions": insider_institutional.get("insider_transactions", [])[:3],
+                    },
+                    "interest_rate_outlook": interest_rate_outlook,
+                },
+                max_depth=5,
+                max_items=8,
+                max_string_chars=400,
+            )
+            user_prompt = f"""
+================ COMPACT LOCAL EVIDENCE PACKAGE ================
+Target: {symbol}
+Unavailable source channels are absent evidence, not bullish or bearish facts. Do not fabricate missing values.
+
+STRUCTURED DATA:
+{json.dumps(market_benchmark_summary, separators=(",", ":"), ensure_ascii=False)}
+
+CURRENT CONTEXT (latest 24h/7d and earnings):
+"""
+        else:
+            user_prompt = f"""
 ================ 0. DATA SOURCE AVAILABILITY ================
 Channels marked "source_unavailable" in data_source_status above produced NO real document. Treat them as absent: do NOT invent, assume, or "aggregate" placeholder content for them, and do NOT cite them as evidence. Factor their absence into data_completeness and missing_information.
 Also, CURRENT CONTEXT passages (Section 2) only contain real, sourced documents (or an explicit "no passages" marker when none matched). If a category is empty, there is no supporting text — never fabricate one.
@@ -825,6 +1020,7 @@ Target Ticker: {symbol}
 
 ================ 2. CURRENT CONTEXT (Last 24h / 7d / Latest Earnings) ================
 """
+
         current_cats = ["Recent Material Events (Last 24h / 7d)", "Short-Term Bullish & Bearish Drivers", "Updated Guidance & Earnings Takeaways"]
         for cat_name in current_cats:
             passages = categorized_rag.get(cat_name, [])
@@ -832,7 +1028,8 @@ Target Ticker: {symbol}
             if not passages:
                 user_prompt += "No specific current passages matched this category.\n"
             for p_idx, passage in enumerate(passages, 1):
-                user_prompt += f"  [{p_idx}] {passage}\n\n"
+                rendered_passage = _clip_prompt_text(str(passage), 700) if compact else str(passage)
+                user_prompt += f"  [{p_idx}] {rendered_passage}\n\n"
 
         user_prompt += """
 ================ 3. LONGER-TERM HISTORICAL CONTEXT (Prior Filings & Multi-Year Patterns) ================
@@ -844,9 +1041,16 @@ Target Ticker: {symbol}
             if not passages:
                 user_prompt += "No specific historical passages matched this category.\n"
             for p_idx, passage in enumerate(passages, 1):
-                user_prompt += f"  [{p_idx}] {passage}\n\n"
+                rendered_passage = _clip_prompt_text(str(passage), 700) if compact else str(passage)
+                user_prompt += f"  [{p_idx}] {rendered_passage}\n\n"
 
-        user_prompt += """
+        if compact:
+            user_prompt += """
+================ END PAYLOAD ================
+Verify publication dates and source reliability. Treat earnings within 3 days, extreme implied volatility, RR below 1.5, incomplete data, or unresolved macro transmission as reasons to reduce conviction. Reconcile technical, valuation, analyst, insider, and macro evidence. Keep the final rationale concise and return only the required JSON object.
+"""
+        else:
+            user_prompt += """
 ================ END PAYLOAD ================
 
 Synthesize the Structured Market Data, Deterministic 5-Pillar Scores, Current Context (Last 24h/7d), and Longer-Term Historical Context.
@@ -860,22 +1064,50 @@ Execute multi-step analytical reasoning:
 Return a valid JSON object matching the required schema.
 """
 
+        system_instruction = (
+            self.LOCAL_QWEN_SYSTEM_INSTRUCTION.strip()
+            if compact
+            else self.NEMOTRON_SYSTEM_INSTRUCTION.strip()
+        )
         return {
-            "system_instruction": self.NEMOTRON_SYSTEM_INSTRUCTION.strip(),
+            "system_instruction": system_instruction,
             "user_prompt": user_prompt.strip(),
-            "technical_summary": market_benchmark_summary
+            "technical_summary": market_benchmark_summary,
+            "prompt_profile": prompt_profile,
         }
 
-    def get_portfolio_analysis_payload(self, portfolio: Dict, analysis_horizon: str = "next 90 days") -> Dict:
-        """Build the separate portfolio-risk prompt without fabricating unavailable holdings data.
-
-        Callers may pre-inject live rate data under portfolio['macro_econ']['interest_rate_outlook']
-        (mirroring the single-stock workflow); if absent, the model reports rate inputs as missing.
-        """
+    def get_portfolio_analysis_payload(
+        self,
+        portfolio: Dict,
+        analysis_horizon: str = "next 90 days",
+        prompt_profile: str = "full",
+    ) -> Dict:
+        """Build the portfolio-risk prompt without fabricating unavailable data."""
+        if prompt_profile not in {"full", "compact"}:
+            raise RAGPromptProfileError("prompt_profile must be 'full' or 'compact'")
         if not isinstance(portfolio, dict):
             portfolio = {}
 
-        user_prompt = f"""
+        compact = prompt_profile == "compact"
+        if compact:
+            prompt_portfolio = _bounded_json_value(
+                portfolio,
+                max_depth=6,
+                max_items=24,
+                max_string_chars=500,
+            )
+            user_prompt = f"""
+================ COMPACT PORTFOLIO RISK REVIEW ================
+Analysis horizon: {analysis_horizon}
+
+PORTFOLIO DATA:
+{json.dumps(prompt_portfolio, separators=(",", ":"), ensure_ascii=False)}
+
+Review concentration, duplicated bets, factor/rate sensitivity, and the five required stress scenarios. Use only supplied fields, state uncertainty, and return only the required JSON object.
+"""
+            system_instruction = self.LOCAL_PORTFOLIO_SYSTEM_INSTRUCTION.strip()
+        else:
+            user_prompt = f"""
 ================ PORTFOLIO RISK REVIEW ================
 Analysis horizon: {analysis_horizon}
 
@@ -886,11 +1118,14 @@ Required review:
 1. Map concentration, sector, geographic, duplicated-bet, correlation, interest-rate, and growth/value risks.
 2. Stress-test a 10% correction, 20% bear market, recession, higher rates, and volatility spike.
 3. Identify the holdings or clusters creating the most portfolio risk and any diversification that is only apparent.
-4. Offer conditional resilience options, each with its trade-off.
+4. Offer conditional resilience options, each with their trade-off.
 
 Return only the JSON object defined in the system instruction. If allocations, classifications, beta/correlation data, or geographic exposure are absent, list them in missing_information and explain the resulting limitation instead of guessing.
 """
+            system_instruction = self.PORTFOLIO_SYSTEM_INSTRUCTION.strip()
+
         return {
-            "system_instruction": self.PORTFOLIO_SYSTEM_INSTRUCTION.strip(),
+            "system_instruction": system_instruction,
             "user_prompt": user_prompt.strip(),
+            "prompt_profile": prompt_profile,
         }
