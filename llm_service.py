@@ -76,41 +76,20 @@ MODEL_REGISTRY = {
         "fallbacks": ["gemini-3.5-flash", "gemini-2.5-flash"],
         "label": "Gemini 3.1 Pro"
     },
-    "gemma": {
-        "provider": "ollama",
-        "model": "gemma4:12b",
-        "label": "gemma4:12b (Ollama)"
-    },
     "qwen": {
-        "provider": "ollama",
-        "model": "qwen2.5:14b",
-        "label": "qwen2.5:14b (Ollama)"
+        "provider": "llamacpp",
+        "model": os.getenv("LLAMACPP_MODEL", "qwen2.5"),
+        "label": "Qwen 2.5 14B (llama.cpp)"
     },
-    "minicpm": {
-        "provider": "ollama",
-        "model": os.getenv("MINICPM_MODEL", "openbmb/minicpm5-2b"),
-        "label": "MiniCPM5-2B 2.5B (Ollama)"
+    "qwen-llamacpp": {
+        "provider": "llamacpp",
+        "model": os.getenv("LLAMACPP_MODEL", "qwen2.5"),
+        "label": "Qwen 2.5 14B (llama.cpp)"
     },
-    "minicpm5": {
-        "provider": "ollama",
-        "model": os.getenv("MINICPM_MODEL", "openbmb/minicpm5-2b"),
-        "label": "MiniCPM5-2B 2.5B (Ollama)"
-    },
-    "minicpm5-2b": {
-        "provider": "ollama",
-        "model": os.getenv("MINICPM_MODEL", "openbmb/minicpm5-2b"),
-        "label": "MiniCPM5-2B 2.5B (Ollama)"
-    },
-    "openbmb/minicpm5-2b": {
-        "provider": "ollama",
-        "model": os.getenv("MINICPM_MODEL", "openbmb/minicpm5-2b"),
-        "label": "MiniCPM5-2B 2.5B (Ollama)"
-    },
-    "twostage": {
-        "provider": "ollama_twostage",
-        "extraction_model": os.getenv("TWOSTAGE_EXTRACTION_MODEL", "qwen2.5:14b"),
-        "reasoning_model": os.getenv("TWOSTAGE_REASONING_MODEL", "qwen3:30b-a3b-instruct-2507-q4_K_M"),
-        "label": "2-Stage Local (qwen2.5:14b + qwen3:30b-a3b-instruct-2507-q4_K_M)"
+    "llamacpp": {
+        "provider": "llamacpp",
+        "model": os.getenv("LLAMACPP_MODEL", "qwen2.5"),
+        "label": "Qwen 2.5 14B (llama.cpp)"
     },
     "openrouter": {
         "provider": "openrouter",
@@ -155,7 +134,7 @@ def clean_think_tags(text: str) -> str:
     """
     Strips reasoning tokens from reasoning models before JSON parsing:
     - XML-style <think>...</think> blocks
-    - Qwen3/MiniCPM/DeepSeek-style " thinking ... response " markers
+    - model-specific " thinking ... response " markers
     and removes markdown code fence blocks if present.
     """
     if not text:
@@ -240,10 +219,8 @@ def extract_json(text: str):
         raise e
 
 
-def get_model_label(model_choice: str) -> str:
+def normalize_model_key(model_choice: str) -> str:
     key = str(model_choice).strip().lower()
-    if key == "local":
-        key = "twostage"
     if key in ["free", "openrouter/free", "or", "minimax", "minimax-m3", "minimax_m3", "m3"]:
         key = "openrouter"
     if key in ["550b", "nemotron-ultra", "ultra"]:
@@ -252,11 +229,22 @@ def get_model_label(model_choice: str) -> str:
         key = "super"
     if key in ["kimi", "kimi-k3", "k3", "moonshot"]:
         key = "kimi"
-    if key in ["cpm", "minicpm5", "minicpm5-2b", "openbmb/minicpm5-2b"]:
-        key = "minicpm"
+    if key in ["qwen-llamacpp", "llamacpp", "qwen2.5", "qwen2.5-14b"]:
+        key = "qwen"
+    return key
+
+
+def get_model_label(model_choice: str) -> str:
+    key = normalize_model_key(model_choice)
     if key in MODEL_REGISTRY:
         return MODEL_REGISTRY[key]["label"]
     return model_choice
+
+
+def uses_compact_prompt_profile(model_choice: str) -> bool:
+    key = normalize_model_key(model_choice)
+    config = MODEL_REGISTRY.get(key)
+    return bool(config and config.get("provider") == "llamacpp")
 
 
 def query_llm(
@@ -275,27 +263,12 @@ def query_llm(
       - 'super' / '120b': Cloud Nemotron-3 Super 120B (NVIDIA API)
       - 'gemini': Cloud Gemini 3.1 Pro
       - 'openrouter' / 'free': OpenRouter Free Models Router (openrouter/free)
-      - 'twostage' / 'local': 2-Stage Local (Stage 1 extraction via qwen2.5:14b, Stage 2 reasoning via qwen3:30b-a3b-instruct-2507-q4_K_M)
-      - 'gemma': Local Ollama model 'gemma4:12b'
-      - 'qwen': Local Ollama model 'qwen2.5:14b'
-      - 'minicpm' / 'minicpm5' / 'minicpm5-2b': Local Ollama model 'openbmb/minicpm5-2b' (override tag via MINICPM_MODEL; reasoning forced on via MINICPM_THINK=1; context 32768 via MINICPM_CONTEXT; output cap 8192 via MINICPM_NUM_PREDICT)
+      - 'qwen' / 'llamacpp': Local Qwen model through the OpenAI-compatible llama.cpp server
     """
     if not model_choice or not str(model_choice).strip():
-        raise ValueError("Model choice argument is required. Valid choices: 'nemotron', 'ultra', 'kimi', 'gemini', 'openrouter', 'twostage', 'gemma', 'qwen', 'minicpm'")
+        raise ValueError("Model choice argument is required. Valid choices: 'nemotron', 'ultra', 'kimi', 'gemini', 'openrouter', 'qwen', 'llamacpp'")
 
-    key = str(model_choice).strip().lower()
-    if key == "local":
-        key = "twostage"
-    if key in ["free", "openrouter/free", "or", "minimax", "minimax-m3", "minimax_m3", "m3"]:
-        key = "openrouter"
-    if key in ["550b", "nemotron-ultra", "ultra"]:
-        key = "ultra"
-    if key in ["120b", "nemotron-super", "super"]:
-        key = "super"
-    if key in ["kimi", "kimi-k3", "k3", "moonshot"]:
-        key = "kimi"
-    if key in ["cpm", "minicpm5", "minicpm5-2b", "openbmb/minicpm5-2b"]:
-        key = "minicpm"
+    key = normalize_model_key(model_choice)
 
     if key not in MODEL_REGISTRY:
         raise ValueError(f"Invalid model choice '{model_choice}'. Choose one of: {list(MODEL_REGISTRY.keys())}")
@@ -380,134 +353,17 @@ def query_llm(
             raise last_error
         raise RuntimeError("All NVIDIA NIM candidate models failed or were rate-limited.")
 
-    elif provider == "ollama_twostage":
-        try:
-            from ollama import chat as ollama_chat
-        except ImportError:
-            raise ImportError("The 'ollama' python package is required for local model execution. Run: pip install ollama")
+    elif provider == "llamacpp":
+        from llamacpp_provider import query_llamacpp
 
-        # Stage 1: Key Metrics & Data Extraction Specialist (qwen2.5:14b)
-        extraction_model = config["extraction_model"]
-        print(f"[llm_service] [Stage 1: Extraction] Running {extraction_model}...")
-        extraction_prompt = f"""
-Analyze the following multi-agent stock market intelligence payload containing data from MarketAgent, InstitutionalDataAgent, MacroDataAgent, NewsAgent, RiskAgent, and AnalystAgent.
-Extract and preserve ALL key quantitative metrics, SEC EDGAR filings, FRED yield curve & CFTC COT macro data, technical indicators, news catalysts, risk factors, and analyst ratings into a structured JSON object.
-
-Input Data:
-{user_prompt}
-"""
-        stage1_response = ollama_chat(
-            model=extraction_model,
-            messages=[
-                {"role": "system", "content": "You are a financial data extraction specialist. Extract and preserve ALL 6 sub-agent datasets into a single clean JSON object."},
-                {"role": "user", "content": extraction_prompt}
-            ],
-            format="json",
-            keep_alive=0
-        )
-        extracted_data_str = stage1_response["message"]["content"]
-        
-        # Validate / Parse Stage 1 JSON if possible
-        try:
-            extracted_json = extract_json(extracted_data_str)
-            extracted_input = json.dumps(extracted_json)
-        except Exception:
-            extracted_input = extracted_data_str
-
-        # Pause briefly to ensure Ollama releases Stage 1 VRAM
-        import time
-        time.sleep(1)
-
-        # Stage 2: Reasoning Engine
-        reasoning_model = config["reasoning_model"]
-        print(f"[llm_service] [Stage 2: Reasoning Engine] Running {reasoning_model}...")
-        
-        reasoning_num_gpu_env = os.getenv("TWOSTAGE_REASONING_NUM_GPU") or os.getenv("OLLAMA_NUM_GPU")
-        reasoning_options = {}
-        if reasoning_num_gpu_env is not None:
-            reasoning_options["num_gpu"] = int(reasoning_num_gpu_env)
-        elif "30b" in reasoning_model.lower():
-            reasoning_options["num_gpu"] = 12
-
-        try:
-            stage2_response = ollama_chat(
-                model=reasoning_model,
-                messages=[
-                    {"role": "system", "content": f"{system_instruction}\n\nCRITICAL MANDATE: Your output MUST be a valid JSON object matching the requested schema. Ensure 'decision' (BUY|SELL|HOLD), 'confidence' (float 0 to 1), 'reason', 'institutional_data', 'macro_data', 'news', 'investment_bank_coverage', 'risk_assessment', and 'PE_and_PEG' are all populated."},
-                    {"role": "user", "content": f"Structured Financial Intelligence Data:\n{extracted_input}\n\nSynthesize the insights from all sub-agents and return ONLY a valid JSON object matching the required schema."}
-                ],
-                format="json",
-                options=reasoning_options if reasoning_options else None,
-                keep_alive=0
+        return clean_think_tags(
+            query_llamacpp(
+                system_instruction=system_instruction,
+                user_prompt=user_prompt,
+                model_override=config["model"],
+                temperature=temperature,
             )
-            raw_reasoning_out = stage2_response["message"]["content"]
-        except Exception as e:
-            fallback_model = "deepseek-r1:14b" if reasoning_model != "deepseek-r1:14b" else "qwen2.5:14b"
-            print(f"[llm_service] Model {reasoning_model} failed (likely GPU VRAM OOM: {e}). Falling back to {fallback_model}...")
-            try:
-                stage2_response = ollama_chat(
-                    model=fallback_model,
-                    messages=[
-                        {"role": "system", "content": f"{system_instruction}\n\nCRITICAL MANDATE: Your output MUST be a valid JSON object matching the requested schema. Ensure 'decision' (BUY|SELL|HOLD), 'confidence' (float 0 to 1), 'reason', 'institutional_data', 'macro_data', 'news', 'investment_bank_coverage', 'risk_assessment', and 'PE_and_PEG' are all populated."},
-                        {"role": "user", "content": f"Structured Financial Intelligence Data:\n{extracted_input}\n\nSynthesize the insights from all sub-agents and return ONLY a valid JSON object matching the required schema."}
-                    ],
-                    format="json",
-                    keep_alive=0
-                )
-                raw_reasoning_out = stage2_response["message"]["content"]
-            except Exception as e2:
-                secondary_fallback = "qwen2.5:14b"
-                print(f"[llm_service] Fallback model {fallback_model} also failed ({e2}). Falling back to {secondary_fallback}...")
-                stage2_response = ollama_chat(
-                    model=secondary_fallback,
-                    messages=[
-                        {"role": "system", "content": f"{system_instruction}\n\nCRITICAL MANDATE: Your output MUST be a valid JSON object matching the requested schema. Ensure 'decision' (BUY|SELL|HOLD), 'confidence' (float 0 to 1), 'reason', 'institutional_data', 'macro_data', 'news', 'investment_bank_coverage', 'risk_assessment', and 'PE_and_PEG' are all populated."},
-                        {"role": "user", "content": f"Structured Financial Intelligence Data:\n{extracted_input}\n\nSynthesize the insights from all sub-agents and return ONLY a valid JSON object matching the required schema."}
-                    ],
-                    format="json",
-                    keep_alive=0
-                )
-                raw_reasoning_out = stage2_response["message"]["content"]
-
-        cleaned_out = clean_think_tags(raw_reasoning_out)
-        return cleaned_out
-
-    elif provider == "ollama":
-        try:
-            from ollama import chat as ollama_chat
-        except ImportError:
-            raise ImportError("The 'ollama' python package is required for local model execution. Run: pip install ollama")
-
-        model_name = config["model"]
-        chat_kwargs = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": user_prompt}
-            ],
-            "format": "json"
-        }
-        # Hybrid Think/No-Think model: force reasoning on; disable via MINICPM_THINK=0/false/off.
-        # JSON grammar conflicts with the reasoning stream (Ollama PEG 500), so rely on extract_json() when thinking.
-        # Full pipeline prompts exceed the Modelfile's 4096 num_ctx, so raise it; override via MINICPM_CONTEXT.
-        # num_predict caps runaway generation on dense prompts; override via MINICPM_NUM_PREDICT.
-        if key == "minicpm":
-            think_flag = os.getenv("MINICPM_THINK", "1").strip().lower()
-            thinking_on = think_flag not in ("0", "false", "no", "off")
-            chat_kwargs["think"] = thinking_on
-            if thinking_on:
-                chat_kwargs.pop("format")
-            try:
-                num_ctx = int(os.getenv("MINICPM_CONTEXT", "32768"))
-            except ValueError:
-                num_ctx = 32768
-            try:
-                num_predict = int(os.getenv("MINICPM_NUM_PREDICT", "8192"))
-            except ValueError:
-                num_predict = 8192
-            chat_kwargs["options"] = {"num_ctx": num_ctx, "num_predict": num_predict}
-        response_obj = ollama_chat(**chat_kwargs)
-        return clean_think_tags(response_obj["message"]["content"])
+        )
 
     elif provider == "gemini":
         try:
