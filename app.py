@@ -74,10 +74,9 @@ To run a new pipeline analysis, execute in your terminal:
 - `python main.py kimi <TICKER>` (Moonshot AI Kimi-K3 via NVIDIA)
 - `python main.py gemini <TICKER>` (Gemini 3.1 Pro)
 - `python main.py openrouter <TICKER>` (OpenRouter Free Models Router - openrouter/free)
-- `python main.py twostage <TICKER>` (2-Stage: Qwen2.5 14B + Qwen3 30B)
-- `python main.py gemma <TICKER>` (Local gemma4:12b)
-- `python main.py qwen <TICKER>` (Local Qwen2.5 14B)
-- `python main.py minicpm <TICKER>` (Local MiniCPM5-2B - openbmb/minicpm5-2b)
+- `python main.py qwen <TICKER>` (Local Qwen 2.5 14B via Vulkan-enabled llama.cpp)
+- `python main.py llamacpp <TICKER>` (Alias for the local llama.cpp server)
+- `python main.py qwen-llamacpp <TICKER>` (Explicit alias for the local llama.cpp server)
 
 *Example:* `python main.py kimi NVDA` or `python main.py nemotron AAPL`
 

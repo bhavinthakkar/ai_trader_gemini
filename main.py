@@ -6,7 +6,7 @@ import time
 import requests
 from dotenv import load_dotenv
 
-from llm_service import query_llm, get_model_label, extract_json
+from llm_service import query_llm, get_model_label, extract_json, uses_compact_prompt_profile
 from db import init_db, save_results, save_portfolio_review, update_signal_outcomes
 from market_agent import MarketAgent
 from institutional_agent import InstitutionalDataAgent
@@ -687,7 +687,11 @@ def run_portfolio_review(llm_choice: str, temperature: float = None, reasoning_b
         print(f"[Portfolio] Warning: could not inject macro rate data ({e}); the model will report rates as missing.")
 
     rag_service = RAGService()
-    payload = rag_service.get_portfolio_analysis_payload(portfolio)
+    prompt_profile = "compact" if uses_compact_prompt_profile(llm_choice) else "full"
+    payload = rag_service.get_portfolio_analysis_payload(
+        portfolio,
+        prompt_profile=prompt_profile,
+    )
 
     print(f"[Portfolio] Executing portfolio risk review with {get_model_label(llm_choice)}...")
     res_content = query_llm(
@@ -717,13 +721,13 @@ def run_portfolio_review(llm_choice: str, temperature: float = None, reasoning_b
 def main():
     parser = argparse.ArgumentParser(
         description="6-Agent Stock Swing Trading Analysis Pipeline",
-        usage="python main.py {nemotron|ultra|kimi|super|gemini|openrouter|twostage|gemma|qwen|minicpm} [ticker] | python main.py portfolio {model}"
+        usage="python main.py {nemotron|ultra|kimi|super|gemini|openrouter|qwen|llamacpp|qwen-llamacpp} [ticker] | python main.py portfolio {model}"
     )
     parser.add_argument(
         "model_arg",
         nargs="?",
         default=None,
-        help="Required model short name: 'nemotron' / 'ultra' (Nemotron-3 Ultra 550B), 'kimi' (Moonshot AI Kimi-K3), 'super' (Nemotron-3 Super 120B), 'gemini' (Gemini 3.1 Pro), 'openrouter' (OpenRouter Free Models Router - openrouter/free), 'twostage' (Qwen2.5 14B + DeepSeek-R1 14B), 'gemma' (gemma4:12b), 'qwen' (qwen2.5:14b), or 'minicpm' (openbmb/minicpm5-2b)"
+        help="Required model short name: 'nemotron' / 'ultra', 'kimi', 'super', 'gemini', 'openrouter', 'qwen' / 'llamacpp' (local Qwen via Vulkan-enabled llama.cpp), or 'qwen-llamacpp'"
     )
     parser.add_argument(
         "ticker_arg",
@@ -735,7 +739,7 @@ def main():
         "--model", "-m",
         dest="model_opt",
         default=None,
-        help="Model short name: 'nemotron', 'ultra', 'kimi', 'super', 'gemini', 'openrouter', 'free', 'twostage', 'gemma', 'qwen', 'minicpm', or 'portfolio'"
+        help="Model short name: 'nemotron', 'ultra', 'kimi', 'super', 'gemini', 'openrouter', 'free', 'qwen' / 'llamacpp', 'qwen-llamacpp', or 'portfolio'"
     )
     parser.add_argument(
         "--ticker", "-t",
@@ -767,17 +771,15 @@ def main():
     raw_model = args.model_opt or args.model_arg
     if not raw_model:
         print("\n❌ ERROR: Model argument is required!")
-        print("Usage: python main.py {nemotron|ultra|kimi|super|gemini|openrouter|twostage|gemma|qwen|minicpm} [ticker]")
+        print("Usage: python main.py {nemotron|ultra|kimi|super|gemini|openrouter|qwen|llamacpp|qwen-llamacpp} [ticker]")
         print("       python main.py portfolio {model}")
         print("  - nemotron / ultra : Cloud Nemotron-3 Ultra 550B (NVIDIA)")
         print("  - kimi             : Moonshot AI Kimi-K3 (NVIDIA)")
         print("  - super            : Cloud Nemotron-3 Super 120B (NVIDIA)")
         print("  - gemini           : Cloud Gemini 3.1 Pro")
         print("  - openrouter       : OpenRouter Free Models Router (openrouter/free)")
-        print("  - twostage         : 2-Stage Local (qwen2.5:14b extraction + qwen3:30b-a3b-instruct-2507-q4_K_M reasoning)")
-        print("  - gemma            : Local Ollama gemma4:12b")
-        print("  - qwen             : Local Ollama qwen2.5:14b")
-        print("  - minicpm          : Local Ollama openbmb/minicpm5-2b\n")
+        print("  - qwen / llamacpp  : Local Qwen 2.5 14B via Vulkan-enabled llama.cpp")
+        print("  - qwen-llamacpp    : Explicit alias for the Vulkan-enabled llama.cpp server\n")
         sys.exit(1)
 
     model_choice = str(raw_model).strip().lower()
@@ -787,13 +789,12 @@ def main():
         "super", "nemotron-super", "120b",
         "gemini", "openrouter", "free", "openrouter/free",
         "minimax", "minimax-m3", "minimax_m3", "m3",
-        "twostage", "gemma", "qwen", "local",
-        "minicpm", "minicpm5", "minicpm5-2b", "cpm",
+        "qwen", "llamacpp", "qwen-llamacpp",
         "portfolio"
     ]
     if model_choice not in valid_models:
         print(f"\n❌ ERROR: Invalid model choice '{raw_model}'!")
-        print("Supported choices are: 'nemotron' (Ultra 550B), 'kimi' (Kimi-K3), 'super' (120B), 'gemini', 'openrouter', 'twostage', 'gemma', 'qwen', 'minicpm', 'portfolio'\n")
+        print("Supported choices are: 'nemotron' (Ultra 550B), 'kimi' (Kimi-K3), 'super' (120B), 'gemini', 'openrouter', 'qwen' / 'llamacpp' / 'qwen-llamacpp', 'portfolio'\n")
         sys.exit(1)
 
     if model_choice == "portfolio":
@@ -826,6 +827,7 @@ def main():
     rag_service = RAGService()
 
     all_results = []
+    prompt_profile = "compact" if uses_compact_prompt_profile(model_choice) else "full"
 
     for idx, symbol in enumerate(watchlist, 1):
         print(f"\n--- [{idx}/{len(watchlist)}] Processing {symbol} ---")
@@ -864,7 +866,12 @@ def main():
         institutional_payload = institutional_service.get_all_institutional_data(symbol)
 
         # 5. Dense Vector Embedding RAG & Prompt Payload Assembly
-        context = rag_service.get_nemotron_payload(gloomberb_payload, technical_data=m_data, institutional_data=institutional_payload)
+        context = rag_service.get_nemotron_payload(
+            gloomberb_payload,
+            technical_data=m_data,
+            institutional_data=institutional_payload,
+            prompt_profile=prompt_profile,
+        )
 
         # Attach the deterministic 5-pillar scores to m_data so normalize can fall back to them
         # instead of defaults (and so gated_confidence uses real pillar agreement).
