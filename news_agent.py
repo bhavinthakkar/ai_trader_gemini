@@ -31,7 +31,7 @@ class NewsAgent:
     """
     News Agent: Fetches real-time news articles using newsapi.ai (Event Registry)
     or newsapi.org (with an automatic yfinance fallback), synthesizes key developments,
-    and estimates short-term market impact via selected LLM (gemma4:12b or Gemini 3.6 Flash).
+    and estimates short-term market impact via the selected cloud or llama.cpp model.
     """
 
     def __init__(self, model_choice="gemini"):
@@ -373,12 +373,10 @@ Return a JSON object matching this schema:
 """
 
         try:
-            # For news summarization, use single-stage fast extraction (qwen) if twostage/local is selected
-            effective_model = "qwen" if self.model_choice in ["twostage", "local"] else self.model_choice
             res_content = query_llm(
                 system_instruction="You are a financial news, institutional holdings, analyst ratings, SEC corporate filings, macroeconomics, and market/sector sentiment intelligence agent. Analyze news, 13F data, bank ratings, SEC EDGAR filings, FRED macro data, and CNN/Sector sentiment, then output JSON.",
                 user_prompt=prompt,
-                model_choice=effective_model
+                model_choice=self.model_choice
             )
             parsed = extract_json(res_content)
             if isinstance(parsed, dict):
