@@ -213,7 +213,20 @@ To ensure strict system reliability and guarantee that raw LLM text is never for
    FINNHUB_API_KEY=...
    NEWS_API_KEY=...
    FMP_API_KEY=...
+   LLAMACPP_BASE_URL=http://127.0.0.1:11434/v1
+   LLAMACPP_MODEL=qwen2.5
+   LLAMACPP_API_KEY=
+   LLAMACPP_CONTEXT_TOKENS=8192
+   LLAMACPP_MAX_TOKENS=2048
+   LLAMACPP_PROMPT_SAFETY_TOKENS=256
+   LLAMACPP_TEMPERATURE=0.2
+   LLAMACPP_CONNECT_TIMEOUT=5
+   LLAMACPP_READ_TIMEOUT=900
+   LLAMACPP_WRITE_TIMEOUT=30
+   LLAMACPP_POOL_TIMEOUT=10
    ```
+
+   `LLAMACPP_API_KEY` may be omitted when the local server does not require authentication. The application sends requests to the OpenAI-compatible endpoint `<LLAMACPP_BASE_URL>/chat/completions`; it never starts or manages the llama.cpp server itself.
 
 5. **Gloomberb CLI Installation**:
    Ensure official `gloomberb` binary is installed at `~/.local/bin/gloomberb`.
@@ -255,16 +268,46 @@ To ensure strict system reliability and guarantee that raw LLM text is never for
 ./venv/bin/python main.py gemini AAPL
 ```
 
-### **Run Pipeline with Local 2-Stage Ollama Chain**
+### **Run Pipeline with Local Qwen 2.5 14B (llama.cpp + Vulkan)**
+The project uses a separately managed, OpenAI-compatible llama.cpp server. It does not start or manage that server. Build llama.cpp with Vulkan support, then launch the model with an 8192-token context and one generation slot.
+
+For a local llama.cpp checkout on Debian/Ubuntu, install the build prerequisites (including `glslc` and the Vulkan/SPIR-V development packages required by your distribution), then configure and build with Vulkan enabled:
 ```bash
-./venv/bin/python main.py twostage NVDA
+sudo apt install cmake libvulkan-dev glslc
+cmake -S llama.cpp -B llama.cpp/build \
+  -DGGML_VULKAN=ON \
+  -DGGML_NATIVE=ON \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build llama.cpp/build --config Release -j
 ```
 
-### **Run Pipeline with Local MiniCPM5-2B (Ollama)**
+Start the server separately with GPU offload, an 8192-token context, and one slot:
 ```bash
-./venv/bin/python main.py minicpm NVDA
+./llama.cpp/build/bin/llama-server \
+  -m /path/to/qwen2.5-14b-q4_k_m.gguf \
+  --alias qwen2.5 \
+  --host 127.0.0.1 --port 11434 \
+  -c 8192 -np 1 -ngl 99 --flash-attn on
 ```
-> Uses OpenBMB's `openbmb/minicpm5-2b` (2.5B, 128K context, hybrid Think/No-Think reasoning) via the official [Ollama library](https://ollama.com/openbmb/minicpm5-2b) entry. Default tag is `Q4_K_M` (~1.6GB); override the tag with the `MINICPM_MODEL` environment variable (e.g. `MINICPM_MODEL=openbmb/minicpm5-2b:q5_K_M`). Pull it with `ollama pull openbmb/minicpm5-2b`. Reasoning mode is forced ON for analysis (disable with `MINICPM_THINK=0`); context window is raised to 32768 tokens for pipeline prompts (override with `MINICPM_CONTEXT`) and output is capped at 8192 tokens (override with `MINICPM_NUM_PREDICT`). Note: this 2.5B model may struggle with large structured pipeline payloads — for full 9K+ token pipeline runs, prefer `twostage` (Qwen3 30B).
+
+Verify that the OpenAI-compatible endpoint is available before running the application:
+```bash
+curl http://127.0.0.1:11434/v1/models
+```
+
+Then use any of the local aliases:
+```bash
+./venv/bin/python main.py qwen NVDA
+./venv/bin/python main.py llamacpp NVDA
+./venv/bin/python main.py qwen-llamacpp NVDA
+```
+
+These aliases send JSON chat-completion requests to `${LLAMACPP_BASE_URL:-http://127.0.0.1:11434/v1}` and automatically use a compact prompt profile sized for the local 8K context. The client serializes requests because the server has one slot, enforces a 2048-token output reserve plus a safety margin, and leaves the server lifecycle entirely outside this project.
+
+To review the current portfolio with the same local model:
+```bash
+./venv/bin/python main.py portfolio qwen
+```
 
 ### **Run Portfolio Risk Review (Investment-Committee Memo)**
 ```bash
@@ -276,7 +319,7 @@ Runs a portfolio-level risk review using the holdings from the Gloomberb CLI por
 
 ## 🛠️ Technology Stack
 
-* **LLM Reasoning**: Moonshot AI Kimi-K3 (`moonshotai/kimi-k3` via NVIDIA NIM), NVIDIA Nemotron-3 Ultra 550B (`nvidia/nemotron-3-ultra-550b-a55b`) & Super 120B (`nvidia/nemotron-3-super-120b`), OpenRouter Free Models Router (`openrouter/free`, 200k context window), Gemini 3.1 Pro, Ollama Qwen 2.5 14B / Qwen 3 30B, OpenBMB MiniCPM5-2B (`openbmb/minicpm5-2b`, 128K context).
+* **LLM Reasoning**: Moonshot AI Kimi-K3 (`moonshotai/kimi-k3` via NVIDIA NIM), NVIDIA Nemotron-3 Ultra 550B (`nvidia/nemotron-3-ultra-550b-a55b`) & Super 120B (`nvidia/nemotron-3-super-120b`), OpenRouter Free Models Router (`openrouter/free`, 200k context window), Gemini 3.1 Pro, and local Qwen 2.5 14B through Vulkan-enabled llama.cpp (`qwen` / `llamacpp` / `qwen-llamacpp`, 8K compact profile).
 * **Vector Embeddings**: FastEmbed (`BAAI/bge-small-en-v1.5`, 384-dimensional dense vectors).
 * **CLI Terminal Feed**: Official `gloom-sh/gloomberb` CLI.
 * **Macro Data**: FRED API (US Treasury Yield Curve) & CNN Fear & Greed Index.
