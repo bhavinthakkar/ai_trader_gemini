@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import json
 from db import init_db, get_latest_signals, get_signal_history, get_summary_stats, get_outcome_performance_stats, get_latest_portfolio_reviews
+from dashboard import collect_dashboard_data, format_volume
 
 # Page Configuration
 st.set_page_config(
@@ -113,13 +114,18 @@ with col6:
 st.markdown("---")
 
 # Main Content Tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 Latest Signals",
     "🔍 Stock Deep-Dive",
+    "🔥 Most Traded Stocks",
     "📜 Signal History Log",
     "🎯 Model Outcome Tracking",
     "📁 Portfolio Risk Review"
 ])
+
+@st.cache_data(ttl=120)
+def get_cached_active_stocks(limit: int = 10):
+    return collect_dashboard_data(limit=limit)
 
 latest_signals = get_latest_signals()
 
@@ -328,6 +334,83 @@ with tab2:
                 st.json(stock_data.get("raw_json") or json.dumps(stock_data))
 
 with tab3:
+    st.subheader("🔥 Most Traded Stocks Today (Price, Range, Volume & Catalysts)")
+    st.caption("Real-time high-volume market movers and the news catalysts driving heavy trading activity (model-free).")
+
+    top_ctrl1, top_ctrl2, top_ctrl3 = st.columns([2, 1, 1])
+    with top_ctrl1:
+        st.markdown("Tracks the top active tickers by intraday share volume, price channels, RVOL, and news catalysts.")
+    with top_ctrl2:
+        limit_val = st.selectbox("Number of Active Stocks:", options=[10, 15, 20, 25], index=0)
+    with top_ctrl3:
+        if st.button("🔄 Refresh Active Data", key="refresh_active_stocks"):
+            get_cached_active_stocks.clear()
+            st.rerun()
+
+    with st.spinner("Fetching real-time active stocks and news catalysts..."):
+        active_stocks = get_cached_active_stocks(limit=limit_val)
+
+    if not active_stocks:
+        st.warning("No active stocks data available at this time.")
+    else:
+        tot_vol = sum(s.get("volume", 0) for s in active_stocks)
+        vol_leader = active_stocks[0]["symbol"] if active_stocks else "N/A"
+        top_gainer = max(active_stocks, key=lambda x: x.get("change_pct", 0.0))
+        top_loser = min(active_stocks, key=lambda x: x.get("change_pct", 0.0))
+
+        ak1, ak2, ak3, ak4 = st.columns(4)
+        ak1.metric("Active Stocks Tracked", f"{len(active_stocks)} Stocks")
+        ak2.metric("Combined Volume", format_volume(tot_vol))
+        ak3.metric("Top Active Gainer", f"{top_gainer['symbol']} ({top_gainer['change_pct']:+.2f}%)")
+        ak4.metric("Top Active Decliner", f"{top_loser['symbol']} ({top_loser['change_pct']:+.2f}%)")
+
+        st.markdown("---")
+
+        table_rows = []
+        for s in active_stocks:
+            chg = s.get("change_pct", 0.0)
+            sign = "+" if chg >= 0 else ""
+            table_rows.append({
+                "Ticker": s["symbol"],
+                "Company": s["name"],
+                "Price": f"${s['price']:.2f}",
+                "Change": f"{sign}{chg:.2f}% (${sign}{s['change']:.2f})",
+                "Day Low": f"${s['day_low']:.2f}",
+                "Day High": f"${s['day_high']:.2f}",
+                "Volume": format_volume(s["volume"]),
+                "RVOL": f"{s['rvol']:.1f}x",
+                "52W Range": f"${s['low_52w']:.1f} - ${s['high_52w']:.1f}" if s.get('low_52w') else "N/A",
+                "RSI(14)": f"{s['rsi14']:.1f}" if s.get('rsi14') is not None else "N/A",
+                "Catalyst Driver": s["catalyst_type"],
+                "Trading Reason": s["reason_summary"]
+            })
+
+        df_active = pd.DataFrame(table_rows)
+        st.dataframe(df_active, width="stretch", hide_index=True)
+
+        st.markdown("#### 📰 Why Are They Trading So Much Today? (News & Catalyst Drilldown)")
+        for s in active_stocks:
+            chg_sign = "+" if s.get("change_pct", 0.0) >= 0 else ""
+            badge = "🟢" if s.get("change_pct", 0.0) >= 0 else "🔴"
+            with st.expander(f"{badge} **{s['symbol']}** ({s['name']}) — ${s['price']:.2f} ({chg_sign}{s['change_pct']:.2f}%) | Vol: {format_volume(s['volume'])} ({s['rvol']:.1f}x 20d avg)"):
+                m_c1, m_c2, m_c3, m_c4 = st.columns(4)
+                m_c1.metric("Day Low / High", f"${s['day_low']:.2f} - ${s['day_high']:.2f}")
+                m_c2.metric("Market Cap", s["market_cap_str"])
+                m_c3.metric("RVOL (20d avg)", f"{s['rvol']:.1f}x")
+                m_c4.metric("RSI14 / ATR", f"{s.get('rsi14', 'N/A')} / ${s.get('atr', 'N/A')}")
+
+                st.markdown(f"**⚡ Catalyst Tag:** `{s['catalyst_type']}`")
+                st.info(f"**Reason for High Volume:** {s['reason_summary']}")
+
+                news_list = s.get("news", [])
+                if news_list:
+                    st.markdown("**Recent News Headlines:**")
+                    for n in news_list:
+                        pub = f"[{n['publisher']}] " if n.get('publisher') else ""
+                        url = n.get('url', '#')
+                        st.markdown(f"- {pub}[{n['title']}]({url})")
+
+with tab4:
     st.subheader("Historical Signal Analysis Log")
     history_records = get_signal_history(limit=200)
 
@@ -347,7 +430,7 @@ with tab3:
         })
         st.dataframe(df_hist, width="stretch", hide_index=True)
 
-with tab4:
+with tab5:
     st.subheader("🎯 Model Ground-Truth Outcome Tracking & Evaluation")
     st.caption("Tracks how predictions performed over forward 1-to-10 trading days.")
 
@@ -386,7 +469,7 @@ with tab4:
     else:
         st.info("No trade outcomes evaluated yet. Signals need at least 1-10 trading days elapsed to compare against historical market bars.")
 
-with tab5:
+with tab6:
     st.subheader("📁 Portfolio Risk Review (Investment-Committee Memo)")
     st.caption("Stored portfolio risk memos generated via `python main.py portfolio <model>`.")
 

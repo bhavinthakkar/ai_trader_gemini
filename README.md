@@ -206,9 +206,17 @@ To ensure strict system reliability and guarantee that raw LLM text is never for
 4. **Environment Configuration (`.env`)**:
    Create a `.env` file in the root directory:
    ```env
-   NVIDIA_API_KEY=nvapi-...
-   GEMINI_API_KEY=AIzaSy...
-   OPENROUTER_API_KEY=sk-or-v1-...
+NVIDIA_API_KEY=nvapi-...
+GEMINI_API_KEY=AIzaSy...
+OPENROUTER_API_KEY=sk-or-v1-...
+NVIDIA_READ_TIMEOUT=300
+NVIDIA_CONNECT_TIMEOUT=30
+NVIDIA_TOTAL_TIMEOUT=600
+NVIDIA_PROGRESS_INTERVAL=15
+OPENROUTER_READ_TIMEOUT=300
+OPENROUTER_CONNECT_TIMEOUT=30
+OPENROUTER_TOTAL_TIMEOUT=600
+OPENROUTER_PROGRESS_INTERVAL=15
    TELEGRAM_CHANNEL_API_TOKEN=bot...
    FINNHUB_API_KEY=...
    NEWS_API_KEY=...
@@ -224,9 +232,19 @@ To ensure strict system reliability and guarantee that raw LLM text is never for
    LLAMACPP_READ_TIMEOUT=900
    LLAMACPP_WRITE_TIMEOUT=30
    LLAMACPP_POOL_TIMEOUT=10
+   LLAMACPP_SERVER_BIN=~/Desktop/git/Bonsai-demo/bin/vulkan/llama-server
+   LLAMACPP_GGUF_PATH=~/models/qwen2.5-14b-instruct-q4_k_m.gguf
+   LLAMACPP_SERVER_LOG=~/models/llamacpp_server.log
+   LLAMACPP_SERVER_NGL=99
+   LLAMACPP_SERVER_PARALLEL=1
+   LLAMACPP_SERVER_ALIAS=qwen2.5
+   LLAMACPP_STARTUP_TIMEOUT=300
+   LLAMACPP_SHUTDOWN_TIMEOUT=30
    ```
 
-   `LLAMACPP_API_KEY` may be omitted when the local server does not require authentication. The application sends requests to the OpenAI-compatible endpoint `<LLAMACPP_BASE_URL>/chat/completions`; it never starts or manages the llama.cpp server itself.
+   `LLAMACPP_API_KEY` may be omitted when the local server does not require authentication. The application sends requests to the OpenAI-compatible endpoint `<LLAMACPP_BASE_URL>/chat/completions`.
+
+   The last seven variables control **auto-start**. They are only read when a `llama.cpp` alias is selected, and all of them are optional: `LLAMACPP_SERVER_BIN` and `LLAMACPP_GGUF_PATH` fall back to auto-discovery, and the remaining values fall back to the defaults shown above. `LLAMACPP_SERVER_NGL` must stay explicit — `-ngl -1` (auto-detect) hangs on the Vulkan build and can crash the host, so the value is rejected if it is negative. Extra slots (`LLAMACPP_SERVER_PARALLEL` > 1) exhaust UMA memory and severely slow Vulkan. `LLAMACPP_SERVER_ALIAS` must match `LLAMACPP_MODEL` so the client and the server agree on the model name.
 
 5. **Gloomberb CLI Installation**:
    Ensure official `gloomberb` binary is installed at `~/.local/bin/gloomberb`.
@@ -255,6 +273,55 @@ To ensure strict system reliability and guarantee that raw LLM text is never for
 ./venv/bin/python main.py nemotron NVDA,META,TSLA
 ```
 
+### **Run Pipeline with Nemotron-3 Ultra 550B + Super 120B Fallback (`free`)**
+```bash
+./venv/bin/python main.py free AAPL
+```
+```bash
+./venv/bin/python main.py free NVDA,TSLA
+```
+
+`free` is a "best free reasoning model" preset rather than a zero-cost tier: it needs `NVIDIA_API_KEY` and draws on NVIDIA NIM quota, not OpenRouter credits. It calls Nemotron-3 Ultra 550B first and, if that call stalls, transparently retries against Nemotron-3 Super 120B (`nvidia/nemotron-3-super-120b-a12b`) instead of waiting out a second Ultra attempt. Rate limits (429) and 502/503/504 gateway errors advance to the same fallback. The active model is printed in the run log, and the model actually used is recorded on the analysis record.
+
+NVIDIA and OpenRouter responses are consumed as a stream, so the request timeout only guards the gap *between* tokens rather than total generation time. A large reasoning model routinely spends minutes generating after a sub-second time-to-first-token, and buffering the whole response made the old non-streaming timeout kill healthy requests.
+
+NVIDIA terminates a stream with `finish_reason: "stop"` and does not reliably send a trailing `[DONE]` sentinel, so the reader stops on either signal. Relying on `[DONE]` alone left the client blocked on an open connection indefinitely. Progress is logged every `NVIDIA_PROGRESS_INTERVAL` seconds, including during the long silent reasoning phase before the first output token, so a slow model is visibly alive rather than looking frozen.
+
+Generation is bounded on three axes so a call can never run away:
+
+| Variable | Default | Guards |
+|---|---|---|
+| `NVIDIA_CONNECT_TIMEOUT` | 30s | TCP/TLS establishment |
+| `NVIDIA_READ_TIMEOUT` | 300s | silence *between* tokens (a true stall) |
+| `NVIDIA_TOTAL_TIMEOUT` | 600s | total wall clock across all candidate models |
+| `OPENROUTER_READ_TIMEOUT` | 300s | silence between tokens (OpenRouter) |
+| `OPENROUTER_TOTAL_TIMEOUT` | 600s | total wall clock across OpenRouter candidates |
+
+When the total budget is hit the current model is abandoned and the fallback is tried; if none remain, the call raises. Lower `REASONING_BUDGET` (default 16000) if you want shorter generations.
+
+> Note: `kimi` currently points at `moonshotai/kimi-k3`, which the NVIDIA gateway is returning `504` for (after ~300s, at every reasoning effort). The retired `moonshotai/kimi-k2-instruct` and `kimi-k2-thinking` return `410 Gone`, and `moonshotai/kimi-k2.6` returns `404`. Use `free` or `super` until Kimi is served again.
+
+To reach OpenRouter's free-model router instead, pass `openrouter` (or `openrouter/free`).
+
+### **Run Pipeline with Space Bunny Alpha (`bunny`, free, 1M context)**
+```bash
+./venv/bin/python main.py bunny ORCL
+```
+```bash
+./venv/bin/python main.py bunny ORCL,NVDA
+```
+
+`bunny` calls `stealth/space-bunny-alpha` on OpenRouter and needs `OPENROUTER_API_KEY`. Pricing is **$0 per token** with a 1M-token context window, so it costs nothing but consumes no NVIDIA quota either.
+
+Its reasoning is **mandatory** and defaults to `max` effort, which is slow — roughly **214s** on a ~6.8k-token prompt versus **39s** at `low` effort. The client therefore pins `reasoning_effort=low` for this model. Override it when you want deeper reasoning and can accept the latency:
+```bash
+./venv/bin/python main.py bunny ORCL --reasoning-effort high
+```
+
+On an identical prompt, for reference: `bunny` 39.2s, Nemotron-3 Super 120B 101.4s, Nemotron-3 Ultra 550B 191.7s.
+
+The model is anonymous, about a week old, unmoderated, and not version-pinned, so outputs are not reproducible or auditable. It is exposed as a separate opt-in choice and does not alter the `free` preset. Because it is free with no stated guarantee of continued availability, it has no fallback model configured — a failure raises rather than silently switching.
+
 ### **Run Pipeline with OpenRouter Free Models Router (`openrouter/free`)**
 ```bash
 ./venv/bin/python main.py openrouter AAPL
@@ -269,7 +336,9 @@ To ensure strict system reliability and guarantee that raw LLM text is never for
 ```
 
 ### **Run Pipeline with Local Qwen 2.5 14B (llama.cpp + Vulkan)**
-The project uses a separately managed, OpenAI-compatible llama.cpp server. It does not start or manage that server. Build llama.cpp with Vulkan support, then launch the model with an 8192-token context and one generation slot.
+Selecting a `llama.cpp` alias starts the local server for you. The pipeline launches `llama-server`, blocks until the OpenAI-compatible endpoint answers, runs the analysis, and then stops the server so it does not sit in VRAM between runs. If a server is already listening on the configured port, it is reused and left running, because the application does not own it.
+
+The only prerequisite is a `llama-server` binary and a GGUF model. Both are auto-discovered (`LLAMACPP_SERVER_BIN`, then `LLAMACPP_GGUF_PATH`, then `$PATH`); override them with the `LLAMACPP_SERVER_BIN` and `LLAMACPP_GGUF_PATH` variables documented in the environment section above.
 
 For a local llama.cpp checkout on Debian/Ubuntu, install the build prerequisites (including `glslc` and the Vulkan/SPIR-V development packages required by your distribution), then configure and build with Vulkan enabled:
 ```bash
@@ -281,7 +350,16 @@ cmake -S llama.cpp -B llama.cpp/build \
 cmake --build llama.cpp/build --config Release -j
 ```
 
-Start the server separately with GPU offload, an 8192-token context, and one slot:
+Use any of the local aliases:
+```bash
+./venv/bin/python main.py qwen NVDA
+./venv/bin/python main.py llamacpp NVDA
+./venv/bin/python main.py qwen-llamacpp NVDA
+```
+
+These aliases send JSON chat-completion requests to `${LLAMACPP_BASE_URL:-http://127.0.0.1:11434/v1}` and automatically use a compact prompt profile sized for the local 8K context. The client serializes requests because the server has one slot and enforces a 2048-token output reserve plus a safety margin.
+
+The auto-started server is launched with the equivalent of:
 ```bash
 ./llama.cpp/build/bin/llama-server \
   -m /path/to/qwen2.5-14b-q4_k_m.gguf \
@@ -290,21 +368,7 @@ Start the server separately with GPU offload, an 8192-token context, and one slo
   -c 8192 -np 1 -ngl 99 --flash-attn on
 ```
 
-Verify that the OpenAI-compatible endpoint is available before running the application:
-```bash
-curl http://127.0.0.1:11434/v1/models
-```
-
-Then use any of the local aliases:
-```bash
-./venv/bin/python main.py qwen NVDA
-./venv/bin/python main.py llamacpp NVDA
-./venv/bin/python main.py qwen-llamacpp NVDA
-```
-
-These aliases send JSON chat-completion requests to `${LLAMACPP_BASE_URL:-http://127.0.0.1:11434/v1}` and automatically use a compact prompt profile sized for the local 8K context. The client serializes requests because the server has one slot, enforces a 2048-token output reserve plus a safety margin, and leaves the server lifecycle entirely outside this project.
-
-To review the current portfolio with the same local model:
+Startup is gated on `LLAMACPP_STARTUP_TIMEOUT` (default 300s, which covers a cold Vulkan model load). If the binary exits during startup, the error includes its exit code and the tail of `LLAMACPP_SERVER_LOG`. To review the current portfolio with the same local model:
 ```bash
 ./venv/bin/python main.py portfolio qwen
 ```
@@ -319,7 +383,7 @@ Runs a portfolio-level risk review using the holdings from the Gloomberb CLI por
 
 ## 🛠️ Technology Stack
 
-* **LLM Reasoning**: Moonshot AI Kimi-K3 (`moonshotai/kimi-k3` via NVIDIA NIM), NVIDIA Nemotron-3 Ultra 550B (`nvidia/nemotron-3-ultra-550b-a55b`) & Super 120B (`nvidia/nemotron-3-super-120b`), OpenRouter Free Models Router (`openrouter/free`, 200k context window), Gemini 3.1 Pro, and local Qwen 2.5 14B through Vulkan-enabled llama.cpp (`qwen` / `llamacpp` / `qwen-llamacpp`, 8K compact profile).
+* **LLM Reasoning**: Moonshot AI Kimi-K3 (`moonshotai/kimi-k3` via NVIDIA NIM), NVIDIA Nemotron-3 Ultra 550B (`nvidia/nemotron-3-ultra-550b-a55b`) & Super 120B (`nvidia/nemotron-3-super-120b`), the `free` preset (Ultra 550B first, Super 120B fallback on stall), Space Bunny Alpha (`bunny` via OpenRouter, $0/token, 1M context), OpenRouter Free Models Router (`openrouter/free`, 200k context window), Gemini 3.1 Pro, and local Qwen 2.5 14B through Vulkan-enabled llama.cpp (`qwen` / `llamacpp` / `qwen-llamacpp`, 8K compact profile).
 * **Vector Embeddings**: FastEmbed (`BAAI/bge-small-en-v1.5`, 384-dimensional dense vectors).
 * **CLI Terminal Feed**: Official `gloom-sh/gloomberb` CLI.
 * **Macro Data**: FRED API (US Treasury Yield Curve) & CNN Fear & Greed Index.

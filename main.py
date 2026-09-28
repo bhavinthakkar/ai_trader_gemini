@@ -7,6 +7,7 @@ import requests
 from dotenv import load_dotenv
 
 from llm_service import query_llm, get_model_label, extract_json, uses_compact_prompt_profile
+from llamacpp_server import managed_llamacpp_server
 from db import init_db, save_results, save_portfolio_review, update_signal_outcomes
 from market_agent import MarketAgent
 from institutional_agent import InstitutionalDataAgent
@@ -19,6 +20,15 @@ from gloomberb_service import GloomberbService
 from institutional_data_service import InstitutionalDataService
 from rag_service import RAGService
 from quantitative_scoring_service import QuantitativeScoringService
+from catalyst_service import (
+    DIP_BUY,
+    EXTENSION_SELL,
+    DIP_MIN_COMPOSITE,
+    CATALYST_CONFIDENCE_BOOST,
+    CATALYST_CONFIDENCE_CEILING,
+    build_relevance_needles,
+    evaluate_catalyst_setup,
+)
 from signal_schema import validate_signal_json
 
 WATCHLIST = ["000660.KS"]
@@ -321,15 +331,58 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         and (avg_dollar_vol_20d_val is None or avg_dollar_vol_20d_val >= LIQUIDITY_MIN_AVG_DOLLAR_VOL_20D)
     )
 
+    # Catalyst overlay (additive). A headline alone still cannot initiate a trade: the certificate
+    # must also prove a measured price/fundamental dislocation. Computed unconditionally for audit.
+    catalyst_setup = evaluate_catalyst_setup(
+        m_data,
+        deterministic_scores,
+        gloomberb_payload.get("news", []) or [],
+        build_relevance_needles(symbol),
+    )
+    catalyst_qualified = bool(catalyst_setup.get("qualified"))
+    catalyst_direction = catalyst_setup.get("direction")
+
+    # A certificate only unlocks the direction it proves: DIP_BUY never authorises a SELL, nor the reverse.
+    catalyst_allows = {
+        DIP_BUY: "BUY",
+        EXTENSION_SELL: "SELL",
+    }.get(catalyst_direction)
+    # MACRO_EVENT is never unlocks-able: the certificate is built from ticker-specific news, so a
+    # macro-tagged trade is a misclassification of a move this system most wants to refuse.
+    catalyst_path = (
+        catalyst_qualified
+        and catalyst_allows == decision
+        and primary_driver == "NEWS_CATALYST"
+    )
+
     if decision in ("BUY", "SELL") and primary_driver in ("NEWS_CATALYST", "MACRO_EVENT"):
-        decision = "HOLD"
-        gates_applied = True
-        no_trade_reason = "INSUFFICIENT_EVIDENCE"
+        if catalyst_path:
+            _append_risk(
+                f"Catalyst certificate '{catalyst_direction}' unlocked this {decision} despite "
+                f"primary_driver '{primary_driver}': {catalyst_setup.get('reasons', [''])[0]} "
+                f"All non-catalyst gates still apply."
+            )
+        else:
+            requested = decision
+            decision = "HOLD"
+            gates_applied = True
+            no_trade_reason = "INSUFFICIENT_EVIDENCE"
+            catalyst_refusal = (catalyst_setup.get("reasons") or ["no certificate"])[0]
+            _append_risk(
+                f"{requested} capped to HOLD: primary_driver '{primary_driver}' is an external "
+                f"event; news/geopolitical/macro headlines can confirm or veto but cannot initiate "
+                f"a directional trade. Catalyst certificate check: {catalyst_refusal} "
+                f"Re-anchor the trade on price structure + composite + setup geometry."
+            )
+
+    # Bounded lift: a catalyst may corroborate, never manufacture high conviction.
+    if catalyst_path and confidence < CATALYST_CONFIDENCE_CEILING:
+        confidence = round(
+            min(confidence + CATALYST_CONFIDENCE_BOOST, CATALYST_CONFIDENCE_CEILING), 2
+        )
         _append_risk(
-            f"{'BUY' if decision == 'HOLD' and buy_score > sell_score else 'SELL'} capped to HOLD: "
-            f"primary_driver '{primary_driver}' is an external event; news/geopolitical/macro "
-            f"headlines can confirm or veto but cannot initiate a directional trade. "
-            f"Re-anchor the trade on price structure + composite + setup geometry."
+            f"Confidence lifted to {confidence} by verified catalyst certificate '{catalyst_direction}' "
+            f"(capped at {CATALYST_CONFIDENCE_CEILING})."
         )
 
     # Deterministic BUY gates: momentum/valuation anchors cannot override setup geometry or risk.
@@ -340,8 +393,12 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         det_composite = deterministic_scores.get("composite_quantitative_score")
         if det_composite is None:
             det_composite = deterministic_scores.get("raw_composite")
+        # A certified catalyst dip buys a discount the composite cannot score, because the composite
+        # reads the selloff itself as weak trend/alpha. That path carries its own, stricter floor
+        # plus the independent valuation-pillar, RSI, RVOL and collapse checks in the certificate.
+        buy_composite_floor = DIP_MIN_COMPOSITE if catalyst_path else 70.0
         try:
-            composite_ok = det_composite is not None and float(det_composite) >= 70.0
+            composite_ok = det_composite is not None and float(det_composite) >= buy_composite_floor
         except (TypeError, ValueError):
             composite_ok = False
 
@@ -537,113 +594,13 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     }
 
 
-def format_telegram_digest(results, model_label="Nemotron-3 Super 120B"):
-    lines = [f"⚡ *Gloomberb Multi-Pillar RAG Digest ({model_label})* ⚡\n"]
-    emoji_map = {"BUY": "🟢", "SELL": "🔴", "HOLD": "⚪"}
-
-    for item in results:
-        stock = item.get("stock", "N/A")
-        decision = str(item.get("decision", "HOLD")).upper()
-        confidence = item.get("confidence", 0.70)
-        buy_score = item.get("buy_score", 0.0)
-        hold_score = item.get("hold_score", 0.0)
-        sell_score = item.get("sell_score", 0.0)
-        horizon = item.get("horizon_days", 10)
-        quant_score = item.get("quant_score", 65.0)
-        pillars = item.get("pillar_scores", {})
-        completeness = item.get("data_completeness", 0.85)
-        emoji = emoji_map.get(decision, "⚪")
-
-        lines.append(f"{emoji} *{stock}* | *{decision}* (Conf: {confidence} | {horizon}d Horizon)")
-        no_trade_reason = item.get("no_trade_reason")
-        if no_trade_reason:
-            lines.append(f"• *No-Trade:* `{no_trade_reason}`")
-        vol_factor = item.get("vol_factor", 1.0)
-        atr_pct = item.get("atr_pct", 0.0)
-        lines.append(f"• *Quant Score:* `{quant_score}/100` | *Vol Factor:* `{vol_factor}` (ATR {atr_pct}%) | *Data Coverage:* `{int(completeness * 100)}%`")
-
-        rr = item.get("reward_risk_ratio")
-        breakeven = item.get("breakeven_win_rate")
-        if rr is not None:
-            be_str = f"{breakeven * 100:.0f}%" if isinstance(breakeven, (int, float)) else "N/A"
-            lines.append(f"• *Reward:Risk:* `{rr}` (breakeven win rate: `{be_str}`)")
-        lines.append(f"• *Pillars:* Trend: {pillars.get('trend', 0)} | Sector: {pillars.get('sector', 0)} | Alpha: {pillars.get('alpha', 0)} | ValHist: {pillars.get('valuation_history', 0)} | PeerVal: {pillars.get('peer_valuation', 0)}")
-        lines.append(f"• *Probabilities:* Buy: {buy_score} | Hold: {hold_score} | Sell: {sell_score}")
-        driver = item.get("primary_driver")
-        if driver and str(driver).strip() and str(driver).strip().upper() != "NONE":
-            lines.append(f"• *Primary Driver:* `{driver}`")
-
-        bull_items = item.get("bull_case", [])
-        if bull_items:
-            lines.append("• *Bull Case:*")
-            for b in bull_items:
-                lines.append(f"  - _{b}_")
-
-        bear_items = item.get("bear_case", [])
-        if bear_items:
-            lines.append("• *Bear Case:*")
-            for b in bear_items:
-                lines.append(f"  - _{b}_")
-
-        risk_items = item.get("key_risks", [])
-        if risk_items:
-            lines.append("• *Key Risks:*")
-            for r in risk_items:
-                lines.append(f"  - _{r}_")
-
-        missing_items = item.get("missing_information", [])
-        if missing_items and missing_items != ["None"]:
-            lines.append("• *Missing Info:*")
-            for m in missing_items:
-                lines.append(f"  - _{m}_")
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-def send_telegram_digest(token, chat_id, text):
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-
-    if len(text) <= 4000:
-        res = requests.post(
-            url,
-            json={
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "Markdown"
-            }
-        )
-        if res.status_code == 200:
-            print("\nTelegram digest message sent successfully!")
-        else:
-            print(f"\nTelegram error: {res.status_code} {res.text}")
-    else:
-        blocks = text.split("\n\n")
-        current_chunk = ""
-        chunks = []
-        for block in blocks:
-            if len(current_chunk) + len(block) + 2 > 3800:
-                chunks.append(current_chunk)
-                current_chunk = block
-            else:
-                current_chunk = (current_chunk + "\n\n" + block).strip()
-        if current_chunk:
-            chunks.append(current_chunk)
-
-        for idx, chunk in enumerate(chunks):
-            res = requests.post(
-                url,
-                json={
-                    "chat_id": chat_id,
-                    "text": chunk,
-                    "parse_mode": "Markdown"
-                }
-            )
-            if res.status_code == 200:
-                print(f"Telegram digest part {idx+1}/{len(chunks)} sent.")
-            else:
-                print(f"Telegram error on part {idx+1}: {res.status_code} {res.text}")
-            time.sleep(1)
+from telegram_digest import (
+    _clean_telegram_markdown,
+    _truncate_telegram_text,
+    split_telegram_text,
+    format_telegram_digest,
+    send_telegram_digest,
+)
 
 
 def run_portfolio_review(llm_choice: str, temperature: float = None, reasoning_budget: int = None, reasoning_effort: str = None) -> dict:
@@ -771,13 +728,15 @@ def main():
     raw_model = args.model_opt or args.model_arg
     if not raw_model:
         print("\n❌ ERROR: Model argument is required!")
-        print("Usage: python main.py {nemotron|ultra|kimi|super|gemini|openrouter|qwen|llamacpp|qwen-llamacpp} [ticker]")
+        print("Usage: python main.py {nemotron|ultra|kimi|super|gemini|openrouter|free|bunny|qwen|llamacpp|qwen-llamacpp} [ticker]")
         print("       python main.py portfolio {model}")
         print("  - nemotron / ultra : Cloud Nemotron-3 Ultra 550B (NVIDIA)")
         print("  - kimi             : Moonshot AI Kimi-K3 (NVIDIA)")
         print("  - super            : Cloud Nemotron-3 Super 120B (NVIDIA)")
         print("  - gemini           : Cloud Gemini 3.1 Pro")
         print("  - openrouter       : OpenRouter Free Models Router (openrouter/free)")
+        print("  - free             : Nemotron-3 Ultra 550B first, Super 120B fallback on stall")
+        print("  - bunny            : Space Bunny Alpha via OpenRouter (free, 1M context)")
         print("  - qwen / llamacpp  : Local Qwen 2.5 14B via Vulkan-enabled llama.cpp")
         print("  - qwen-llamacpp    : Explicit alias for the Vulkan-enabled llama.cpp server\n")
         sys.exit(1)
@@ -788,13 +747,14 @@ def main():
         "kimi", "kimi-k3", "k3", "moonshot",
         "super", "nemotron-super", "120b",
         "gemini", "openrouter", "free", "openrouter/free",
+        "bunny", "space-bunny", "sb",
         "minimax", "minimax-m3", "minimax_m3", "m3",
         "qwen", "llamacpp", "qwen-llamacpp",
         "portfolio"
     ]
     if model_choice not in valid_models:
         print(f"\n❌ ERROR: Invalid model choice '{raw_model}'!")
-        print("Supported choices are: 'nemotron' (Ultra 550B), 'kimi' (Kimi-K3), 'super' (120B), 'gemini', 'openrouter', 'qwen' / 'llamacpp' / 'qwen-llamacpp', 'portfolio'\n")
+        print("Supported choices are: 'nemotron' (Ultra 550B), 'kimi' (Kimi-K3), 'super' (120B), 'gemini', 'openrouter', 'free' (Ultra 550B then Super 120B), 'bunny' (Space Bunny Alpha, free 1M-context), 'qwen' / 'llamacpp' / 'qwen-llamacpp', 'portfolio'\n")
         sys.exit(1)
 
     if model_choice == "portfolio":
@@ -802,12 +762,13 @@ def main():
         if not llm_choice or str(llm_choice).strip().lower() not in [m for m in valid_models if m != "portfolio"]:
             print("\n❌ ERROR: Portfolio review requires an LLM model choice, e.g. `python main.py portfolio gemini`.")
             sys.exit(1)
-        run_portfolio_review(
-            llm_choice,
-            temperature=args.temperature,
-            reasoning_budget=args.reasoning_budget,
-            reasoning_effort=args.reasoning_effort
-        )
+        with managed_llamacpp_server(llm_choice):
+            run_portfolio_review(
+                llm_choice,
+                temperature=args.temperature,
+                reasoning_budget=args.reasoning_budget,
+                reasoning_effort=args.reasoning_effort
+            )
         return
 
     raw_ticker = args.ticker_opt or args.ticker_arg
@@ -816,180 +777,181 @@ def main():
     else:
         watchlist = WATCHLIST
 
-    model_label = get_model_label(model_choice)
+    with managed_llamacpp_server(model_choice):
+        model_label = get_model_label(model_choice)
 
-    print(f"=== Initializing Gloomberb RAG & Technical Analysis Pipeline (Model: {model_label}) ===")
-    print(f"Target Watchlist: {', '.join(watchlist)}")
-    market_agent = MarketAgent()
-    macro_agent = MacroDataAgent()
-    gloomberb_service = GloomberbService()
-    institutional_service = InstitutionalDataService()
-    rag_service = RAGService()
+        print(f"=== Initializing Gloomberb RAG & Technical Analysis Pipeline (Model: {model_label}) ===")
+        print(f"Target Watchlist: {', '.join(watchlist)}")
+        market_agent = MarketAgent()
+        macro_agent = MacroDataAgent()
+        gloomberb_service = GloomberbService()
+        institutional_service = InstitutionalDataService()
+        rag_service = RAGService()
 
-    all_results = []
-    prompt_profile = "compact" if uses_compact_prompt_profile(model_choice) else "full"
+        all_results = []
+        prompt_profile = "compact" if uses_compact_prompt_profile(model_choice) else "full"
 
-    for idx, symbol in enumerate(watchlist, 1):
-        print(f"\n--- [{idx}/{len(watchlist)}] Processing {symbol} ---")
+        for idx, symbol in enumerate(watchlist, 1):
+            print(f"\n--- [{idx}/{len(watchlist)}] Processing {symbol} ---")
 
-        # 1. Technical Data Collection (RSI / EMA / ATR / Volume / RVOL / Channels)
-        m_data = market_agent.analyze(symbol)
-        if not m_data:
-            print(f"Skipping {symbol}: Insufficient price data.")
-            continue
+            # 1. Technical Data Collection (RSI / EMA / ATR / Volume / RVOL / Channels)
+            m_data = market_agent.analyze(symbol)
+            if not m_data:
+                print(f"Skipping {symbol}: Insufficient price data.")
+                continue
 
-        # 2. Macro Data Stream (FRED Yield Curve, Spreads, 10Y Real Yield, 5d Velocity, Fed Funds, CFTC COT)
-        macro_data = macro_agent.analyze(symbol)
+            # 2. Macro Data Stream (FRED Yield Curve, Spreads, 10Y Real Yield, 5d Velocity, Fed Funds, CFTC COT)
+            macro_data = macro_agent.analyze(symbol)
 
-        # 3. Gloomberb Data Source Stream (News, Filings, Financials, Options, Insiders, Peer Valuation)
-        gloomberb_payload = gloomberb_service.get_all_gloomberb_data(symbol)
-        if macro_data:
-            macro_econ = gloomberb_payload.setdefault("macro_econ", {})
-            iro = macro_econ.setdefault("interest_rate_outlook", {})
-            if iro.get("yield_10y") in ["N/A", None] and macro_data.get("us_10y_yield") != "N/A":
-                iro["yield_10y"] = macro_data.get("us_10y_yield")
-            if iro.get("yield_2y") in ["N/A", None] and macro_data.get("us_2y_yield") != "N/A":
-                iro["yield_2y"] = macro_data.get("us_2y_yield")
-            if iro.get("yield_curve_spread_2y10y") in ["N/A", None] and macro_data.get("yield_curve_spread_10y2y") != "N/A":
-                iro["yield_curve_spread_2y10y"] = macro_data.get("yield_curve_spread_10y2y")
-            if iro.get("yield_curve_status") in ["N/A", None] and macro_data.get("yield_curve_status") != "N/A":
-                iro["yield_curve_status"] = macro_data.get("yield_curve_status")
-            if macro_data.get("us_10y_real_yield"):
-                iro["yield_10y_real"] = macro_data.get("us_10y_real_yield")
-            if macro_data.get("us_10y_yield_5d_change"):
-                iro["yield_10y_5d_change"] = macro_data.get("us_10y_yield_5d_change")
-            if iro.get("fed_funds_rate") in ["N/A", None] and macro_data.get("fed_funds_rate") != "N/A":
-                iro["fed_funds_rate"] = macro_data.get("fed_funds_rate")
-            macro_econ["cftc_cot"] = macro_data.get("cftc_cot_summary", "")
+            # 3. Gloomberb Data Source Stream (News, Filings, Financials, Options, Insiders, Peer Valuation)
+            gloomberb_payload = gloomberb_service.get_all_gloomberb_data(symbol)
+            if macro_data:
+                macro_econ = gloomberb_payload.setdefault("macro_econ", {})
+                iro = macro_econ.setdefault("interest_rate_outlook", {})
+                if iro.get("yield_10y") in ["N/A", None] and macro_data.get("us_10y_yield") != "N/A":
+                    iro["yield_10y"] = macro_data.get("us_10y_yield")
+                if iro.get("yield_2y") in ["N/A", None] and macro_data.get("us_2y_yield") != "N/A":
+                    iro["yield_2y"] = macro_data.get("us_2y_yield")
+                if iro.get("yield_curve_spread_2y10y") in ["N/A", None] and macro_data.get("yield_curve_spread_10y2y") != "N/A":
+                    iro["yield_curve_spread_2y10y"] = macro_data.get("yield_curve_spread_10y2y")
+                if iro.get("yield_curve_status") in ["N/A", None] and macro_data.get("yield_curve_status") != "N/A":
+                    iro["yield_curve_status"] = macro_data.get("yield_curve_status")
+                if macro_data.get("us_10y_real_yield"):
+                    iro["yield_10y_real"] = macro_data.get("us_10y_real_yield")
+                if macro_data.get("us_10y_yield_5d_change"):
+                    iro["yield_10y_5d_change"] = macro_data.get("us_10y_yield_5d_change")
+                if iro.get("fed_funds_rate") in ["N/A", None] and macro_data.get("fed_funds_rate") != "N/A":
+                    iro["fed_funds_rate"] = macro_data.get("fed_funds_rate")
+                macro_econ["cftc_cot"] = macro_data.get("cftc_cot_summary", "")
 
-        # 4. Institutional Multi-Source Data Stream (IR, SEC direct, Earnings calls, Press releases, Reputable news)
-        institutional_payload = institutional_service.get_all_institutional_data(symbol)
+            # 4. Institutional Multi-Source Data Stream (IR, SEC direct, Earnings calls, Press releases, Reputable news)
+            institutional_payload = institutional_service.get_all_institutional_data(symbol)
 
-        # 5. Dense Vector Embedding RAG & Prompt Payload Assembly
-        context = rag_service.get_nemotron_payload(
-            gloomberb_payload,
-            technical_data=m_data,
-            institutional_data=institutional_payload,
-            prompt_profile=prompt_profile,
-        )
-
-        # Attach the deterministic 5-pillar scores to m_data so normalize can fall back to them
-        # instead of defaults (and so gated_confidence uses real pillar agreement).
-        if isinstance(m_data, dict):
-            m_data = dict(m_data)
-            m_data["deterministic_5pillar_scores"] = QuantitativeScoringService().compute_5pillar_scores(
-                m_data, gloomberb_payload, gloomberb_payload.get("sector_benchmark", {})
-            )
-            # Deterministic data completeness: computed from live provider availability once.
-            # The LLM's own claim (model_data_completeness) is stored separately and never authoritative.
-            m_data["deterministic_data_completeness"] = QuantitativeScoringService.compute_data_coverage(
-                m_data, macro_data, gloomberb_payload, institutional_payload
+            # 5. Dense Vector Embedding RAG & Prompt Payload Assembly
+            context = rag_service.get_nemotron_payload(
+                gloomberb_payload,
+                technical_data=m_data,
+                institutional_data=institutional_payload,
+                prompt_profile=prompt_profile,
             )
 
-        # 6. Model Reasoning Core & Market Analysis
-        print(f"[{model_label}] Executing market analysis for {symbol}...")
+            # Attach the deterministic 5-pillar scores to m_data so normalize can fall back to them
+            # instead of defaults (and so gated_confidence uses real pillar agreement).
+            if isinstance(m_data, dict):
+                m_data = dict(m_data)
+                m_data["deterministic_5pillar_scores"] = QuantitativeScoringService().compute_5pillar_scores(
+                    m_data, gloomberb_payload, gloomberb_payload.get("sector_benchmark", {})
+                )
+                # Deterministic data completeness: computed from live provider availability once.
+                # The LLM's own claim (model_data_completeness) is stored separately and never authoritative.
+                m_data["deterministic_data_completeness"] = QuantitativeScoringService.compute_data_coverage(
+                    m_data, macro_data, gloomberb_payload, institutional_payload
+                )
 
-        try:
-            res_content = query_llm(
-                system_instruction=context["system_instruction"],
-                user_prompt=context["user_prompt"],
-                model_choice=model_choice,
-                temperature=args.temperature,
-                reasoning_budget=args.reasoning_budget,
-                reasoning_effort=args.reasoning_effort
-            )
-            parsed = extract_json(res_content)
+            # 6. Model Reasoning Core & Market Analysis
+            print(f"[{model_label}] Executing market analysis for {symbol}...")
 
-            res_obj = None
-            if isinstance(parsed, dict):
-                res_obj = parsed
-            elif isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], dict):
-                res_obj = parsed[0]
+            try:
+                res_content = query_llm(
+                    system_instruction=context["system_instruction"],
+                    user_prompt=context["user_prompt"],
+                    model_choice=model_choice,
+                    temperature=args.temperature,
+                    reasoning_budget=args.reasoning_budget,
+                    reasoning_effort=args.reasoning_effort
+                )
+                parsed = extract_json(res_content)
 
-            schema_failed = False
-            if res_obj:
-                validated, errors = validate_signal_json(res_obj)
+                res_obj = None
+                if isinstance(parsed, dict):
+                    res_obj = parsed
+                elif isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], dict):
+                    res_obj = parsed[0]
 
-                # One constrained corrective retry on strict schema violations.
-                if errors:
-                    print(f"[{model_label}] Schema validation failed for {symbol}; issuing one corrective retry...")
-                    retry_prompt = (
-                        f"{context['user_prompt']}\n\n"
-                        "=== SCHEMA VALIDATION FAILED -- RESUBMIT ONLY THE FIXED JSON ===\n"
-                        "Your previous response failed strict schema validation. Correct EVERY "
-                        "violation below and return ONLY a single valid JSON object with the exact "
-                        "same golden keys (decision, primary_driver, buy_score, hold_score, "
-                        "sell_score, horizon_days, quant_score, pillar_scores, data_completeness, "
-                        "falsification_bull, falsification_bear, bull_case, bear_case, key_risks, "
-                        "missing_information). buy_score/hold_score/sell_score must each be in "
-                        "[0,1] and sum to ~1.0.\n"
-                        f"Violations:\n- " + "\n- ".join(errors) + "\n"
-                    )
-                    retry_content = query_llm(
-                        system_instruction=context["system_instruction"],
-                        user_prompt=retry_prompt,
-                        model_choice=model_choice,
-                        temperature=args.temperature,
-                        reasoning_budget=args.reasoning_budget,
-                        reasoning_effort=args.reasoning_effort
-                    )
-                    retry_parsed = extract_json(retry_content)
-                    retry_obj = None
-                    if isinstance(retry_parsed, dict):
-                        retry_obj = retry_parsed
-                    elif isinstance(retry_parsed, list) and len(retry_parsed) > 0 and isinstance(retry_parsed[0], dict):
-                        retry_obj = retry_parsed[0]
-                    if retry_obj:
-                        validated, errors = validate_signal_json(retry_obj)
+                schema_failed = False
+                if res_obj:
+                    validated, errors = validate_signal_json(res_obj)
 
-                if not errors:
-                    normalized_obj = normalize_master_trader_json(
-                        validated,
-                        symbol,
-                        m_data=m_data,
-                        macro_data=macro_data,
-                        gloomberb_payload=gloomberb_payload
-                    )
+                    # One constrained corrective retry on strict schema violations.
+                    if errors:
+                        print(f"[{model_label}] Schema validation failed for {symbol}; issuing one corrective retry...")
+                        retry_prompt = (
+                            f"{context['user_prompt']}\n\n"
+                            "=== SCHEMA VALIDATION FAILED -- RESUBMIT ONLY THE FIXED JSON ===\n"
+                            "Your previous response failed strict schema validation. Correct EVERY "
+                            "violation below and return ONLY a single valid JSON object with the exact "
+                            "same golden keys (decision, primary_driver, buy_score, hold_score, "
+                            "sell_score, horizon_days, quant_score, pillar_scores, data_completeness, "
+                            "falsification_bull, falsification_bear, bull_case, bear_case, key_risks, "
+                            "missing_information). buy_score/hold_score/sell_score must each be in "
+                            "[0,1] and sum to ~1.0.\n"
+                            f"Violations:\n- " + "\n- ".join(errors) + "\n"
+                        )
+                        retry_content = query_llm(
+                            system_instruction=context["system_instruction"],
+                            user_prompt=retry_prompt,
+                            model_choice=model_choice,
+                            temperature=args.temperature,
+                            reasoning_budget=args.reasoning_budget,
+                            reasoning_effort=args.reasoning_effort
+                        )
+                        retry_parsed = extract_json(retry_content)
+                        retry_obj = None
+                        if isinstance(retry_parsed, dict):
+                            retry_obj = retry_parsed
+                        elif isinstance(retry_parsed, list) and len(retry_parsed) > 0 and isinstance(retry_parsed[0], dict):
+                            retry_obj = retry_parsed[0]
+                        if retry_obj:
+                            validated, errors = validate_signal_json(retry_obj)
+
+                    if not errors:
+                        normalized_obj = normalize_master_trader_json(
+                            validated,
+                            symbol,
+                            m_data=m_data,
+                            macro_data=macro_data,
+                            gloomberb_payload=gloomberb_payload
+                        )
+                    else:
+                        # Audit path: a still-invalid signal never passes through normalize unvalidated.
+                        # Record a deterministic HOLD so the event is visible, not silently dropped.
+                        schema_failed = True
+                        fallback_res = {
+                            "decision": "HOLD",
+                            "primary_driver": "QUANT_STRUCTURE",
+                            "buy_score": 0.0,
+                            "hold_score": 1.0,
+                            "sell_score": 0.0,
+                            "horizon_days": 10,
+                            "quant_score": None,
+                            "data_completeness": None,
+                            "missing_information": [
+                                "Model output failed strict schema validation; reverted to HOLD."
+                            ],
+                            "key_risks": [
+                                "Schema validation failed after one corrective retry: " + "; ".join(errors)
+                            ],
+                        }
+                        normalized_obj = normalize_master_trader_json(
+                            fallback_res,
+                            symbol,
+                            m_data=m_data,
+                            macro_data=macro_data,
+                            gloomberb_payload=gloomberb_payload
+                        )
+                        normalized_obj["no_trade_reason"] = "SCHEMA_INVALID"
+                        normalized_obj["decision"] = "HOLD"
+
+                    all_results.append(normalized_obj)
+                    if schema_failed:
+                        print(f"[{model_label}] Schema failure for {symbol}; recorded deterministic HOLD (SCHEMA_INVALID).")
+                    else:
+                        print(f"[{model_label}] Final Decision for {symbol}: {normalized_obj.get('decision')} (Conf: {normalized_obj.get('confidence')})")
                 else:
-                    # Audit path: a still-invalid signal never passes through normalize unvalidated.
-                    # Record a deterministic HOLD so the event is visible, not silently dropped.
-                    schema_failed = True
-                    fallback_res = {
-                        "decision": "HOLD",
-                        "primary_driver": "QUANT_STRUCTURE",
-                        "buy_score": 0.0,
-                        "hold_score": 1.0,
-                        "sell_score": 0.0,
-                        "horizon_days": 10,
-                        "quant_score": None,
-                        "data_completeness": None,
-                        "missing_information": [
-                            "Model output failed strict schema validation; reverted to HOLD."
-                        ],
-                        "key_risks": [
-                            "Schema validation failed after one corrective retry: " + "; ".join(errors)
-                        ],
-                    }
-                    normalized_obj = normalize_master_trader_json(
-                        fallback_res,
-                        symbol,
-                        m_data=m_data,
-                        macro_data=macro_data,
-                        gloomberb_payload=gloomberb_payload
-                    )
-                    normalized_obj["no_trade_reason"] = "SCHEMA_INVALID"
-                    normalized_obj["decision"] = "HOLD"
+                    print(f"Warning: Model returned empty output for {symbol}.")
 
-                all_results.append(normalized_obj)
-                if schema_failed:
-                    print(f"[{model_label}] Schema failure for {symbol}; recorded deterministic HOLD (SCHEMA_INVALID).")
-                else:
-                    print(f"[{model_label}] Final Decision for {symbol}: {normalized_obj.get('decision')} (Conf: {normalized_obj.get('confidence')})")
-            else:
-                print(f"Warning: Model returned empty output for {symbol}.")
-
-        except Exception as e:
-            print(f"Model synthesis error for {symbol}: {e}")
+            except Exception as e:
+                print(f"Model synthesis error for {symbol}: {e}")
 
     if not all_results:
         print("\nNo analysis results generated.")

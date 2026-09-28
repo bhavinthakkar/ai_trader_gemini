@@ -1,10 +1,66 @@
 import os
 import json
 import re
+import time
 import requests
 from dotenv import load_dotenv
 
 load_dotenv()
+
+NVIDIA_READ_TIMEOUT = int(os.getenv("NVIDIA_READ_TIMEOUT", "300"))
+NVIDIA_CONNECT_TIMEOUT = int(os.getenv("NVIDIA_CONNECT_TIMEOUT", "30"))
+NVIDIA_TOTAL_TIMEOUT = int(os.getenv("NVIDIA_TOTAL_TIMEOUT", "600"))
+NVIDIA_PROGRESS_INTERVAL = int(os.getenv("NVIDIA_PROGRESS_INTERVAL", "15"))
+
+OPENROUTER_READ_TIMEOUT = int(os.getenv("OPENROUTER_READ_TIMEOUT", "300"))
+OPENROUTER_CONNECT_TIMEOUT = int(os.getenv("OPENROUTER_CONNECT_TIMEOUT", "30"))
+OPENROUTER_TOTAL_TIMEOUT = int(os.getenv("OPENROUTER_TOTAL_TIMEOUT", "600"))
+OPENROUTER_PROGRESS_INTERVAL = int(os.getenv("OPENROUTER_PROGRESS_INTERVAL", "15"))
+
+
+class TimeBudgetExceeded(RuntimeError):
+    """A streamed response outlived the total wall-clock budget."""
+
+
+def _collect_sse_content(response, label, deadline, progress_interval, total_budget) -> str:
+    parts = []
+    started = time.monotonic()
+    last_report = started
+    token_count = 0
+
+    for raw_line in response.iter_lines():
+        now = time.monotonic()
+        if now > deadline:
+            raise TimeBudgetExceeded(
+                f"{label} exceeded the {total_budget}s total budget"
+            )
+        if now - last_report >= progress_interval:
+            last_report = now
+            print(f"[llm_service] {label} still generating: {now - started:.0f}s elapsed, "
+                  f"~{token_count} content tokens received")
+        if not raw_line:
+            continue
+        line = raw_line.decode("utf-8", "ignore") if isinstance(raw_line, bytes) else raw_line
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        data = line[len("data:"):].strip()
+        if data == "[DONE]":
+            break
+        try:
+            chunk = json.loads(data)
+        except ValueError:
+            continue
+        for choice in chunk.get("choices") or []:
+            piece = (choice.get("delta") or {}).get("content") or ""
+            if piece:
+                parts.append(piece)
+                token_count += 1
+            if choice.get("finish_reason"):
+                return "".join(parts)
+    return "".join(parts)
+    return "".join(parts)
+
 
 MODEL_REGISTRY = {
     "ultra": {
@@ -98,10 +154,10 @@ MODEL_REGISTRY = {
         "label": "OpenRouter Free Models Router (openrouter/free)"
     },
     "free": {
-        "provider": "openrouter",
-        "model": "openrouter/free",
-        "fallbacks": ["nvidia/nemotron-3-super-120b-a12b:free", "minimax/minimax-m3:free"],
-        "label": "OpenRouter Free Models Router (openrouter/free)"
+        "provider": "nvidia",
+        "model": "nvidia/nemotron-3-ultra-550b-a55b",
+        "fallbacks": ["nvidia/nemotron-3-super-120b-a12b"],
+        "label": "Nemotron-3 Ultra 550B (NVIDIA) -> Super 120B fallback on read timeout"
     },
     "openrouter/free": {
         "provider": "openrouter",
@@ -126,6 +182,12 @@ MODEL_REGISTRY = {
         "model": "openrouter/free",
         "fallbacks": ["minimax/minimax-m3:free", "nvidia/nemotron-3-super-120b-a12b:free"],
         "label": "OpenRouter Free Models Router (openrouter/free)"
+    },
+    "bunny": {
+        "provider": "openrouter",
+        "model": "stealth/space-bunny-alpha",
+        "default_reasoning_effort": "low",
+        "label": "Space Bunny Alpha (OpenRouter, free, 1M context)"
     }
 }
 
@@ -221,7 +283,7 @@ def extract_json(text: str):
 
 def normalize_model_key(model_choice: str) -> str:
     key = str(model_choice).strip().lower()
-    if key in ["free", "openrouter/free", "or", "minimax", "minimax-m3", "minimax_m3", "m3"]:
+    if key in ["openrouter/free", "or", "minimax", "minimax-m3", "minimax_m3", "m3"]:
         key = "openrouter"
     if key in ["550b", "nemotron-ultra", "ultra"]:
         key = "ultra"
@@ -229,6 +291,8 @@ def normalize_model_key(model_choice: str) -> str:
         key = "super"
     if key in ["kimi", "kimi-k3", "k3", "moonshot"]:
         key = "kimi"
+    if key in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
+        key = "bunny"
     if key in ["qwen-llamacpp", "llamacpp", "qwen2.5", "qwen2.5-14b"]:
         key = "qwen"
     return key
@@ -262,11 +326,13 @@ def query_llm(
       - 'kimi' / 'kimi-k3' / 'k3': Moonshot AI Kimi-K3 (NVIDIA API)
       - 'super' / '120b': Cloud Nemotron-3 Super 120B (NVIDIA API)
       - 'gemini': Cloud Gemini 3.1 Pro
-      - 'openrouter' / 'free': OpenRouter Free Models Router (openrouter/free)
+      - 'openrouter': OpenRouter Free Models Router (openrouter/free)
+      - 'free': Nemotron-3 Ultra 550B first, falling back to Super 120B on stall
+      - 'bunny': Space Bunny Alpha via OpenRouter (free, 1M context, reasoning pinned to low)
       - 'qwen' / 'llamacpp': Local Qwen model through the OpenAI-compatible llama.cpp server
     """
     if not model_choice or not str(model_choice).strip():
-        raise ValueError("Model choice argument is required. Valid choices: 'nemotron', 'ultra', 'kimi', 'gemini', 'openrouter', 'qwen', 'llamacpp'")
+        raise ValueError("Model choice argument is required. Valid choices: 'nemotron', 'ultra', 'kimi', 'gemini', 'openrouter', 'free', 'bunny', 'qwen', 'llamacpp'")
 
     key = normalize_model_key(model_choice)
 
@@ -291,12 +357,16 @@ def query_llm(
         eff_budget = int(reasoning_budget) if reasoning_budget is not None else int(os.getenv("REASONING_BUDGET", "16000"))
         eff_effort = str(reasoning_effort) if reasoning_effort is not None else os.getenv("REASONING_EFFORT", "high")
 
-        import time
         last_error = None
+        chain_deadline = time.monotonic() + NVIDIA_TOTAL_TIMEOUT
 
         for model_idx, model_name in enumerate(candidates):
             if not model_name:
                 continue
+            if time.monotonic() > chain_deadline:
+                print(f"[llm_service] Total budget of {NVIDIA_TOTAL_TIMEOUT}s exhausted; "
+                      f"not attempting '{model_name}'.")
+                break
 
             payload = {
                 "model": model_name,
@@ -306,7 +376,8 @@ def query_llm(
                 ],
                 "temperature": eff_temp,
                 "top_p": 0.95,
-                "max_tokens": eff_budget
+                "max_tokens": eff_budget,
+                "stream": True
             }
 
             if "kimi" in model_name.lower():
@@ -317,11 +388,15 @@ def query_llm(
 
             for attempt in range(2):
                 try:
-                    response = requests.post(url, headers=headers, json=payload, timeout=120)
+                    response = requests.post(
+                        url, headers=headers, json=payload,
+                        timeout=(NVIDIA_CONNECT_TIMEOUT, NVIDIA_READ_TIMEOUT),
+                        stream=True
+                    )
                     if response.status_code == 200:
-                        res_json = response.json()
-                        content = res_json["choices"][0]["message"].get("content") or ""
-                        return clean_think_tags(content)
+                        return clean_think_tags(_collect_sse_content(
+                            response, model_name, chain_deadline,
+                            NVIDIA_PROGRESS_INTERVAL, NVIDIA_TOTAL_TIMEOUT))
                     elif response.status_code == 400 and "thinking_token_budget" in response.text:
                         payload.pop("reasoning_effort", None)
                         payload.pop("reasoning_budget", None)
@@ -343,6 +418,28 @@ def query_llm(
                         continue
                     else:
                         raise RuntimeError(f"NVIDIA API call failed ({response.status_code}): {response.text}")
+                except TimeBudgetExceeded as e:
+                    last_error = e
+                    if model_idx < len(candidates) - 1:
+                        next_model = candidates[model_idx + 1]
+                        print(f"[llm_service] {model_name} hit the {NVIDIA_TOTAL_TIMEOUT}s total budget. "
+                              f"Switching to fallback model '{next_model}'...")
+                    else:
+                        print(f"[llm_service] {model_name} hit the {NVIDIA_TOTAL_TIMEOUT}s total budget. "
+                              f"No fallback model left.")
+                    break
+                except requests.exceptions.ReadTimeout as e:
+                    # A read timeout means the model is still thinking past the deadline, not that
+                    # the network blipped, so retrying it only burns another full timeout.
+                    last_error = e
+                    if model_idx < len(candidates) - 1:
+                        next_model = candidates[model_idx + 1]
+                        print(f"[llm_service] NVIDIA NIM model '{model_name}' read timeout after "
+                              f"{NVIDIA_READ_TIMEOUT}s. Switching to fallback model '{next_model}'...")
+                    else:
+                        print(f"[llm_service] NVIDIA NIM model '{model_name}' read timeout after "
+                              f"{NVIDIA_READ_TIMEOUT}s. No fallback model left.")
+                    break
                 except requests.exceptions.RequestException as e:
                     last_error = e
                     print(f"[llm_service] NVIDIA connection error for '{model_name}': {e}. Retrying...")
@@ -410,6 +507,8 @@ def query_llm(
             raise ValueError("OPENROUTER_API_KEY environment variable is not set in .env")
 
         eff_temp = float(temperature) if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "0.2"))
+        eff_effort = (str(reasoning_effort) if reasoning_effort is not None
+                      else config.get("default_reasoning_effort"))
 
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -420,8 +519,14 @@ def query_llm(
 
         candidates = [config["model"]] + config.get("fallbacks", [])
         last_error = None
+        chain_deadline = time.monotonic() + OPENROUTER_TOTAL_TIMEOUT
 
         for candidate_model in candidates:
+            if time.monotonic() > chain_deadline:
+                print(f"[llm_service] OpenRouter total budget of {OPENROUTER_TOTAL_TIMEOUT}s exhausted; "
+                      f"not attempting '{candidate_model}'.")
+                break
+
             payload = {
                 "model": candidate_model,
                 "messages": [
@@ -429,32 +534,30 @@ def query_llm(
                     {"role": "user", "content": user_prompt}
                 ],
                 "temperature": eff_temp,
-                "response_format": {"type": "json_object"}
+                "response_format": {"type": "json_object"},
+                "stream": True
             }
+            if eff_effort:
+                payload["reasoning_effort"] = eff_effort
             try:
                 response = requests.post(
                     "https://openrouter.ai/api/v1/chat/completions",
                     headers=headers,
                     json=payload,
-                    timeout=120
+                    timeout=(OPENROUTER_CONNECT_TIMEOUT, OPENROUTER_READ_TIMEOUT),
+                    stream=True
                 )
                 if response.status_code == 200:
-                    res_json = response.json()
-                    choices = res_json.get("choices", [])
-                    actual_model = res_json.get("model", candidate_model)
-                    if choices and "message" in choices[0]:
-                        content = choices[0]["message"].get("content", "")
-                        cleaned = clean_think_tags(content)
-                        # Validate that returned text can be parsed as JSON
-                        try:
-                            _ = extract_json(cleaned)
-                            return cleaned
-                        except Exception as parse_err:
-                            print(f"[llm_service] OpenRouter model '{candidate_model}' (routed to '{actual_model}') returned non-JSON/invalid output ({parse_err}). Trying fallback...")
-                            last_error = parse_err
-                            continue
-                    else:
-                        print(f"[llm_service] OpenRouter model '{candidate_model}' returned empty choices. Trying fallback...")
+                    cleaned = clean_think_tags(_collect_sse_content(
+                        response, candidate_model, chain_deadline,
+                        OPENROUTER_PROGRESS_INTERVAL, OPENROUTER_TOTAL_TIMEOUT))
+                    try:
+                        _ = extract_json(cleaned)
+                        return cleaned
+                    except Exception as parse_err:
+                        print(f"[llm_service] OpenRouter model '{candidate_model}' returned "
+                              f"non-JSON/invalid output ({parse_err}). Trying fallback...")
+                        last_error = parse_err
                         continue
                 elif response.status_code in [429, 502, 503, 504]:
                     print(f"[llm_service] OpenRouter model {candidate_model} returned {response.status_code}: {response.text[:200]}. Trying fallback...")
@@ -464,6 +567,11 @@ def query_llm(
                     print(f"[llm_service] OpenRouter model {candidate_model} returned {response.status_code}. Trying fallback...")
                     last_error = RuntimeError(f"OpenRouter API call failed ({response.status_code}): {response.text}")
                     continue
+            except TimeBudgetExceeded as e:
+                last_error = e
+                print(f"[llm_service] OpenRouter model {candidate_model} hit the "
+                      f"{OPENROUTER_TOTAL_TIMEOUT}s total budget. Trying fallback...")
+                continue
             except requests.exceptions.RequestException as e:
                 last_error = e
                 print(f"[llm_service] OpenRouter connection error with {candidate_model}: {e}. Trying fallback...")
