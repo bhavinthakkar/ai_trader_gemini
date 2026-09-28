@@ -5,4 +5,9 @@ __pycache__/
 .pytest_cache/
 *.db
 .omo/
-
+.streamlit_server.pid
+streamlit.log
+.api_server.pid
+api_server.log
+mobile_app/node_modules/
+mobile_app/.expo/

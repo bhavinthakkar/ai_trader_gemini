@@ -1,17 +1,26 @@
 import pandas as pd
 import ta
 import yfinance as yf
+from ticker_resolver import resolve_symbol
 
 class MarketAgent:
     """
     Market Agent: Collects price action history, 5-day velocity, 
     technical indicators (RSI14, EMA20, EMA50, ATR), and forward fundamental metrics.
+    Supports US, European (gettex / EIX / XETRA) tickers, ISINs, and WKNs.
     """
     
-    def analyze(self, symbol: str) -> dict:
-        print(f"[MarketAgent] Fetching technicals and fundamentals for {symbol}...")
+    def analyze(self, symbol: str, prefer_exchange: str = "DE", force_european: bool = False) -> dict:
+        resolved = resolve_symbol(symbol, prefer_exchange=prefer_exchange, force_european=force_european)
+        query_sym = resolved["symbol"]
+
+        if query_sym != symbol:
+            print(f"[MarketAgent] Sourcing '{symbol}' as '{query_sym}' ({resolved.get('exchange', 'Exchange')}) | Currency: {resolved.get('currency_symbol', '$')}")
+        else:
+            print(f"[MarketAgent] Fetching technicals and fundamentals for {symbol}...")
+
         try:
-            ticker = yf.Ticker(symbol)
+            ticker = yf.Ticker(query_sym)
             df = ticker.history(period="6mo", interval="1d")
 
             if df.empty:
@@ -113,8 +122,30 @@ class MarketAgent:
             target_mean_price = info.get("targetMeanPrice")
             recommendation_key = info.get("recommendationKey")
 
+            # Fallback to underlying asset for cross-listed dual equities (e.g. NVD.DE -> NVDA)
+            underlying_sym = resolved.get("underlying_symbol")
+            if underlying_sym and underlying_sym != query_sym and (not forward_pe or not recommendation_key or not rev_growth):
+                try:
+                    u_info = yf.Ticker(underlying_sym).info or {}
+                    forward_pe = forward_pe or u_info.get("forwardPE")
+                    profit_margins = profit_margins if profit_margins is not None else u_info.get("profitMargins")
+                    earnings_growth = earnings_growth if earnings_growth is not None else u_info.get("earningsGrowth")
+                    rev_growth = rev_growth if rev_growth is not None else u_info.get("revenueGrowth")
+                    recommendation_key = recommendation_key or u_info.get("recommendationKey")
+                    target_mean_price = target_mean_price or u_info.get("targetMeanPrice")
+                except Exception:
+                    pass
+
             return {
-                "symbol": symbol,
+                "symbol": query_sym,
+                "input_symbol": symbol,
+                "underlying_symbol": resolved.get("underlying_symbol", query_sym),
+                "company_name": resolved.get("company_name", query_sym),
+                "currency": resolved.get("currency", "USD"),
+                "currency_symbol": resolved.get("currency_symbol", "$"),
+                "isin": resolved.get("isin", ""),
+                "exchange": resolved.get("exchange", ""),
+                "is_european": resolved.get("is_european", False),
                 "current_price": round(float(price), 2),
                 "change_5d_pct": f"{change_5d_pct:+.2f}%",
                 "market_spy_5d_pct": market_5d_pct,

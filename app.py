@@ -1,23 +1,41 @@
+import os
+import sys
+import subprocess
 import streamlit as st
 import pandas as pd
 import json
-from db import init_db, get_latest_signals, get_signal_history, get_summary_stats, get_outcome_performance_stats, get_latest_portfolio_reviews
+from db import (
+    init_db,
+    get_latest_signals,
+    get_signal_history,
+    get_summary_stats,
+    get_outcome_performance_stats,
+    get_latest_portfolio_reviews,
+    delete_signals_older_than
+)
 from dashboard import collect_dashboard_data, format_volume
+from ticker_resolver import resolve_symbol, is_european_symbol, get_currency_for_symbol
+
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Page Configuration
 st.set_page_config(
     page_title="AI Trader - Swing Trading Analysis Report",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="auto"
 )
 
-# Custom Styling
+# Custom Styling (Responsive & Mobile-Friendly)
 st.markdown("""
 <style>
+    /* Dark Theme Base */
     .main {
         background-color: #0e1117;
     }
+
+    /* Badges */
     .badge-buy {
         background-color: #0e3a24;
         color: #3dd68c;
@@ -26,6 +44,7 @@ st.markdown("""
         border-radius: 20px;
         font-weight: 600;
         font-size: 0.85rem;
+        display: inline-block;
     }
     .badge-sell {
         background-color: #3b1719;
@@ -35,6 +54,7 @@ st.markdown("""
         border-radius: 20px;
         font-weight: 600;
         font-size: 0.85rem;
+        display: inline-block;
     }
     .badge-hold {
         background-color: #27272a;
@@ -44,19 +64,147 @@ st.markdown("""
         border-radius: 20px;
         font-weight: 600;
         font-size: 0.85rem;
+        display: inline-block;
     }
+
+    /* Universal Touch-Friendly Buttons */
     .stButton>button {
         background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
         color: white;
         border: none;
         font-weight: 600;
         border-radius: 8px;
-        padding: 0.5rem 1rem;
+        padding: 0.55rem 1rem;
+        min-height: 44px;
         transition: all 0.2s ease-in-out;
+        touch-action: manipulation;
     }
     .stButton>button:hover {
         background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
         box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+    }
+
+    /* Card styling for Metrics across all viewports */
+    div[data-testid="stMetric"] {
+        background: #111827;
+        padding: 0.75rem 0.9rem;
+        border-radius: 10px;
+        border: 1px solid #1f2937;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    }
+    div[data-testid="stMetricValue"] {
+        font-size: clamp(1.1rem, 2.5vw, 1.45rem) !important;
+        font-weight: 700 !important;
+        color: #f8fafc !important;
+        word-break: break-word !important;
+        overflow-wrap: break-word !important;
+    }
+    div[data-testid="stMetricLabel"] {
+        font-size: 0.78rem !important;
+        color: #94a3b8 !important;
+        white-space: normal !important;
+        word-wrap: break-word !important;
+    }
+
+    /* Mobile Swipeable Tab Bar */
+    .stTabs [data-baseweb="tab-list"] {
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+        gap: 0.35rem !important;
+        padding: 0.25rem 0.1rem 0.6rem 0.1rem !important;
+        scrollbar-width: thin !important;
+    }
+    .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar {
+        height: 3px;
+    }
+    .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-thumb {
+        background: #334155;
+        border-radius: 4px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        white-space: nowrap !important;
+        flex-shrink: 0 !important;
+        padding: 0.5rem 0.9rem !important;
+        font-size: 0.85rem !important;
+        border-radius: 8px !important;
+    }
+
+    /* Dataframe & Table Horizontal Scroll for Mobile */
+    div[data-testid="stDataFrame"], div[data-testid="stTable"] {
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+
+    /* Prominent Sidebar Hamburger Button on Mobile */
+    [data-testid="stSidebarCollapsedControl"] {
+        background: #1e293b !important;
+        border: 1px solid #334155 !important;
+        border-radius: 8px !important;
+        padding: 0.3rem !important;
+        top: 0.6rem !important;
+        left: 0.6rem !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
+    }
+
+    /* Responsive Media Queries for Tablet & Mobile */
+    @media (max-width: 768px) {
+        .block-container {
+            padding-top: 1.5rem !important;
+            padding-bottom: 2.5rem !important;
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
+            max-width: 100% !important;
+        }
+
+        /* Allow columns in horizontal blocks to wrap on mobile */
+        div[data-testid="stHorizontalBlock"] {
+            flex-wrap: wrap !important;
+            gap: 0.5rem !important;
+        }
+
+        /* Columns take 50% width on tablet/mobile (2 per row for metrics) */
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+            flex: 1 1 calc(50% - 0.5rem) !important;
+            min-width: 135px !important;
+        }
+
+        /* Responsive typography */
+        h1 {
+            font-size: 1.55rem !important;
+            line-height: 1.25 !important;
+        }
+        h2 {
+            font-size: 1.25rem !important;
+        }
+        h3 {
+            font-size: 1.1rem !important;
+        }
+        h4 {
+            font-size: 0.98rem !important;
+        }
+
+        .hide-on-mobile {
+            display: none !important;
+        }
+    }
+
+    @media (max-width: 480px) {
+        .block-container {
+            padding-left: 0.5rem !important;
+            padding-right: 0.5rem !important;
+        }
+
+        /* Inputs stack full-width on compact phone screens */
+        div[data-testid="stTextInput"],
+        div[data-testid="stSelectbox"],
+        div[data-testid="stMultiSelect"],
+        div[data-testid="stSlider"] {
+            width: 100% !important;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -85,7 +233,31 @@ To run a new pipeline analysis, execute in your terminal:
 """)
 
 st.sidebar.markdown("---")
-if st.sidebar.button("🔄 Refresh Report Data", width="stretch"):
+st.sidebar.subheader("⚙️ Recency Filter")
+recency_options = {
+    "Past 7 Days (1 Week)": 7,
+    "Past 14 Days (2 Weeks)": 14,
+    "Past 30 Days (1 Month)": 30,
+    "All Time": None
+}
+selected_window_label = st.sidebar.selectbox(
+    "Signals Recency Window:",
+    options=list(recency_options.keys()),
+    index=0,
+    help="Filter out signals older than the selected timeframe in Latest Signals & KPIs"
+)
+max_age_days = recency_options[selected_window_label]
+
+with st.sidebar.expander("🗑️ Database Maintenance"):
+    st.caption("Permanently purge older historical records from SQLite database (`trader.db`).")
+    purge_days = st.number_input("Purge records older than (days):", min_value=1, max_value=365, value=7, step=1)
+    if st.button("Permanently Purge Old Signals", type="secondary"):
+        deleted_count = delete_signals_older_than(days=int(purge_days))
+        st.success(f"Purged {deleted_count} records older than {purge_days} days.")
+        st.rerun()
+
+st.sidebar.markdown("---")
+if st.sidebar.button("🔄 Refresh Report Data", use_container_width=True):
     st.rerun()
 
 # Main App Layout
@@ -93,7 +265,7 @@ st.title("📈 Autonomous Stock Swing Trading Report")
 st.caption("Reporting dashboard reading analysis results from SQLite (`trader.db`)")
 
 # Summary KPI Cards
-stats = get_summary_stats()
+stats = get_summary_stats(max_age_days=max_age_days)
 outcome_stats = get_outcome_performance_stats()
 col1, col2, col3, col4, col5, col6 = st.columns(6)
 
@@ -124,13 +296,17 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 ])
 
 @st.cache_data(ttl=120)
-def get_cached_active_stocks(limit: int = 10):
-    return collect_dashboard_data(limit=limit)
+def get_cached_active_stocks(limit: int = 10, market: str = "US", prefer_exchange: str = "DE"):
+    return collect_dashboard_data(limit=limit, market=market, prefer_exchange=prefer_exchange)
 
-latest_signals = get_latest_signals()
+latest_signals = get_latest_signals(max_age_days=max_age_days)
 
 with tab1:
     st.subheader("Latest Swing Trade Recommendations")
+    if max_age_days:
+        st.caption(f"📅 Displaying active recommendations analyzed within the **{selected_window_label}** (older analyses filtered out).")
+    else:
+        st.caption("📅 Displaying latest recommendation per stock for **All Time**.")
 
     if not latest_signals:
         st.info("No signal data found in database. Run `python main.py` in your terminal to populate analysis reports!")
@@ -203,13 +379,60 @@ with tab1:
 with tab2:
     st.subheader("Deterministic 5-Pillar & Quantitative Synthesis Breakdown")
 
-    if not latest_signals:
-        st.info("No data available. Run `python main.py` in terminal to generate stock details.")
-    else:
-        symbol_list = [s["symbol"] for s in latest_signals]
-        selected_stock = st.selectbox("Select Ticker Symbol to Inspect:", options=symbol_list)
+    # On-demand ISIN & European Ticker Resolver / Analyzer
+    st.markdown("##### 🔎 ISIN / European Ticker Resolver & Deep-Dive")
+    lookup_col1, lookup_col2 = st.columns([3, 1])
+    with lookup_col1:
+        isin_query = st.text_input(
+            "Enter ISIN, WKN, or Symbol (e.g. US67066G1040, DE0007164600, 716460, NVD.DE, SAP.DE):",
+            placeholder="Paste European ISIN or ticker...",
+            key="isin_lookup_input"
+        ).strip().upper()
+    with lookup_col2:
+        st.markdown("<div class='hide-on-mobile' style='height: 28px;'></div>", unsafe_allow_html=True)
+        analyze_isin_btn = st.button("🚀 Analyze with bunny", key="analyze_isin_button", use_container_width=True)
 
-        stock_data = next((s for s in latest_signals if s["symbol"] == selected_stock), None)
+    symbol_list = [s["symbol"] for s in latest_signals] if latest_signals else []
+
+    if isin_query:
+        resolved_info = resolve_symbol(isin_query, prefer_exchange="DE", force_european=True)
+        res_sym = resolved_info["symbol"]
+        curr_code, curr_sym_lookup = get_currency_for_symbol(res_sym)
+        isin_str = f" | **ISIN:** `{resolved_info['isin']}`" if resolved_info.get("isin") else ""
+        st.info(
+            f"**Resolved Symbol:** `{res_sym}` | **Company:** {resolved_info.get('company_name', res_sym)} | "
+            f"**Currency:** {curr_code} ({curr_sym_lookup}) | **Exchange:** {resolved_info.get('exchange', 'gettex / XETRA')}{isin_str}"
+        )
+
+        if analyze_isin_btn:
+            with st.status(f"🚀 Running 6-Agent AI Swing Synthesis on {res_sym} via bunny...", expanded=True) as status_box:
+                st.write(f"Launching main.py for {res_sym}...")
+                main_script = os.path.join(BASE_DIR, "main.py")
+                cmd = [sys.executable, main_script, "bunny", res_sym, "--eu"]
+                try:
+                    proc = subprocess.run(cmd, cwd=BASE_DIR, capture_output=True, text=True)
+                    if proc.returncode == 0:
+                        status_box.update(label=f"✅ Analysis Complete for {res_sym}!", state="complete", expanded=False)
+                        st.success(f"Analysis complete for {res_sym}! Signal recorded to database.")
+                        latest_signals = get_latest_signals(max_age_days=max_age_days)
+                        symbol_list = [s["symbol"] for s in latest_signals]
+                    else:
+                        status_box.update(label=f"⚠️ Pipeline finished with exit code {proc.returncode}", state="error", expanded=True)
+                        st.code(proc.stderr or proc.stdout, language="text")
+                except Exception as e:
+                    status_box.update(label=f"❌ Failed: {e}", state="error")
+                    st.error(f"Execution error: {e}")
+
+        if res_sym not in symbol_list:
+            symbol_list.insert(0, res_sym)
+
+    if not symbol_list:
+        st.info("No signal data available. Enter an ISIN or ticker above, or run `python main.py` in your terminal.")
+    else:
+        selected_stock = st.selectbox("Select Ticker Symbol to Inspect:", options=symbol_list)
+        curr_code, curr_sym = get_currency_for_symbol(selected_stock)
+
+        stock_data = next((s for s in latest_signals if s["symbol"] == selected_stock), None) if latest_signals else None
 
         if stock_data:
             c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
@@ -230,7 +453,7 @@ with tab2:
                 st.metric("Deterministic Quant Score", f"{q_score}/100" if q_score is not None else "N/A")
             with c4:
                 entry_p = stock_data.get("entry_price")
-                st.metric("Entry Price", f"${entry_p:.2f}" if entry_p else "N/A")
+                st.metric("Entry Price", f"{curr_sym}{entry_p:.2f}" if entry_p else "N/A")
 
             # 5-Pillar Quantitative Scores Display
             if any(stock_data.get(k) is not None for k in ["trend_score", "sector_score", "alpha_score", "val_history_score", "peer_val_score"]):
@@ -245,8 +468,8 @@ with tab2:
             # Technical & Macro Snapshot Row
             st.markdown("#### 📈 Execution & Macro Parameters")
             m1, m2, m3, m4, m5, m6 = st.columns(6)
-            m1.metric("Stop Loss", f"${stock_data.get('stop_loss_price', 'N/A')}")
-            m2.metric("Target Price", f"${stock_data.get('target_price', 'N/A')}")
+            m1.metric("Stop Loss", f"{curr_sym}{stock_data.get('stop_loss_price', 'N/A')}")
+            m2.metric("Target Price", f"{curr_sym}{stock_data.get('target_price', 'N/A')}")
             m3.metric("RSI14", f"{stock_data.get('rsi14', 'N/A')}")
             m4.metric("RVOL (20d)", f"{stock_data.get('rvol_20d', 'N/A')}x")
             m5.metric("US 10Y Yield", f"{stock_data.get('us_10y_yield', 'N/A')}%")
@@ -258,8 +481,8 @@ with tab2:
             g1.metric("Reward:Risk", stock_data.get('reward_risk_ratio', 'N/A'))
             g2.metric("Breakeven Win Rate", f"{stock_data.get('breakeven_win_rate', 0) * 100:.0f}%" if stock_data.get("breakeven_win_rate") is not None else "N/A")
             g3.metric("Wall St Target RR", stock_data.get('analyst_target_rr', 'N/A'))
-            g4.metric("Structural Stop", f"${stock_data.get('structural_stop_price', 'N/A')}")
-            g5.metric("Structural Target", f"${stock_data.get('structural_target_price', 'N/A')}")
+            g4.metric("Structural Stop", f"{curr_sym}{stock_data.get('structural_stop_price', 'N/A')}")
+            g5.metric("Structural Target", f"{curr_sym}{stock_data.get('structural_target_price', 'N/A')}")
 
             # Volatility risk profile (deterministic ATR dampener)
             st.markdown("#### 🎢 Volatility Risk Profile")
@@ -337,18 +560,100 @@ with tab3:
     st.subheader("🔥 Most Traded Stocks Today (Price, Range, Volume & Catalysts)")
     st.caption("Real-time high-volume market movers and the news catalysts driving heavy trading activity (model-free).")
 
-    top_ctrl1, top_ctrl2, top_ctrl3 = st.columns([2, 1, 1])
+    top_ctrl1, top_ctrl2, top_ctrl3 = st.columns([1.5, 1.2, 1.3])
     with top_ctrl1:
-        st.markdown("Tracks the top active tickers by intraday share volume, price channels, RVOL, and news catalysts.")
+        market_choice = st.radio(
+            "Market Selection:",
+            options=["🇺🇸 US Markets (NYSE / NASDAQ)", "🇪🇺 Europe (gettex / XETRA)"],
+            index=0,
+            horizontal=True,
+            help="Switch between US high-volume movers ($) and European gettex/XETRA traded NASDAQ leaders (€)"
+        )
+        is_eu = "Europe" in market_choice
+        selected_market = "EU" if is_eu else "US"
+        selected_exchange = "DE"
+        if is_eu:
+            exchange_opt = st.selectbox(
+                "Exchange Preference:",
+                options=["DE (XETRA Reference)", "MU (gettex / Börse München)", "HA (EIX / Börse Hannover)", "TG (Tradegate)"],
+                index=0,
+                help="gettex and EIX follow the German Referenzmarkt-Prinzip based on XETRA (.DE) during market hours"
+            )
+            selected_exchange = exchange_opt.split(" ")[0].strip()
+
     with top_ctrl2:
         limit_val = st.selectbox("Number of Active Stocks:", options=[10, 15, 20, 25], index=0)
+        analyse_count = st.selectbox(
+            "AI Analysis Count (bunny):",
+            options=[3, 5, 10],
+            index=1,
+            help="Number of top active stocks to sequentially analyze with main.py using Space Bunny Alpha ('bunny')"
+        )
     with top_ctrl3:
-        if st.button("🔄 Refresh Active Data", key="refresh_active_stocks"):
+        if st.button("🔄 Refresh Active Data", key="refresh_active_stocks", use_container_width=True):
             get_cached_active_stocks.clear()
             st.rerun()
 
-    with st.spinner("Fetching real-time active stocks and news catalysts..."):
-        active_stocks = get_cached_active_stocks(limit=limit_val)
+        run_analyse = st.button(
+            "🚀 Refresh active data & Analyse",
+            key="refresh_and_analyse_stocks",
+            help="Refreshes active stocks data and executes master.py using Space Bunny Alpha (bunny)",
+            use_container_width=True,
+            type="primary"
+        )
+
+    if run_analyse:
+        get_cached_active_stocks.clear()
+        master_script = os.path.join(BASE_DIR, "master.py")
+        cmd = [
+            sys.executable,
+            master_script,
+            "bunny",
+            "--limit", str(analyse_count),
+            "--dashboard-limit", str(limit_val),
+            "--market", selected_market,
+            "--prefer-exchange", selected_exchange,
+            "--no-streamlit",
+        ]
+        status_market_label = f"Europe (gettex / XETRA: {selected_exchange})" if is_eu else "US Markets"
+        with st.status(f"🚀 Running Gloomberb Master Orchestration ({status_market_label} | Model: bunny, Limit: {analyse_count})...", expanded=True) as status_box:
+            st.write(f"Initializing active volume screener [{selected_market}] & launching 6-agent AI swing analysis...")
+            log_box = st.empty()
+            logs = []
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    cwd=BASE_DIR,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
+                for line in iter(proc.stdout.readline, ""):
+                    clean = line.strip()
+                    if clean:
+                        logs.append(clean)
+                        log_box.code("\n".join(logs[-15:]), language="text")
+                        if "COMMENCING SEQUENTIAL" in clean:
+                            status_box.update(label="⚡ Executing 6-Agent AI Swing Synthesis per stock...")
+                        elif "Launching main.py for" in clean:
+                            st.write(f"▶ {clean}")
+                        elif "Completed" in clean and "Decision:" in clean:
+                            st.write(f"✅ {clean}")
+                proc.stdout.close()
+                rc = proc.wait()
+                if rc == 0:
+                    status_box.update(label=f"✅ Master Analysis Complete for Top {analyse_count} Stocks!", state="complete", expanded=False)
+                    st.success(f"Successfully analyzed top {analyse_count} active stocks using Space Bunny Alpha ('bunny')! Trade signals saved to database.")
+                else:
+                    status_box.update(label=f"⚠️ Pipeline finished with exit code {rc}", state="error", expanded=True)
+                    st.warning(f"Master script exited with code {rc}. Check details in log above.")
+            except Exception as e:
+                status_box.update(label=f"❌ Execution failed: {e}", state="error")
+                st.error(f"Failed to execute master script: {e}")
+
+    with st.spinner(f"Fetching real-time active stocks [{selected_market}] and news catalysts..."):
+        active_stocks = get_cached_active_stocks(limit=limit_val, market=selected_market, prefer_exchange=selected_exchange)
 
     if not active_stocks:
         st.warning("No active stocks data available at this time.")
@@ -368,18 +673,19 @@ with tab3:
 
         table_rows = []
         for s in active_stocks:
+            curr_sym = s.get("currency_symbol", "€" if is_eu else "$")
             chg = s.get("change_pct", 0.0)
             sign = "+" if chg >= 0 else ""
             table_rows.append({
                 "Ticker": s["symbol"],
                 "Company": s["name"],
-                "Price": f"${s['price']:.2f}",
-                "Change": f"{sign}{chg:.2f}% (${sign}{s['change']:.2f})",
-                "Day Low": f"${s['day_low']:.2f}",
-                "Day High": f"${s['day_high']:.2f}",
+                "Price": f"{curr_sym}{s['price']:.2f}",
+                "Change": f"{sign}{chg:.2f}% ({sign}{curr_sym}{abs(s['change']):.2f})",
+                "Day Low": f"{curr_sym}{s['day_low']:.2f}",
+                "Day High": f"{curr_sym}{s['day_high']:.2f}",
                 "Volume": format_volume(s["volume"]),
                 "RVOL": f"{s['rvol']:.1f}x",
-                "52W Range": f"${s['low_52w']:.1f} - ${s['high_52w']:.1f}" if s.get('low_52w') else "N/A",
+                "52W Range": f"{curr_sym}{s['low_52w']:.1f} - {curr_sym}{s['high_52w']:.1f}" if s.get('low_52w') else "N/A",
                 "RSI(14)": f"{s['rsi14']:.1f}" if s.get('rsi14') is not None else "N/A",
                 "Catalyst Driver": s["catalyst_type"],
                 "Trading Reason": s["reason_summary"]
@@ -390,14 +696,15 @@ with tab3:
 
         st.markdown("#### 📰 Why Are They Trading So Much Today? (News & Catalyst Drilldown)")
         for s in active_stocks:
+            curr_sym = s.get("currency_symbol", "€" if is_eu else "$")
             chg_sign = "+" if s.get("change_pct", 0.0) >= 0 else ""
             badge = "🟢" if s.get("change_pct", 0.0) >= 0 else "🔴"
-            with st.expander(f"{badge} **{s['symbol']}** ({s['name']}) — ${s['price']:.2f} ({chg_sign}{s['change_pct']:.2f}%) | Vol: {format_volume(s['volume'])} ({s['rvol']:.1f}x 20d avg)"):
+            with st.expander(f"{badge} **{s['symbol']}** ({s['name']}) — {curr_sym}{s['price']:.2f} ({chg_sign}{s['change_pct']:.2f}%) | Vol: {format_volume(s['volume'])} ({s['rvol']:.1f}x 20d avg)"):
                 m_c1, m_c2, m_c3, m_c4 = st.columns(4)
-                m_c1.metric("Day Low / High", f"${s['day_low']:.2f} - ${s['day_high']:.2f}")
+                m_c1.metric("Day Low / High", f"{curr_sym}{s['day_low']:.2f} - {curr_sym}{s['day_high']:.2f}")
                 m_c2.metric("Market Cap", s["market_cap_str"])
                 m_c3.metric("RVOL (20d avg)", f"{s['rvol']:.1f}x")
-                m_c4.metric("RSI14 / ATR", f"{s.get('rsi14', 'N/A')} / ${s.get('atr', 'N/A')}")
+                m_c4.metric("RSI14 / ATR", f"{s.get('rsi14', 'N/A')} / {curr_sym}{s.get('atr', 'N/A')}")
 
                 st.markdown(f"**⚡ Catalyst Tag:** `{s['catalyst_type']}`")
                 st.info(f"**Reason for High Volume:** {s['reason_summary']}")
@@ -409,6 +716,8 @@ with tab3:
                         pub = f"[{n['publisher']}] " if n.get('publisher') else ""
                         url = n.get('url', '#')
                         st.markdown(f"- {pub}[{n['title']}]({url})")
+
+
 
 with tab4:
     st.subheader("Historical Signal Analysis Log")

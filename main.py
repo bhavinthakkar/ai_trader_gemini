@@ -30,12 +30,11 @@ from catalyst_service import (
     evaluate_catalyst_setup,
 )
 from signal_schema import validate_signal_json
+from ticker_resolver import resolve_symbol
 
 WATCHLIST = ["000660.KS"]
 
 load_dotenv()
-CHAT_ID = os.getenv("TELEGRAM_CHANNEL_CHAT_ID", "969601315")
-telegram_token = os.getenv("TELEGRAM_CHANNEL_API_TOKEN")
 
 MASTER_TRADER_INSTRUCTION = """
 You are a senior Master Trader & Portfolio Manager.
@@ -594,13 +593,6 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     }
 
 
-from telegram_digest import (
-    _clean_telegram_markdown,
-    _truncate_telegram_text,
-    split_telegram_text,
-    format_telegram_digest,
-    send_telegram_digest,
-)
 
 
 def run_portfolio_review(llm_choice: str, temperature: float = None, reasoning_budget: int = None, reasoning_effort: str = None) -> dict:
@@ -723,6 +715,23 @@ def main():
         default=None,
         help="Reasoning effort level ('low', 'medium', 'high', 'max', default: 'high')"
     )
+    parser.add_argument(
+        "--market",
+        choices=["US", "EU"],
+        default="US",
+        help="Target market: US or EU (Europe - gettex / XETRA) (default: US)"
+    )
+    parser.add_argument(
+        "--eu",
+        action="store_true",
+        help="Shorthand for European market (--market EU)"
+    )
+    parser.add_argument(
+        "--prefer-exchange",
+        choices=["DE", "MU", "F", "HA", "TG"],
+        default="DE",
+        help="Preferred European exchange suffix (DE=XETRA, MU=gettex, HA=Hannover/EIX) (default: DE)"
+    )
     args = parser.parse_args()
 
     raw_model = args.model_opt or args.model_arg
@@ -771,9 +780,15 @@ def main():
             )
         return
 
+    market = "EU" if args.eu else args.market.upper()
+    force_eu = (market == "EU")
     raw_ticker = args.ticker_opt or args.ticker_arg
     if raw_ticker:
-        watchlist = [t.strip().upper() for t in raw_ticker.split(",") if t.strip()]
+        raw_list = [t.strip().upper() for t in raw_ticker.split(",") if t.strip()]
+        watchlist = [
+            resolve_symbol(t, prefer_exchange=args.prefer_exchange, force_european=force_eu)["symbol"]
+            for t in raw_list
+        ]
     else:
         watchlist = WATCHLIST
 
@@ -971,10 +986,6 @@ def main():
     except Exception as e:
         print(f"[Outcome Tracker] Notice: {e}")
 
-    # Send Telegram alerts
-    if all_results and telegram_token:
-        digest_message = format_telegram_digest(all_results, model_label=model_label)
-        send_telegram_digest(telegram_token, CHAT_ID, digest_message)
 
 
 if __name__ == "__main__":

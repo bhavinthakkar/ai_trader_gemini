@@ -258,23 +258,39 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
     print(f"[DB] Successfully saved {len(results)} analysis records to database.")
 
 
-def get_latest_signals(db_path=DB_PATH) -> list:
+def get_latest_signals(db_path=DB_PATH, max_age_days: int | None = 7) -> list:
     """
     Returns the most recent analysis record for each stock symbol.
+    By default, restricts to signals generated within the last `max_age_days` (default: 7 days / 1 week).
+    Pass max_age_days=None or max_age_days=0 to disable the recency filter and return all-time latest signals.
     """
     init_db(db_path)
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            SELECT s.*
-            FROM signals s
-            INNER JOIN (
-                SELECT symbol, MAX(id) as max_id
-                FROM signals
-                GROUP BY symbol
-            ) latest ON s.id = latest.max_id
-            ORDER BY s.symbol ASC;
-        """)
+        if max_age_days and max_age_days > 0:
+            cursor.execute("""
+                SELECT s.*
+                FROM signals s
+                INNER JOIN (
+                    SELECT symbol, MAX(id) as max_id
+                    FROM signals
+                    WHERE timestamp >= datetime('now', ?)
+                    GROUP BY symbol
+                ) latest ON s.id = latest.max_id
+                WHERE s.timestamp >= datetime('now', ?)
+                ORDER BY s.symbol ASC;
+            """, (f"-{max_age_days} days", f"-{max_age_days} days"))
+        else:
+            cursor.execute("""
+                SELECT s.*
+                FROM signals s
+                INNER JOIN (
+                    SELECT symbol, MAX(id) as max_id
+                    FROM signals
+                    GROUP BY symbol
+                ) latest ON s.id = latest.max_id
+                ORDER BY s.symbol ASC;
+            """)
         rows = cursor.fetchall()
         return [dict(r) for r in rows]
 
@@ -303,12 +319,13 @@ def get_signal_history(symbol: str = None, limit: int = 100, db_path=DB_PATH) ->
         return [dict(r) for r in rows]
 
 
-def get_summary_stats(db_path=DB_PATH) -> dict:
+def get_summary_stats(db_path=DB_PATH, max_age_days: int | None = 7) -> dict:
     """
     Returns summary metrics (counts, last run date, latest decision breakdown).
+    By default, metrics reflect active signals from the last `max_age_days` (default: 7 days / 1 week).
     """
     init_db(db_path)
-    latest = get_latest_signals(db_path)
+    latest = get_latest_signals(db_path=db_path, max_age_days=max_age_days)
     buy_count = sum(1 for s in latest if s["decision"] == "BUY")
     sell_count = sum(1 for s in latest if s["decision"] == "SELL")
     hold_count = sum(1 for s in latest if s["decision"] == "HOLD")
@@ -328,6 +345,21 @@ def get_summary_stats(db_path=DB_PATH) -> dict:
         "hold_count": hold_count,
         "last_run": last_run or "N/A"
     }
+
+
+def delete_signals_older_than(days: int = 7, db_path=DB_PATH) -> int:
+    """
+    Permanently deletes signals older than `days` from the database.
+    Returns the count of deleted records.
+    """
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM signals WHERE timestamp < datetime('now', ?);", (f"-{days} days",))
+        deleted_count = cursor.rowcount
+        conn.commit()
+        return deleted_count
+
 
 
 def update_signal_outcomes(db_path=DB_PATH) -> int:

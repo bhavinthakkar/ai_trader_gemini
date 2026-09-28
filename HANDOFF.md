@@ -195,6 +195,20 @@ CONTEXT FOR CONTINUATION
   quoted as a guarantee.
 - Regenerate context with the /init-deep skill if a hierarchical AGENTS.md is
   ever wanted; there is no AGENTS.md in this repo today.
-- Tests are fast (127 in under a second) because everything is mocked. The only
+- Tests are fast (160 in under a second) because everything is mocked. The only
   real proof for the streaming work was the live run recorded above; a
   fully-mocked suite will not catch a provider that drops its sentinel.
+
+LATEST SESSION UPDATES (2026-09-28)
+-----------------------------------
+- FastAPI REST API & Mobile Application Backend: Created api.py and api_server.py providing high-performance JSON endpoints for signals, KPI summaries, real-time market movers, background AI execution, and outcome evaluation.
+- React Native / Expo Android Mobile App: Created mobile_app with dedicated 5-tab dark finance UI (Signals, Deep-Dive, Movers, History, Settings) connecting directly to the FastAPI engine.
+- Dashboard Integration (dashboard.py): Added --market {US,EU} (--eu) and --prefer-exchange {DE,MU,HA,TG}, dynamic currency formatting across terminal tables and HTML dashboard.
+  - Master Pipeline Integration (master.py): Sourced European market universe in EUR, added CLI flags, and formatted terminal summary tables in native currency (€).
+  - Main CLI Integration (main.py): Supports --market EU (--eu) and automatically resolves incoming ISINs or tickers.
+  - Streamlit UI Integration (app.py):
+    - Tab 3 ("🔥 Most Traded Stocks"): Added market toggle (🇪🇺 Europe vs 🇺🇸 US Markets) and exchange preference selector with one-click master analysis and live € pricing.
+    - Tab 2 ("🔍 Stock Deep-Dive"): Added interactive ISIN/WKN search bar with instant instrument resolution, dynamic € metrics, and on-demand AI analysis via bunny.
+  - 180/180 unit tests pass (including test_ticker_resolver.py and test_master.py).
+
+

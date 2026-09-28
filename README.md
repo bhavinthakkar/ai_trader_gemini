@@ -60,13 +60,8 @@ The platform operates on a **Deterministic quantitative-first architecture** pai
                                         │
                                         ▼
                        ┌──────────────────────────────────┐
-                       │ Python Telegram Formatter        │
-                       │ (format_telegram_digest)         │
-                       └────────────────┬─────────────────┘
-                                        │
-                                        ▼
-                       ┌──────────────────────────────────┐
-                       │ Telegram API (Display Only)      │
+                       │ SQLite & Reporting Layer         │
+                       │ (trader.db & Web / Mobile Apps)  │
                        └──────────────────────────────────┘
 ```
 
@@ -140,16 +135,13 @@ To ensure strict system reliability and guarantee that raw LLM text is never for
   JSON Schema Validator & Normalizer (Python Contract)
       │
       ▼
-  Telegram Formatter (Python Contract)
-      │
-      ▼
-  Telegram API (Display Only)
+  SQLite Database & Live Dashboards (Streamlit & Mobile)
 ```
 
 1. **Nemotron (Data Producer)**: Synthesizes structured technicals and retrieved dual-horizon RAG evidence into raw JSON.
 2. **JSON Schema Validator (`normalize_master_trader_json`)**: Intercepts the LLM response, validates field types, clamps confidence scores $[0.0, 1.0]$, normalizes BUY/SELL/HOLD decisions, and injects safe defaults.
-3. **Telegram Formatter (`format_telegram_digest`)**: Accepts strictly validated Python dictionaries and constructs formatted Markdown.
-4. **Telegram API (Display Only)**: Dispatches sanitized, pre-formatted messages to subscriber channels.
+3. **SQLite & API Layer**: Saves structured analysis to `trader.db` and serves real-time REST data via FastAPI.
+4. **Web & Mobile Dashboards**: Visualizes signals on Streamlit (`app.py`) and native Android (`mobile_app`).
 
 ---
 
@@ -161,7 +153,7 @@ To ensure strict system reliability and guarantee that raw LLM text is never for
 4. **Deterministic Quantitative Scoring (`QuantitativeScoringService`)**: Calculating the explicit 5-pillar composite quantitative score (0-100).
 5. **Dual-Horizon Multiplicative RAG Indexing (`RAGService`)**: Indexing qualitative document chunks, embedding with FastEmbed `BAAI/bge-small-en-v1.5`, and retrieving top passages across `CURRENT CONTEXT` vs `HISTORICAL CONTEXT`.
 6. **Reasoning Synthesis (`LLMService`)**: Prompting NVIDIA Nemotron-3 Super 120B to synthesize structured metrics and dual-horizon textual evidence.
-7. **Storage & Telegram Distribution**: Storing structured JSON records in SQLite (`trading_analysis.db`) and sending digests to Telegram.
+7. **Storage & Dashboard Distribution**: Storing structured JSON records in SQLite (`trader.db`) and serving web & mobile dashboards.
 
 ---
 
@@ -217,7 +209,6 @@ OPENROUTER_READ_TIMEOUT=300
 OPENROUTER_CONNECT_TIMEOUT=30
 OPENROUTER_TOTAL_TIMEOUT=600
 OPENROUTER_PROGRESS_INTERVAL=15
-   TELEGRAM_CHANNEL_API_TOKEN=bot...
    FINNHUB_API_KEY=...
    NEWS_API_KEY=...
    FMP_API_KEY=...

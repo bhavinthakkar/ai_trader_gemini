@@ -10,7 +10,6 @@ from dashboard import (
     infer_trading_catalyst,
     process_single_stock,
     generate_html_dashboard,
-    format_telegram_active_digest,
 )
 
 
@@ -176,25 +175,45 @@ class TestDashboard(unittest.TestCase):
             if os.path.exists(temp_path):
                 os.remove(temp_path)
 
-    def test_format_telegram_active_digest(self):
-        sample_data = [
-            {
-                "symbol": "TSLA",
-                "price": 250.0,
-                "change_pct": 4.25,
-                "volume": 95000000,
-                "rvol": 1.8,
-                "day_low": 242.0,
-                "day_high": 252.0,
-                "catalyst_type": "DELIVERY NUMBERS",
-                "reason_summary": "Strong quarterly delivery numbers driving stock up 4.25%."
-            }
+
+    def test_get_nasdaq_european_universe(self):
+        from ticker_resolver import get_nasdaq_european_universe
+        xetra_univ = get_nasdaq_european_universe(exchange="DE")
+        self.assertIn("NVD.DE", xetra_univ)
+        self.assertIn("APC.DE", xetra_univ)
+        self.assertIn("TL0.DE", xetra_univ)
+
+        gettex_univ = get_nasdaq_european_universe(exchange="MU")
+        self.assertIn("NVD.MU", gettex_univ)
+        self.assertIn("APC.MU", gettex_univ)
+        self.assertIn("TL0.MU", gettex_univ)
+
+    @patch("dashboard.fetch_most_active_quotes")
+    @patch("dashboard.load_cached_portfolio")
+    def test_collect_dashboard_data_portfolio(self, mock_load, mock_fetch):
+        mock_load.return_value = {
+            "total_holdings": 2,
+            "holdings": [
+                {"symbol": "NVD.DE", "us_symbol": "NVDA", "shares": 10.0, "purchase_price": 115.0},
+                {"symbol": "TL0.DE", "us_symbol": "TSLA", "shares": 5.0, "purchase_price": 210.0}
+            ]
+        }
+        mock_fetch.return_value = [
+            {"symbol": "NVD.DE", "shortName": "NVIDIA", "regularMarketPrice": 125.0, "regularMarketVolume": 500000},
+            {"symbol": "TL0.DE", "shortName": "Tesla", "regularMarketPrice": 220.0, "regularMarketVolume": 300000}
         ]
-        digest = format_telegram_active_digest(sample_data, "NEUTRAL (50)")
-        self.assertIn("TSLA", digest)
-        self.assertIn("🟢", digest)
-        self.assertIn("DELIVERY NUMBERS", digest)
-        self.assertIn("Day Range", digest)
+
+        from dashboard import collect_dashboard_data
+        data = collect_dashboard_data(limit=5, use_portfolio=True)
+        self.assertEqual(len(data), 2)
+        syms = [d["symbol"] for d in data]
+        self.assertIn("NVD.DE", syms)
+        self.assertIn("TL0.DE", syms)
+        # Check shares and purchase price were attached
+        nvd_item = next(d for d in data if d["symbol"] == "NVD.DE")
+        self.assertEqual(nvd_item["shares"], 10.0)
+        self.assertEqual(nvd_item["purchase_price"], 115.0)
+        self.assertEqual(nvd_item["currency_symbol"], "€")
 
 
 if __name__ == "__main__":

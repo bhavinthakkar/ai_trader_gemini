@@ -10,7 +10,6 @@ Outputs:
   - Terminal interactive dashboard (via Rich)
   - Standalone modern HTML dashboard (dashboard.html)
   - Structured JSON export (optional via --json)
-  - Telegram alert summary (optional via --telegram)
 """
 
 from __future__ import annotations
@@ -30,7 +29,18 @@ from dotenv import load_dotenv
 from market_agent import MarketAgent
 from news_agent import NewsAgent
 from gloomberb_service import GloomberbService
-from telegram_digest import send_telegram_digest, _clean_telegram_markdown, _truncate_telegram_text
+from ticker_resolver import (
+    resolve_symbol,
+    get_european_default_universe,
+    get_nasdaq_european_universe,
+    get_currency_for_symbol,
+    is_european_symbol
+)
+from google_finance_sync import (
+    sync_google_portfolio,
+    load_cached_portfolio,
+    get_portfolio_symbols
+)
 
 try:
     from rich.console import Console
@@ -103,38 +113,48 @@ def format_volume(num: Any) -> str:
         return str(num)
 
 
-def format_market_cap(num: Any) -> str:
-    """Format market cap numbers with $, M, B, T suffixes."""
+def format_market_cap(num: Any, curr_sym: str = "$") -> str:
+    """Format market cap numbers with currency, M, B, T suffixes."""
     if num is None or num == "N/A":
         return "N/A"
     try:
         val = float(num)
         if val >= 1e12:
-            return f"${val / 1e12:.2f}T"
+            return f"{curr_sym}{val / 1e12:.2f}T"
         elif val >= 1e9:
-            return f"${val / 1e9:.2f}B"
+            return f"{curr_sym}{val / 1e9:.2f}B"
         elif val >= 1e6:
-            return f"${val / 1e6:.1f}M"
+            return f"{curr_sym}{val / 1e6:.1f}M"
         elif val >= 1e3:
-            return f"${val / 1e3:.0f}K"
-        return f"${val:.2f}"
+            return f"{curr_sym}{val / 1e3:.0f}K"
+        return f"{curr_sym}{val:.2f}"
     except (ValueError, TypeError):
         return str(num)
 
 
-def fetch_most_active_quotes(limit: int = 10, symbols: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+def fetch_most_active_quotes(
+    limit: int = 10,
+    symbols: Optional[List[str]] = None,
+    market: str = "US",
+    prefer_exchange: str = "DE",
+) -> List[Dict[str, Any]]:
     """
     Fetches real-time market data for the most traded stocks of the day.
-    Priority 1: Custom symbols (if supplied)
-    Priority 2: yfinance screener for 'most_actives'
-    Priority 3: Gloomberb CLI movers
-    Priority 4: Default active universe
+    Supports US and European (gettex / XETRA) markets and ISIN resolution.
+    Priority 1: Custom symbols or ISINs (if supplied)
+    Priority 2: European gettex/XETRA universe (if market == 'EU')
+    Priority 3: yfinance screener for 'most_actives' (US)
+    Priority 4: Gloomberb CLI movers
+    Priority 5: Default active universe
     """
     if symbols:
-        print(f"[Dashboard] Sourcing data for {len(symbols)} requested tickers...")
+        print(f"[Dashboard] Sourcing data for {len(symbols)} requested tickers/ISINs...")
         items = []
-        for sym in symbols[:limit]:
-            sym = sym.strip().upper()
+        for raw_sym in symbols[:limit]:
+            resolved = resolve_symbol(raw_sym, prefer_exchange=prefer_exchange, force_european=(market.upper() == "EU"))
+            sym = resolved["symbol"]
+            curr = resolved.get("currency", "USD")
+            curr_sym = resolved.get("currency_symbol", "$")
             try:
                 t = yf.Ticker(sym)
                 info = t.info or {}
@@ -147,7 +167,7 @@ def fetch_most_active_quotes(limit: int = 10, symbols: Optional[List[str]] = Non
                 if price is not None:
                     items.append({
                         "symbol": sym,
-                        "shortName": info.get("shortName") or info.get("longName") or sym,
+                        "shortName": info.get("shortName") or info.get("longName") or resolved.get("company_name") or sym,
                         "regularMarketPrice": price,
                         "regularMarketDayHigh": info.get("regularMarketDayHigh") or fast_info.get("day_high") or price,
                         "regularMarketDayLow": info.get("regularMarketDayLow") or fast_info.get("day_low") or price,
@@ -160,11 +180,20 @@ def fetch_most_active_quotes(limit: int = 10, symbols: Optional[List[str]] = Non
                         "fiftyTwoWeekHigh": info.get("fiftyTwoWeekHigh") or fast_info.get("year_high"),
                         "fiftyTwoWeekLow": info.get("fiftyTwoWeekLow") or fast_info.get("year_low"),
                         "averageDailyVolume3Month": info.get("averageDailyVolume3Month") or fast_info.get("three_month_average_volume"),
+                        "currency": curr,
+                        "currency_symbol": curr_sym,
+                        "isin": resolved.get("isin", ""),
                     })
             except Exception as e:
                 print(f"[Dashboard] Error fetching quote for {sym}: {e}")
         if items:
             return items
+
+    # European market mode: query US/NASDAQ tech leaders on gettex / XETRA
+    if market.upper() == "EU":
+        eu_universe = get_nasdaq_european_universe(exchange=prefer_exchange)
+        print(f"[Dashboard] Sourcing European NASDAQ dual-listings (gettex / XETRA: {len(eu_universe)} symbols in EUR)...")
+        return fetch_most_active_quotes(limit=limit, symbols=eu_universe, market=market, prefer_exchange=prefer_exchange)
 
     print(f"[Dashboard] Fetching top {limit} most active stocks via Yahoo Finance screener...")
     try:
@@ -336,6 +365,10 @@ def process_single_stock(quote: Dict[str, Any], market_agent: MarketAgent) -> Di
     """Processes quote data, technical analysis, and news for a single active stock."""
     symbol = quote.get("symbol", "").upper()
     name = quote.get("shortName") or quote.get("longName") or symbol
+    curr = quote.get("currency")
+    curr_sym = quote.get("currency_symbol")
+    if not curr_sym:
+        curr, curr_sym = get_currency_for_symbol(symbol)
 
     current_price = round(float(quote.get("regularMarketPrice") or 0.0), 2)
     day_high = round(float(quote.get("regularMarketDayHigh") or current_price), 2)
@@ -371,6 +404,10 @@ def process_single_stock(quote: Dict[str, Any], market_agent: MarketAgent) -> Di
     except Exception as e:
         print(f"[Dashboard] MarketAgent analysis notice for {symbol}: {e}")
 
+    if tech_data.get("currency_symbol"):
+        curr_sym = tech_data.get("currency_symbol")
+        curr = tech_data.get("currency", curr)
+
     rsi14 = tech_data.get("rsi14")
     ema20 = tech_data.get("ema20")
     ema50 = tech_data.get("ema50")
@@ -403,10 +440,33 @@ def process_single_stock(quote: Dict[str, Any], market_agent: MarketAgent) -> Di
     else:
         intraday_pos_pct = 50.0
 
+    # Look up portfolio metadata if available
+    portfolio_meta: Dict[str, Any] = {}
+    try:
+        cached_pf = load_cached_portfolio()
+        if cached_pf and cached_pf.get("holdings"):
+            for h in cached_pf["holdings"]:
+                h_sym = h.get("symbol", "").upper()
+                h_us = h.get("us_symbol", "").upper()
+                if h_sym == symbol or h_us == symbol or h_sym.split(".")[0] == symbol.split(".")[0]:
+                    portfolio_meta = h
+                    break
+    except Exception:
+        pass
+
+    shares = portfolio_meta.get("shares")
+    purchase_price = portfolio_meta.get("purchase_price")
+    pos_val = round(current_price * shares, 2) if (shares is not None and shares > 0) else None
+    unrealized_pl = round((current_price - purchase_price) * shares, 2) if (shares is not None and purchase_price is not None) else None
+    unrealized_pl_pct = round(((current_price - purchase_price) / purchase_price) * 100.0, 2) if (purchase_price is not None and purchase_price > 0) else None
+
     return {
         "symbol": symbol,
         "name": name,
         "price": current_price,
+        "currency": curr or "USD",
+        "currency_symbol": curr_sym or "$",
+        "isin": quote.get("isin") or tech_data.get("isin", ""),
         "change": change,
         "change_pct": change_pct,
         "day_high": day_high,
@@ -418,7 +478,7 @@ def process_single_stock(quote: Dict[str, Any], market_agent: MarketAgent) -> Di
         "avg_volume": vol_20d_mean,
         "rvol": rvol,
         "market_cap": market_cap,
-        "market_cap_str": format_market_cap(market_cap),
+        "market_cap_str": format_market_cap(market_cap, curr_sym=curr_sym or "$"),
         "high_52w": high_52w,
         "low_52w": low_52w,
         "rsi14": rsi14,
@@ -433,13 +493,39 @@ def process_single_stock(quote: Dict[str, Any], market_agent: MarketAgent) -> Di
         "catalyst_type": catalyst_type,
         "primary_headline": primary_headline,
         "reason_summary": reason_summary,
-        "news": news_items
+        "news": news_items,
+        "shares": shares,
+        "purchase_price": purchase_price,
+        "position_val": pos_val,
+        "unrealized_pl": unrealized_pl,
+        "unrealized_pl_pct": unrealized_pl_pct,
     }
 
 
-def collect_dashboard_data(limit: int = 10, symbols: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+def collect_dashboard_data(
+    limit: int = 10,
+    symbols: Optional[List[str]] = None,
+    market: str = "US",
+    prefer_exchange: str = "DE",
+    use_portfolio: bool = False,
+    portfolio_url: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """Concurrently collects quotes, technicals, and news for all selected active stocks."""
-    raw_quotes = fetch_most_active_quotes(limit=limit, symbols=symbols)
+    if portfolio_url:
+        try:
+            print(f"[Dashboard] Syncing Google portfolio from URL: {portfolio_url}...")
+            sync_google_portfolio(portfolio_url, prefer_exchange=prefer_exchange, force_european=True)
+            use_portfolio = True
+        except Exception as e:
+            print(f"[Dashboard] Error syncing Google portfolio from URL: {e}")
+
+    if use_portfolio and not symbols:
+        portfolio_symbols = get_portfolio_symbols(prefer_exchange=prefer_exchange)
+        print(f"[Dashboard] Sourcing {len(portfolio_symbols)} holdings from Google Finance portfolio...")
+        symbols = portfolio_symbols
+        market = "EU"
+
+    raw_quotes = fetch_most_active_quotes(limit=limit, symbols=symbols, market=market, prefer_exchange=prefer_exchange)
     if not raw_quotes:
         print("[Dashboard] No quotes available.")
         return []
@@ -482,6 +568,7 @@ def render_terminal_dashboard(data: List[Dict[str, Any]], fear_greed: str) -> No
         print("=" * 80)
         for item in data:
             sym = item['symbol']
+            curr_sym = item.get('currency_symbol', '$')
             price = item['price']
             chg = item['change_pct']
             vol = format_volume(item['volume'])
@@ -491,7 +578,7 @@ def render_terminal_dashboard(data: List[Dict[str, Any]], fear_greed: str) -> No
             cat = item['catalyst_type']
             reason = item['reason_summary']
             sign = "+" if chg >= 0 else ""
-            print(f"\n[{sym}] ${price:.2f} ({sign}{chg:.2f}%) | Vol: {vol} ({rvol:.1f}x) | Range: ${low:.2f} - ${high:.2f}")
+            print(f"\n[{sym}] {curr_sym}{price:.2f} ({sign}{chg:.2f}%) | Vol: {vol} ({rvol:.1f}x) | Range: {curr_sym}{low:.2f} - {curr_sym}{high:.2f}")
             print(f"  Catalyst: [{cat}]")
             print(f"  Reason:   {reason}")
         print("\n" + "=" * 80)
@@ -539,19 +626,20 @@ def render_terminal_dashboard(data: List[Dict[str, Any]], fear_greed: str) -> No
 
     for item in data:
         sym = item["symbol"]
-        price_str = f"${item['price']:.2f}"
+        curr_sym = item.get("currency_symbol", "$")
+        price_str = f"{curr_sym}{item['price']:.2f}"
         chg = item["change_pct"]
         chg_style = "green" if chg >= 0 else "red"
-        chg_str = f"[{chg_style}]{chg:+.2f}% (${item['change']:+.2f})[/{chg_style}]"
+        chg_str = f"[{chg_style}]{chg:+.2f}% ({curr_sym}{item['change']:+.2f})[/{chg_style}]"
 
-        range_str = f"${item['day_low']:.2f} - ${item['day_high']:.2f}"
+        range_str = f"{curr_sym}{item['day_low']:.2f} - {curr_sym}{item['day_high']:.2f}"
         vol_str = f"{format_volume(item['volume'])} ({item['rvol']:.1f}x)"
         if item["rvol"] >= 1.5:
             vol_str = f"[bold yellow]{vol_str}[/bold yellow]"
 
         range_52w = "N/A"
         if item.get("low_52w") and item.get("high_52w"):
-            range_52w = f"${item['low_52w']:.1f} - ${item['high_52w']:.1f}"
+            range_52w = f"{curr_sym}{item['low_52w']:.1f} - {curr_sym}{item['high_52w']:.1f}"
 
         rsi_val = item.get("rsi14")
         if rsi_val is not None:
@@ -573,6 +661,7 @@ def render_terminal_dashboard(data: List[Dict[str, Any]], fear_greed: str) -> No
     console.print("\n[bold cyan]📌 Why Are They Trading So Much Today? (Catalyst Deep Dive)[/bold cyan]")
     for item in data:
         sym = item["symbol"]
+        curr_sym = item.get("currency_symbol", "$")
         name = item["name"]
         chg = item["change_pct"]
         chg_color = "green" if chg >= 0 else "red"
@@ -581,8 +670,8 @@ def render_terminal_dashboard(data: List[Dict[str, Any]], fear_greed: str) -> No
 
         detail_text = Text()
         detail_text.append(f"• [{sym}] {name} ", style="bold white")
-        detail_text.append(f"${item['price']:.2f} ({chg:+.2f}%) ", style=f"bold {chg_color}")
-        detail_text.append(f"| Vol: {vol_str} ({rvol:.1f}x 20d avg) | Range: ${item['day_low']:.2f} - ${item['day_high']:.2f}\n", style="dim")
+        detail_text.append(f"{curr_sym}{item['price']:.2f} ({chg:+.2f}%) ", style=f"bold {chg_color}")
+        detail_text.append(f"| Vol: {vol_str} ({rvol:.1f}x 20d avg) | Range: {curr_sym}{item['day_low']:.2f} - {curr_sym}{item['day_high']:.2f}\n", style="dim")
         detail_text.append(f"  ➤ Core Driver: ", style="bold yellow")
         detail_text.append(f"{item['reason_summary']}\n", style="white")
 
@@ -609,6 +698,7 @@ def generate_html_dashboard(data: List[Dict[str, Any]], fear_greed: str, output_
 
     for item in data:
         sym = item["symbol"]
+        curr_sym = item.get("currency_symbol", "$")
         name = item["name"]
         price = item["price"]
         chg = item["change_pct"]
@@ -631,13 +721,13 @@ def generate_html_dashboard(data: List[Dict[str, Any]], fear_greed: str, output_
         rows_html.append(f"""
         <tr>
             <td class="font-bold text-white">{sym}<br><span class="text-xs text-gray-400 font-normal">{name[:20]}</span></td>
-            <td class="text-right font-mono font-bold">${price:.2f}</td>
-            <td class="text-right"><span class="badge {badge_class}">{sign}{chg:.2f}% (${sign}{chg_val:.2f})</span></td>
+            <td class="text-right font-mono font-bold">{curr_sym}{price:.2f}</td>
+            <td class="text-right"><span class="badge {badge_class}">{sign}{chg:.2f}% ({sign}{curr_sym}{abs(chg_val):.2f})</span></td>
             <td>
                 <div class="range-container">
-                    <span class="range-val">${day_low:.2f}</span>
+                    <span class="range-val">{curr_sym}{day_low:.2f}</span>
                     <div class="range-bar"><div class="range-fill" style="width: {pos_pct}%;"></div></div>
-                    <span class="range-val">${day_high:.2f}</span>
+                    <span class="range-val">{curr_sym}{day_high:.2f}</span>
                 </div>
             </td>
             <td class="text-right font-mono">{vol_str} <span class="text-xs {'text-yellow-400 font-bold' if rvol >= 1.5 else 'text-gray-400'}">({rvol:.1f}x)</span></td>
@@ -670,14 +760,14 @@ def generate_html_dashboard(data: List[Dict[str, Any]], fear_greed: str, output_
                     <p class="text-xs text-gray-400">Market Cap: {cap_str} | Alpha vs SPY: {alpha_str}</p>
                 </div>
                 <div class="text-right">
-                    <div class="text-2xl font-mono font-bold text-white">${price:.2f}</div>
+                    <div class="text-2xl font-mono font-bold text-white">{curr_sym}{price:.2f}</div>
                     <span class="badge {badge_class}">{sign}{chg:.2f}%</span>
                 </div>
             </div>
 
             <div class="grid grid-cols-4 gap-2 py-2 mb-3 bg-gray-900 rounded p-2 text-xs font-mono">
-                <div><span class="text-gray-400">Low:</span> ${day_low:.2f}</div>
-                <div><span class="text-gray-400">High:</span> ${day_high:.2f}</div>
+                <div><span class="text-gray-400">Low:</span> {curr_sym}{day_low:.2f}</div>
+                <div><span class="text-gray-400">High:</span> {curr_sym}{day_high:.2f}</div>
                 <div><span class="text-gray-400">Volume:</span> {vol_str}</div>
                 <div><span class="text-gray-400">RVOL:</span> {rvol:.1f}x</div>
             </div>
@@ -807,30 +897,7 @@ def generate_html_dashboard(data: List[Dict[str, Any]], fear_greed: str, output_
     return output_path
 
 
-def format_telegram_active_digest(data: List[Dict[str, Any]], fear_greed: str) -> str:
-    """Formats a concise, truncated Telegram digest for the most traded stocks."""
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    lines = [f"⚡ *Gloomberb Most Traded Stocks ({now_str})* ⚡\n• *Market Sentiment:* `{fear_greed}`\n"]
 
-    for item in data[:8]:
-        sym = item["symbol"]
-        price = item["price"]
-        chg = item["change_pct"]
-        emoji = "🟢" if chg >= 0 else "🔴"
-        vol_str = format_volume(item["volume"])
-        rvol = item["rvol"]
-        low = item["day_low"]
-        high = item["day_high"]
-        cat = item["catalyst_type"]
-        reason = _truncate_telegram_text(item["reason_summary"], max_chars=130)
-
-        lines.append(f"{emoji} *{sym}* | `${price:.2f}` ({chg:+.2f}%) | Vol: `{vol_str}` ({rvol:.1f}x)")
-        lines.append(f"• *Day Range:* `${low:.2f}` - `${high:.2f}`")
-        lines.append(f"• *Catalyst:* `{cat}`")
-        lines.append(f"• *Reason:* _{reason}_")
-        lines.append("")
-
-    return "\n".join(lines)
 
 
 def main() -> None:
@@ -847,7 +914,24 @@ def main() -> None:
         "--tickers", "-t",
         type=str,
         default=None,
-        help="Optional comma-separated list of symbols (e.g. NVDA,TSLA,INTC,AAPL)"
+        help="Optional comma-separated list of symbols (e.g. NVDA,TSLA,INTC,AAPL or ISINs)"
+    )
+    parser.add_argument(
+        "--market", "-m",
+        choices=["US", "EU"],
+        default="US",
+        help="Target market: US or EU (Europe - gettex / XETRA) (default: US)"
+    )
+    parser.add_argument(
+        "--eu",
+        action="store_true",
+        help="Shorthand for European market (--market EU)"
+    )
+    parser.add_argument(
+        "--prefer-exchange",
+        choices=["DE", "MU", "F", "HA", "TG"],
+        default="DE",
+        help="Preferred European exchange suffix (DE=XETRA, MU=gettex, HA=Hannover/EIX) (default: DE)"
     )
     parser.add_argument(
         "--html",
@@ -867,16 +951,30 @@ def main() -> None:
         help="Optional path to export raw dashboard dataset as JSON"
     )
     parser.add_argument(
-        "--telegram",
+        "--portfolio",
         action="store_true",
-        help="Broadcast active stocks summary to Telegram channel"
+        help="Analyze Google Finance / Google Sheet portfolio holdings (dual-listed in EUR)"
+    )
+    parser.add_argument(
+        "--portfolio-url",
+        type=str,
+        default=None,
+        help="URL of shared Google Sheet or Google Finance portfolio to sync before analyzing"
+    )
+    parser.add_argument(
+        "--streamlit",
+        action="store_true",
+        help="Ensure Streamlit web dashboard server (app.py) is running"
     )
     args = parser.parse_args()
 
     symbols = [s.strip().upper() for s in args.tickers.split(",") if s.strip()] if args.tickers else None
+    use_portfolio = args.portfolio or bool(args.portfolio_url)
+    market = "EU" if (args.eu or use_portfolio) else args.market.upper()
 
     print("\n" + "=" * 65)
-    print("⚡ GLOOMBERB MOST TRADED STOCKS & CATALYST DASHBOARD ⚡")
+    mode_tag = "PORTFOLIO" if use_portfolio else market
+    print(f"⚡ GLOOMBERB MOST TRADED STOCKS & CATALYST DASHBOARD [{mode_tag}] ⚡")
     print("=" * 65)
 
     # 1. Fetch market sentiment (CNN Fear & Greed Index)
@@ -886,7 +984,14 @@ def main() -> None:
         fear_greed = "Neutral (50)"
 
     # 2. Concurrently collect stock quotes, technicals & news
-    data = collect_dashboard_data(limit=args.limit, symbols=symbols)
+    data = collect_dashboard_data(
+        limit=args.limit,
+        symbols=symbols,
+        market=market,
+        prefer_exchange=args.prefer_exchange,
+        use_portfolio=use_portfolio,
+        portfolio_url=args.portfolio_url,
+    )
     if not data:
         print("\n❌ Failed to gather market data for active stocks.")
         sys.exit(1)
@@ -907,16 +1012,14 @@ def main() -> None:
         except Exception as e:
             print(f"[Dashboard] Error exporting JSON: {e}")
 
-    # 6. Broadcast to Telegram if requested
-    if args.telegram:
-        token = os.getenv("TELEGRAM_CHANNEL_API_TOKEN")
-        chat_id = os.getenv("TELEGRAM_CHANNEL_CHAT_ID", "969601315")
-        if token and chat_id:
-            print("[Dashboard] Broadcasting active stocks digest to Telegram...")
-            msg = format_telegram_active_digest(data, fear_greed)
-            send_telegram_digest(token, chat_id, msg)
-        else:
-            print("[Dashboard] Notice: TELEGRAM_CHANNEL_API_TOKEN or CHAT_ID not set; skipping Telegram broadcast.")
+
+    # 7. Start Streamlit web dashboard if requested
+    if args.streamlit:
+        try:
+            from streamlit_server import ensure_streamlit_running
+            ensure_streamlit_running()
+        except Exception as e:
+            print(f"[Dashboard] Notice: Could not start Streamlit server: {e}")
 
 
 if __name__ == "__main__":
