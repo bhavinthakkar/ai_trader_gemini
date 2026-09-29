@@ -240,6 +240,14 @@ OPENROUTER_PROGRESS_INTERVAL=15
 5. **Gloomberb CLI Installation**:
    Ensure official `gloomberb` binary is installed at `~/.local/bin/gloomberb`.
 
+6. **Mobile App Dependencies (Expo / React Native)**:
+   Ensure Node.js (v18+) is installed, then install the mobile app packages:
+   ```bash
+   cd mobile_app
+   npm install
+   cd ..
+   ```
+
 ---
 
 ## 🚀 Usage Guide
@@ -370,6 +378,111 @@ Startup is gated on `LLAMACPP_STARTUP_TIMEOUT` (default 300s, which covers a col
 ```
 Runs a portfolio-level risk review using the holdings from the Gloomberb CLI portfolio list. It injects the live Fed/rate macro outlook (FRED yield curve, real yields, fed funds rate, yield velocity, CFTC COT — the same `interest_rate_outlook` block the single-stock workflow uses) into the portfolio payload, then analyzes it with the `PORTFOLIO_SYSTEM_INSTRUCTION` (concentration/exposure mapping, stress tests, Fed policy assessment, diversification gaps, resilience options). Results are saved to the `portfolio_reviews` table and rendered in the Streamlit dashboard's "📁 Portfolio Risk Review" tab.
 
+### **📱 Run AI Trader Mobile Application (React Native & Expo)**
+
+The project includes a cross-platform mobile client (`mobile_app/`) built with React Native and Expo (SDK 57). The mobile application communicates with the FastAPI REST API (`api.py` / `api_server.py`) on port `8000` to deliver real-time swing trade alerts, quantitative scores, stock deep-dives, screener tools, and trade history directly to your Android or iOS device.
+
+#### **1. Prerequisites**
+* **Expo Go**: Install the official **Expo Go** app on your phone from the [Google Play Store](https://play.google.com/store/apps/details?id=host.exp.exponent) (Android) or [Apple App Store](https://apps.apple.com/app/expo-go/id982107779) (iOS).
+* **Node.js**: Ensure Node.js (v18+) is installed on your host machine.
+* **Dependencies**: Run `cd mobile_app && npm install && cd ..` if not already installed.
+* **Network**: For LAN mode, ensure your phone and computer are connected to the same Wi-Fi network.
+
+#### **2. Quick Start: Automated Mobile Launcher (Recommended)**
+The simplest way to start the mobile ecosystem is using `mobile_launcher.py`:
+
+```bash
+./venv/bin/python mobile_launcher.py
+```
+
+This single command:
+1. Automatically verifies if the FastAPI backend (`http://localhost:8000/api/health`) is running; if inactive, starts `api_server.py` in the background as a detached daemon.
+2. Configures the environment and boots the Expo Metro bundler in LAN mode.
+3. Renders a QR code and connection URL in your terminal.
+
+**To open the app on your phone:**
+1. Open **Expo Go** on Android (or the default **Camera** app on iOS).
+2. Scan the QR code displayed in your terminal.
+3. The JavaScript bundle will compile and launch the AI Trader app immediately.
+
+#### **3. Tunnel Mode (Bypassing Router Isolation & Firewalls)**
+If your phone is on a separate subnet, cellular data, or your Wi-Fi router enforces client isolation (common on guest or corporate networks), use tunnel mode:
+
+```bash
+./venv/bin/python mobile_launcher.py --tunnel
+```
+
+* You can also press `s` inside the running Metro terminal to toggle between LAN and Tunnel mode.
+* To clear Metro bundler cache if encountering bundle state issues:
+  ```bash
+  ./venv/bin/python mobile_launcher.py --clear
+  # or combine with tunnel mode:
+  ./venv/bin/python mobile_launcher.py --tunnel --clear
+  ```
+
+#### **4. Standalone Backend & Manual Metro Workflow**
+If you prefer running the backend and bundler in separate terminal windows:
+
+* **Terminal 1 — FastAPI Mobile Backend (`api_server.py`)**:
+  ```bash
+  # Start backend daemon on port 8000
+  ./venv/bin/python api_server.py start
+
+  # Check server status, local/LAN IPs, and OpenAPI documentation
+  ./venv/bin/python api_server.py status
+
+  # Stop or restart the backend server
+  ./venv/bin/python api_server.py stop
+  ./venv/bin/python api_server.py restart
+  ```
+  Interactive Swagger documentation is accessible at `http://localhost:8000/docs`.
+
+* **Terminal 2 — Expo Metro Bundler**:
+  ```bash
+  cd mobile_app
+  npx expo start --lan
+  # or with tunnel:
+  npx expo start --tunnel
+  ```
+
+#### **5. Configuring the Backend URL in the Mobile App**
+The mobile application defaults to connecting to port `8000` on your host's local area network IP (`http://<LAN_IP>:8000`). If your IP changes or you are using an ngrok / custom tunnel:
+1. Tap the **⚙️ Settings** tab at the bottom of the mobile app.
+2. Enter your workstation's IP or tunnel URL (e.g., `http://192.168.1.150:8000`).
+3. Tap **Update API URL**. The app immediately verifies backend health and updates the status indicator (🟢 **CONNECTED**).
+
+#### **6. Mobile Application Features**
+* **⚡ Signals Tab**: View active swing trading signals, filter by decision (BUY / HOLD / SELL / ALL), search by symbol or catalyst, adjust recency window (1D, 7D, 30D, 90D, All), and monitor aggregated KPI cards (Signal counts, Bullish/Bearish distribution, Average Confidence).
+* **🔬 Deep Dive Tab**: Select any stock or search any ticker to review 5-pillar quantitative scores (Trend, Sector, Alpha, Valuation History, Peer Valuation), full bull/bear cases, key risks, price geometries, and trigger an on-demand multi-agent synthesis.
+* **📊 Movers Tab**: Live volume screener identifying top gainers, losers, and volume leaders across US markets and European (gettex / XETRA) exchanges.
+* **📜 History Tab**: Complete historical archive of past signals and outcome tracking metrics.
+* **⚙️ Settings Tab**: Real-time backend connection health monitor, editable API base URL, and manual trigger for trade outcome evaluations.
+
+#### **7. Troubleshooting**
+* **"Failed to download remote update" / Connection Timeout**: Your router may block peer-to-peer traffic between devices. Restart with `./venv/bin/python mobile_launcher.py --tunnel`.
+* **Backend Status Red / "Cannot connect to server"**:
+  - Run `./venv/bin/python api_server.py status` to check if FastAPI is running.
+  - Verify that your PC firewall allows inbound connections on port `8000`.
+  - Check the IP entered under the mobile app's **Settings** tab.
+* **Metro Bundler Cache Issues**: Run `./venv/bin/python mobile_launcher.py --clear` or `npx expo start -c` in `mobile_app/`.
+
+---
+
+### **💻 Run Streamlit Web Dashboard**
+
+In addition to the mobile app, you can launch the interactive browser dashboard:
+
+```bash
+# Start Streamlit dashboard on port 8501
+./venv/bin/python streamlit_server.py start
+
+# Check status or stop the server
+./venv/bin/python streamlit_server.py status
+./venv/bin/python streamlit_server.py stop
+```
+
+Access the dashboard locally at `http://localhost:8501` or via local network at `http://<LAN_IP>:8501`.
+
 ---
 
 ## 🛠️ Technology Stack
@@ -378,4 +491,5 @@ Runs a portfolio-level risk review using the holdings from the Gloomberb CLI por
 * **Vector Embeddings**: FastEmbed (`BAAI/bge-small-en-v1.5`, 384-dimensional dense vectors).
 * **CLI Terminal Feed**: Official `gloom-sh/gloomberb` CLI.
 * **Macro Data**: FRED API (US Treasury Yield Curve) & CNN Fear & Greed Index.
-* **Database & UI**: SQLite3 (`trading_analysis.db`), Streamlit dashboard.
+* **Database & UI**: SQLite3 (`trader.db`), Streamlit web dashboard (`app.py`), React Native & Expo mobile application (`mobile_app`), and FastAPI REST backend (`api.py`).
+

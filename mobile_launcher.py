@@ -9,6 +9,7 @@ AI Trader Mobile App Launcher
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
@@ -39,6 +40,21 @@ def ensure_api_server_running(port: int = 8000):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="AI Trader Mobile App Launcher")
+    parser.add_argument(
+        "--tunnel",
+        "-t",
+        action="store_true",
+        help="Use Expo tunnel mode to bypass local Wi-Fi router isolation and firewalls",
+    )
+    parser.add_argument(
+        "--clear",
+        "-c",
+        action="store_true",
+        help="Clear Metro bundler cache",
+    )
+    args = parser.parse_args()
+
     ensure_api_server_running()
 
     # Prepend local node binary to PATH and disable Electron sandbox on Linux
@@ -51,11 +67,17 @@ def main():
     print("📱 Launching AI Trader Android Mobile App (Expo Metro)")
     print("=======================================================")
     print("1. Install 'Expo Go' from the Google Play Store on your Android phone.")
-    print("2. Connect your phone to the same local WiFi as this computer.")
+    print("2. Connect your phone to the same local WiFi as this computer (or use --tunnel).")
     print("3. Scan the QR code below using the Expo Go app or your camera.")
+    print("💡 If you get 'Failed to download remote update', press 's' in the terminal")
+    print("   or run with: ./venv/bin/python mobile_launcher.py --tunnel")
     print("=======================================================\n")
 
-    cmd = ["npx", "expo", "start", "--lan"]
+    mode_flag = "--tunnel" if args.tunnel else "--lan"
+    cmd = ["npx", "expo", "start", mode_flag]
+    if args.clear:
+        cmd.append("-c")
+
     try:
         subprocess.run(cmd, cwd=str(MOBILE_DIR), env=env)
     except KeyboardInterrupt:

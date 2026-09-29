@@ -15,7 +15,7 @@ import {
 import { StatusBar } from 'expo-status-bar';
 
 // Default backend API URL (Workstation Local Area Network IP)
-const DEFAULT_API_URL = 'http://192.168.0.241:8000';
+const DEFAULT_API_URL = 'http://192.168.0.94:8000';
 
 export default function App() {
   const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);

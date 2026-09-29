@@ -16,3 +16,5 @@ google-genai>=2.19.0
 curl-cffi>=0.16.0
 lxml>=6.1.0
 httpx2[http2,brotli,zstd]>=2.13.1
+fastapi>=0.110.0
+uvicorn>=0.28.0
