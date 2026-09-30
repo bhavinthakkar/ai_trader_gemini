@@ -52,6 +52,28 @@ sed -e "s|{{USER}}|${TARGET_USER}|g" \
 
 cp "${SCRIPT_DIR}/ai-trader-scanner.timer" /etc/systemd/system/ai-trader-scanner.timer
 
+# Detect npx for mobile service (Expo Metro Bundler)
+TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
+NPX_BIN=""
+for candidate in "$(which npx 2>/dev/null)" "${TARGET_HOME}/.local/node/bin/npx" "/usr/local/bin/npx" "/usr/bin/npx"; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+        NPX_BIN="$candidate"
+        break
+    fi
+done
+
+MOBILE_INSTALLED=false
+if [ -n "$NPX_BIN" ] && [ -d "${PROJECT_DIR}/mobile_app" ]; then
+    NODE_DIR="$(dirname "$NPX_BIN")"
+    echo "📱 Configuring ai-trader-mobile.service using ${NPX_BIN}..."
+    sed -e "s|{{USER}}|${TARGET_USER}|g" \
+        -e "s|{{PROJECT_DIR}}|${PROJECT_DIR}|g" \
+        -e "s|{{NPX_BIN}}|${NPX_BIN}|g" \
+        -e "s|{{NODE_DIR}}|${NODE_DIR}|g" \
+        "${SCRIPT_DIR}/ai-trader-mobile.service" > /etc/systemd/system/ai-trader-mobile.service
+    MOBILE_INSTALLED=true
+fi
+
 # Reload systemd
 echo "🔄 Reloading systemd daemon..."
 systemctl daemon-reload
@@ -66,6 +88,11 @@ systemctl enable --now ai-trader-web.service
 echo "🟢 Enabling and starting ai-trader-scanner.timer (periodic scans)..."
 systemctl enable --now ai-trader-scanner.timer
 
+if [ "$MOBILE_INSTALLED" = true ]; then
+    echo "🟢 Enabling and starting ai-trader-mobile.service (Expo Metro)..."
+    systemctl enable --now ai-trader-mobile.service
+fi
+
 echo ""
 echo "============================================================"
 echo " ✅ Installation Complete!"
@@ -74,10 +101,19 @@ echo " Services configured to automatically start on boot:"
 echo "   1. ai-trader-api.service      (FastAPI REST backend on port 8000)"
 echo "   2. ai-trader-web.service      (Streamlit Web Dashboard on port 8501)"
 echo "   3. ai-trader-scanner.timer    (Periodic market scan runner)"
+if [ "$MOBILE_INSTALLED" = true ]; then
+    echo "   4. ai-trader-mobile.service   (Expo Metro Mobile Bundler on port 8081)"
+fi
 echo ""
 echo " Useful management commands:"
 echo "   sudo systemctl status ai-trader-api"
 echo "   sudo systemctl status ai-trader-web"
+if [ "$MOBILE_INSTALLED" = true ]; then
+    echo "   sudo systemctl status ai-trader-mobile"
+fi
 echo "   journalctl -u ai-trader-api -f"
 echo "   journalctl -u ai-trader-web -f"
+if [ "$MOBILE_INSTALLED" = true ]; then
+    echo "   journalctl -u ai-trader-mobile -f"
+fi
 echo "============================================================"

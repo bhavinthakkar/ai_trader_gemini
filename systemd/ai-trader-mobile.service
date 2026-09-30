@@ -1,0 +1,19 @@
+[Unit]
+Description=AI Trader Expo Metro Bundler Service
+After=network-online.target ai-trader-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{USER}}
+WorkingDirectory={{PROJECT_DIR}}/mobile_app
+Environment=PATH={{NODE_DIR}}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=CI=1
+ExecStart={{NPX_BIN}} expo start --lan --port 8081
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

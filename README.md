@@ -487,17 +487,19 @@ Access the dashboard locally at `http://localhost:8501` or via local network at 
 
 ### **🍓 Raspberry Pi & Linux Autostart (systemd)**
 
-To keep the FastAPI REST backend and Streamlit dashboard running 24/7 across reboots and automatically restart them on crash:
+To keep the FastAPI REST backend, Streamlit dashboard, and Expo Metro bundler running 24/7 across reboots and automatically restart them on crash:
 
 ```bash
-# Install and enable all services on boot
+# Install and enable all services on boot (API, Web, Scanner Timer, and Mobile Bundler)
 sudo bash systemd/install_services.sh
 
 # Monitor service status and logs
 sudo systemctl status ai-trader-api
 sudo systemctl status ai-trader-web
+sudo systemctl status ai-trader-mobile
 journalctl -u ai-trader-api -f
 journalctl -u ai-trader-web -f
+journalctl -u ai-trader-mobile -f
 
 # Uninstall services
 sudo bash systemd/uninstall_services.sh

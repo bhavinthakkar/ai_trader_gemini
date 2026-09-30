@@ -11,6 +11,8 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 echo "Stopping and disabling AI Trader services..."
+systemctl stop ai-trader-mobile.service 2>/dev/null || true
+systemctl disable ai-trader-mobile.service 2>/dev/null || true
 systemctl stop ai-trader-scanner.timer 2>/dev/null || true
 systemctl disable ai-trader-scanner.timer 2>/dev/null || true
 systemctl stop ai-trader-web.service 2>/dev/null || true
@@ -19,6 +21,7 @@ systemctl stop ai-trader-api.service 2>/dev/null || true
 systemctl disable ai-trader-api.service 2>/dev/null || true
 
 echo "Removing unit files from /etc/systemd/system/..."
+rm -f /etc/systemd/system/ai-trader-mobile.service
 rm -f /etc/systemd/system/ai-trader-api.service
 rm -f /etc/systemd/system/ai-trader-web.service
 rm -f /etc/systemd/system/ai-trader-scanner.service
