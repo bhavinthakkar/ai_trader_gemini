@@ -1,0 +1,13 @@
+[Unit]
+Description=AI Trader Periodic Market Scan & Signal Generation
+After=network-online.target ai-trader-api.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{USER}}
+WorkingDirectory={{PROJECT_DIR}}
+ExecStart={{PROJECT_DIR}}/venv/bin/python master.py free --limit 5
+EnvironmentFile=-{{PROJECT_DIR}}/.env
+StandardOutput=journal
+StandardError=journal

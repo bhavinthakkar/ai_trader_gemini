@@ -1,0 +1,18 @@
+[Unit]
+Description=AI Trader Streamlit Web Dashboard
+After=network-online.target ai-trader-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{USER}}
+WorkingDirectory={{PROJECT_DIR}}
+ExecStart={{PROJECT_DIR}}/venv/bin/streamlit run app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+Restart=always
+RestartSec=10
+EnvironmentFile=-{{PROJECT_DIR}}/.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

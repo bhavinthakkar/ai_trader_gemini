@@ -485,6 +485,26 @@ Access the dashboard locally at `http://localhost:8501` or via local network at 
 
 ---
 
+### **🍓 Raspberry Pi & Linux Autostart (systemd)**
+
+To keep the FastAPI REST backend and Streamlit dashboard running 24/7 across reboots and automatically restart them on crash:
+
+```bash
+# Install and enable all services on boot
+sudo bash systemd/install_services.sh
+
+# Monitor service status and logs
+sudo systemctl status ai-trader-api
+sudo systemctl status ai-trader-web
+journalctl -u ai-trader-api -f
+journalctl -u ai-trader-web -f
+
+# Uninstall services
+sudo bash systemd/uninstall_services.sh
+```
+
+---
+
 ## 🛠️ Technology Stack
 
 * **LLM Reasoning**: Moonshot AI Kimi-K3 (`moonshotai/kimi-k3` via NVIDIA NIM), NVIDIA Nemotron-3 Ultra 550B (`nvidia/nemotron-3-ultra-550b-a55b`) & Super 120B (`nvidia/nemotron-3-super-120b`), the `free` preset (Ultra 550B first, Super 120B fallback on stall), Space Bunny Alpha (`bunny` via OpenRouter, $0/token, 1M context), OpenRouter Free Models Router (`openrouter/free`, 200k context window), Gemini 3.1 Pro, and local Qwen 2.5 14B through Vulkan-enabled llama.cpp (`qwen` / `llamacpp` / `qwen-llamacpp`, 8K compact profile).
