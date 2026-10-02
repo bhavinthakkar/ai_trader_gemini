@@ -165,6 +165,49 @@ def fetch_most_active_quotes(
                     or info.get("currentPrice")
                 )
                 if price is not None:
+                    raw_prev_close = (
+                        info.get("regularMarketPreviousClose")
+                        or fast_info.get("previous_close")
+                    )
+                    raw_change = info.get("regularMarketChange")
+                    raw_change_pct = info.get("regularMarketChangePercent")
+
+                    # If previous close is missing or invalid but we have change:
+                    if (raw_prev_close is None or raw_prev_close <= 0) and raw_change is not None:
+                        calc_prev = price - float(raw_change)
+                        if calc_prev > 0:
+                            raw_prev_close = calc_prev
+
+                    prev_close = raw_prev_close if (raw_prev_close is not None and raw_prev_close > 0) else price
+
+                    # Compute change if missing
+                    if raw_change is not None:
+                        change_val = float(raw_change)
+                    elif prev_close > 0:
+                        change_val = price - prev_close
+                    else:
+                        change_val = 0.0
+
+                    # Compute mathematical percentage change
+                    if prev_close > 0 and abs(price - prev_close) > 1e-6:
+                        math_pct = ((price - prev_close) / prev_close) * 100.0
+                    else:
+                        math_pct = 0.0
+
+                    # Authoritative percentage change (eliminate flawed < 1.0 heuristic multiplier)
+                    if raw_change_pct is not None:
+                        raw_pct = float(raw_change_pct)
+                        if abs(raw_pct - math_pct) < 0.2:
+                            change_pct_val = raw_pct
+                        elif abs(raw_pct * 100.0 - math_pct) < 0.2:
+                            change_pct_val = raw_pct * 100.0
+                        elif prev_close > 0 and raw_prev_close is not None and float(raw_prev_close) > 0:
+                            change_pct_val = math_pct
+                        else:
+                            change_pct_val = raw_pct
+                    else:
+                        change_pct_val = math_pct
+
                     items.append({
                         "symbol": sym,
                         "shortName": info.get("shortName") or info.get("longName") or resolved.get("company_name") or sym,
@@ -172,10 +215,10 @@ def fetch_most_active_quotes(
                         "regularMarketDayHigh": info.get("regularMarketDayHigh") or fast_info.get("day_high") or price,
                         "regularMarketDayLow": info.get("regularMarketDayLow") or fast_info.get("day_low") or price,
                         "regularMarketOpen": info.get("regularMarketOpen") or fast_info.get("open") or price,
-                        "regularMarketPreviousClose": info.get("regularMarketPreviousClose") or fast_info.get("previous_close") or price,
+                        "regularMarketPreviousClose": prev_close,
                         "regularMarketVolume": info.get("regularMarketVolume") or fast_info.get("last_volume") or 0,
-                        "regularMarketChange": info.get("regularMarketChange") or 0.0,
-                        "regularMarketChangePercent": (info.get("regularMarketChangePercent") or 0.0) * (100.0 if abs(info.get("regularMarketChangePercent", 0.0)) < 1.0 else 1.0),
+                        "regularMarketChange": change_val,
+                        "regularMarketChangePercent": change_pct_val,
                         "marketCap": info.get("marketCap") or fast_info.get("market_cap"),
                         "fiftyTwoWeekHigh": info.get("fiftyTwoWeekHigh") or fast_info.get("year_high"),
                         "fiftyTwoWeekLow": info.get("fiftyTwoWeekLow") or fast_info.get("year_low"),
@@ -374,19 +417,45 @@ def process_single_stock(quote: Dict[str, Any], market_agent: MarketAgent) -> Di
     day_high = round(float(quote.get("regularMarketDayHigh") or current_price), 2)
     day_low = round(float(quote.get("regularMarketDayLow") or current_price), 2)
     day_open = round(float(quote.get("regularMarketOpen") or current_price), 2)
-    prev_close = round(float(quote.get("regularMarketPreviousClose") or current_price), 2)
+    raw_prev_close = quote.get("regularMarketPreviousClose")
+    prev_close = round(float(raw_prev_close), 2) if (raw_prev_close is not None and float(raw_prev_close) > 0) else current_price
 
-    change = round(float(quote.get("regularMarketChange") or (current_price - prev_close)), 2)
+    # Mathematical price change from current_price and prev_close
+    calc_change = round(current_price - prev_close, 2)
+    raw_change = quote.get("regularMarketChange")
+    if raw_change is not None:
+        raw_change_val = round(float(raw_change), 2)
+        if abs(raw_change_val - calc_change) < 0.05 or raw_prev_close is None:
+            change = raw_change_val
+        else:
+            change = calc_change
+    elif prev_close > 0:
+        change = calc_change
+    else:
+        change = 0.0
+
+    # Mathematical percent change: ((current_price - prev_close) / prev_close) * 100.0
+    if prev_close > 0 and abs(current_price - prev_close) > 1e-6:
+        calc_pct = ((current_price - prev_close) / prev_close) * 100.0
+    else:
+        calc_pct = 0.0
+
     raw_change_pct = quote.get("regularMarketChangePercent")
     if raw_change_pct is not None:
-        change_pct = round(float(raw_change_pct), 2)
-        # Normalize if returned as decimal (e.g., 0.035 instead of 3.5%)
-        if abs(change_pct) < 0.10 and abs(raw_change_pct) != 0.0 and prev_close > 0:
-            calc_pct = ((current_price - prev_close) / prev_close) * 100.0
-            if abs(calc_pct - change_pct * 100) < 0.5:
-                change_pct = round(calc_pct, 2)
+        raw_val = float(raw_change_pct)
+        # Check if raw matches calc_pct (e.g., 0.32% or 5.2%)
+        if abs(raw_val - calc_pct) < 0.2:
+            change_pct = round(raw_val, 2)
+        # Check if raw was passed as decimal fraction (e.g., 0.035 for 3.5%)
+        elif abs(raw_val * 100.0 - calc_pct) < 0.2:
+            change_pct = round(raw_val * 100.0, 2)
+        # Authoritative mathematical calculation when prev_close is reliable
+        elif prev_close > 0 and raw_prev_close is not None and float(raw_prev_close) > 0:
+            change_pct = round(calc_pct, 2)
+        else:
+            change_pct = round(raw_val, 2)
     elif prev_close > 0:
-        change_pct = round(((current_price - prev_close) / prev_close) * 100.0, 2)
+        change_pct = round(calc_pct, 2)
     else:
         change_pct = 0.0
 

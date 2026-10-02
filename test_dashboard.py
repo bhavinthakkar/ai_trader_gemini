@@ -136,6 +136,113 @@ class TestDashboard(unittest.TestCase):
         self.assertEqual(res["catalyst_type"], "PRODUCT / AI / TECH")
         self.assertTrue(len(res["news"]) > 0)
 
+    def test_process_single_stock_european_small_move(self):
+        # Small move (< 1%) on European stock (e.g. +0.32%) must not be inflated to +32%
+        mock_quote = {
+            "symbol": "SAP.DE",
+            "shortName": "SAP SE",
+            "regularMarketPrice": 187.34,
+            "regularMarketPreviousClose": 186.74,
+            "regularMarketDayHigh": 188.00,
+            "regularMarketDayLow": 186.50,
+            "regularMarketOpen": 186.80,
+            "regularMarketVolume": 1200000,
+            "regularMarketChange": 0.60,
+            "regularMarketChangePercent": 0.3213,
+            "currency": "EUR",
+            "currency_symbol": "€",
+        }
+        mock_market_agent = MagicMock()
+        mock_market_agent.analyze.return_value = {"rsi14": 52.0}
+
+        with patch("dashboard.fetch_stock_news", return_value=[]):
+            res = process_single_stock(mock_quote, mock_market_agent)
+
+        self.assertEqual(res["symbol"], "SAP.DE")
+        self.assertEqual(res["price"], 187.34)
+        self.assertEqual(res["change"], 0.60)
+        self.assertEqual(res["change_pct"], 0.32)
+        self.assertEqual(res["currency_symbol"], "€")
+
+    def test_process_single_stock_european_negative_small_move(self):
+        # Small negative move (< 1%) must remain -0.45%, not -45%
+        mock_quote = {
+            "symbol": "NVD.DE",
+            "shortName": "NVIDIA (EUR)",
+            "regularMarketPrice": 99.55,
+            "regularMarketPreviousClose": 100.00,
+            "regularMarketChange": -0.45,
+            "regularMarketChangePercent": -0.45,
+            "currency": "EUR",
+            "currency_symbol": "€",
+        }
+        mock_market_agent = MagicMock()
+        mock_market_agent.analyze.return_value = {}
+
+        with patch("dashboard.fetch_stock_news", return_value=[]):
+            res = process_single_stock(mock_quote, mock_market_agent)
+
+        self.assertEqual(res["price"], 99.55)
+        self.assertEqual(res["change"], -0.45)
+        self.assertEqual(res["change_pct"], -0.45)
+
+    def test_process_single_stock_recovers_from_corrupted_100x_multiplier(self):
+        # If an upstream bug inflated 0.32% to 32.13%, process_single_stock corrects it via price math
+        mock_quote = {
+            "symbol": "SAP.DE",
+            "regularMarketPrice": 187.34,
+            "regularMarketPreviousClose": 186.74,
+            "regularMarketChange": 0.60,
+            "regularMarketChangePercent": 32.13,  # Corrupted 100x multiplier
+        }
+        mock_market_agent = MagicMock()
+        mock_market_agent.analyze.return_value = {}
+
+        with patch("dashboard.fetch_stock_news", return_value=[]):
+            res = process_single_stock(mock_quote, mock_market_agent)
+
+        self.assertEqual(res["change_pct"], 0.32)
+
+    def test_process_single_stock_fractional_decimal_format(self):
+        # If an external source provides 0.035 for 3.5%, it is normalized to 3.50%
+        mock_quote = {
+            "symbol": "ABC",
+            "regularMarketPrice": 103.50,
+            "regularMarketPreviousClose": 100.00,
+            "regularMarketChange": 3.50,
+            "regularMarketChangePercent": 0.035,  # Fractional decimal
+        }
+        mock_market_agent = MagicMock()
+        mock_market_agent.analyze.return_value = {}
+
+        with patch("dashboard.fetch_stock_news", return_value=[]):
+            res = process_single_stock(mock_quote, mock_market_agent)
+
+        self.assertEqual(res["change_pct"], 3.50)
+
+    @patch("yfinance.Ticker")
+    def test_fetch_most_active_quotes_european_small_percent_not_inflated(self, mock_ticker_cls):
+        from dashboard import fetch_most_active_quotes
+
+        mock_ticker = MagicMock()
+        mock_ticker.info = {
+            "regularMarketPrice": 187.34,
+            "regularMarketPreviousClose": 186.74,
+            "regularMarketChange": 0.60,
+            "regularMarketChangePercent": 0.3213,  # 0.32% move
+            "shortName": "SAP SE",
+        }
+        mock_ticker.fast_info = {}
+        mock_ticker_cls.return_value = mock_ticker
+
+        quotes = fetch_most_active_quotes(limit=1, symbols=["SAP.DE"], market="EU", prefer_exchange="DE")
+        self.assertEqual(len(quotes), 1)
+        # Verify the percentage is ~0.32% and NOT multiplied by 100 to become ~32%
+        self.assertAlmostEqual(quotes[0]["regularMarketChangePercent"], 0.3213, places=2)
+        self.assertLess(quotes[0]["regularMarketChangePercent"], 1.0)
+        self.assertEqual(quotes[0]["regularMarketPrice"], 187.34)
+        self.assertEqual(quotes[0]["regularMarketPreviousClose"], 186.74)
+
     def test_generate_html_dashboard(self):
         sample_data = [
             {
