@@ -60,9 +60,21 @@ class MarketAgent:
             high_20d = round(float(df["High"].tail(20).max()), 2) if len(df) >= 20 else round(float(price), 2)
             low_20d = round(float(df["Low"].tail(20).min()), 2) if len(df) >= 20 else round(float(price), 2)
 
-            # Quantitative stop-loss and swing target price levels
+            # 20-day Realized / Historical Volatility (annualized %)
+            hv_20d = None
+            if len(df) >= 20:
+                try:
+                    daily_ret = df["Close"].pct_change().dropna().tail(20)
+                    if not daily_ret.empty and daily_ret.std() > 0:
+                        hv_20d = round(float(daily_ret.std() * (252 ** 0.5) * 100.0), 2)
+                except Exception:
+                    hv_20d = None
+
+            # Quantitative stop-loss and swing target price levels (long and short setups)
             suggested_stop_loss = round(float(price - (1.5 * atr_val)), 2) if atr_val else round(float(price * 0.95), 2)
             suggested_target_price = round(float(price + (2.5 * atr_val)), 2) if atr_val else round(float(price * 1.08), 2)
+            suggested_short_stop_loss = round(float(price + (1.5 * atr_val)), 2) if atr_val else round(float(price * 1.05), 2)
+            suggested_short_target_price = round(float(price - (2.5 * atr_val)), 2) if atr_val else round(float(price * 0.92), 2)
 
             # Forward fundamentals & analyst consensus
             try:
@@ -70,8 +82,10 @@ class MarketAgent:
             except Exception:
                 info = {}
 
-            # Days until next quarterly earnings announcement
+            # Days until next quarterly earnings announcement & scheduled events
             days_to_earnings = None
+            days_to_ex_dividend = None
+            ex_dividend_date = None
             try:
                 import datetime
                 cal = getattr(ticker, "calendar", None)
@@ -97,6 +111,40 @@ class MarketAgent:
                         diff = (target_dt - now_dt).days
                         if diff >= 0:
                             days_to_earnings = int(diff)
+
+                    # Check for Ex-Dividend Date in calendar
+                    ex_dt_val = None
+                    if isinstance(cal, dict):
+                        for k in ("Ex-Dividend Date", "Dividend Date", "exDividendDate"):
+                            if k in cal and cal[k]:
+                                ex_dt_val = cal[k]
+                                break
+                    elif isinstance(cal, pd.DataFrame) and not cal.empty:
+                        for k in ("Ex-Dividend Date", "Dividend Date"):
+                            if k in cal.index:
+                                ex_dt_val = cal.loc[k].iloc[0]
+                                break
+
+                    if ex_dt_val is not None:
+                        t_dt = ex_dt_val.date() if isinstance(ex_dt_val, (datetime.date, datetime.datetime)) else pd.to_datetime(str(ex_dt_val)).date()
+                        now_dt = datetime.date.today()
+                        diff = (t_dt - now_dt).days
+                        if diff >= 0:
+                            days_to_ex_dividend = int(diff)
+                            ex_dividend_date = t_dt.isoformat()
+
+                if days_to_ex_dividend is None:
+                    ex_div_ts = info.get("exDividendDate")
+                    if ex_div_ts:
+                        if isinstance(ex_div_ts, (int, float)):
+                            t_dt = datetime.date.fromtimestamp(ex_div_ts)
+                        else:
+                            t_dt = pd.to_datetime(str(ex_div_ts)).date()
+                        now_dt = datetime.date.today()
+                        diff = (t_dt - now_dt).days
+                        if diff >= 0:
+                            days_to_ex_dividend = int(diff)
+                            ex_dividend_date = t_dt.isoformat()
             except Exception:
                 pass
 
@@ -162,7 +210,15 @@ class MarketAgent:
                 "low_20d": low_20d,
                 "suggested_stop_loss": suggested_stop_loss,
                 "suggested_target_price": suggested_target_price,
+                "suggested_short_stop_loss": suggested_short_stop_loss,
+                "suggested_short_target_price": suggested_short_target_price,
                 "days_to_earnings": days_to_earnings,
+                "days_to_ex_dividend": days_to_ex_dividend,
+                "ex_dividend_date": ex_dividend_date,
+                "days_to_next_event": days_to_ex_dividend,
+                "next_event_type": "EX_DIVIDEND" if days_to_ex_dividend is not None else None,
+                "next_event_date": ex_dividend_date,
+                "hv_20d": hv_20d,
                 "forward_pe": round(float(forward_pe), 2) if forward_pe else "N/A",
                 "profit_margins": f"{profit_margins * 100:.1f}%" if profit_margins else "N/A",
                 "earnings_growth_yoy": f"{earnings_growth * 100:.1f}%" if earnings_growth else "N/A",

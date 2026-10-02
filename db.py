@@ -79,7 +79,29 @@ def init_db(db_path=DB_PATH):
             "model_pillar_scores": "TEXT",
             "no_trade_reason": "TEXT",
             "model_data_completeness": "REAL",
-            "deterministic_data_completeness": "REAL"
+            "deterministic_data_completeness": "REAL",
+            "implied_volatility": "REAL",
+            "expected_move": "REAL",
+            "expected_move_pct": "REAL",
+            "stop_distance": "REAL",
+            "stop_distance_pct": "REAL",
+            "expected_move_stop_ratio": "REAL",
+            "volatility_regime": "TEXT",
+            "days_to_next_event": "INTEGER",
+            "next_event_type": "TEXT",
+            "next_event_date": "TEXT",
+            "sell_type": "TEXT",
+            "short_reward_risk_ratio": "REAL",
+            "structural_short_stop_price": "REAL",
+            "structural_short_target_price": "REAL",
+            "short_stop_distance": "REAL",
+            "short_stop_distance_pct": "REAL",
+            "short_expected_move_stop_ratio": "REAL",
+            "pillar_status": "TEXT",
+            "pillar_input_tracking": "TEXT",
+            "financial_quality_score": "REAL",
+            "is_value_trap": "INTEGER",
+            "value_trap_reasons": "TEXT"
         }
 
         cursor.execute("PRAGMA table_info(signals);")
@@ -215,6 +237,34 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
             model_data_completeness = _to_float(item.get("model_data_completeness"))
             deterministic_data_completeness = _to_float(item.get("deterministic_data_completeness"))
 
+            implied_volatility = _to_float(item.get("implied_volatility"))
+            expected_move = _to_float(item.get("expected_move"))
+            expected_move_pct = _to_float(item.get("expected_move_pct"))
+            stop_distance = _to_float(item.get("stop_distance"))
+            stop_distance_pct = _to_float(item.get("stop_distance_pct"))
+            expected_move_stop_ratio = _to_float(item.get("expected_move_stop_ratio"))
+            volatility_regime = _ensure_str(item.get("volatility_regime"), "")
+            days_to_next_event = item.get("days_to_next_event")
+            if days_to_next_event is not None:
+                try:
+                    days_to_next_event = int(days_to_next_event)
+                except Exception:
+                    days_to_next_event = None
+            next_event_type = _ensure_str(item.get("next_event_type"), "")
+            next_event_date = _ensure_str(item.get("next_event_date"), "")
+            sell_type = _ensure_str(item.get("sell_type"), "")
+            short_reward_risk_ratio = _to_float(item.get("short_reward_risk_ratio"))
+            structural_short_stop_price = _to_float(item.get("structural_short_stop_price"))
+            structural_short_target_price = _to_float(item.get("structural_short_target_price"))
+            short_stop_distance = _to_float(item.get("short_stop_distance"))
+            short_stop_distance_pct = _to_float(item.get("short_stop_distance_pct"))
+            short_expected_move_stop_ratio = _to_float(item.get("short_expected_move_stop_ratio"))
+            pillar_status = json.dumps(item.get("pillar_status") or {})
+            pillar_input_tracking = json.dumps(item.get("pillar_input_tracking") or {})
+            financial_quality_score = _to_float(item.get("financial_quality_score"))
+            is_value_trap = 1 if item.get("is_value_trap") else 0
+            value_trap_reasons = _ensure_str(item.get("value_trap_reasons", []))
+
             # Backward-compatible text summaries
             reason = _ensure_str(item.get("reason") or bull_case)
             inst_data = _ensure_str(item.get("institutional_data", ""))
@@ -238,8 +288,13 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                     structural_stop_price, structural_target_price,
                     vol_factor, atr_pct, primary_driver, falsification_bull, falsification_bear,
                     model_confidence, model_quant_score, model_pillar_scores,
-                    no_trade_reason, model_data_completeness, deterministic_data_completeness
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    no_trade_reason, model_data_completeness, deterministic_data_completeness,
+                    implied_volatility, expected_move, expected_move_pct, stop_distance, stop_distance_pct,
+                    expected_move_stop_ratio, volatility_regime, days_to_next_event, next_event_type, next_event_date,
+                    sell_type, short_reward_risk_ratio, structural_short_stop_price, structural_short_target_price,
+                    short_stop_distance, short_stop_distance_pct, short_expected_move_stop_ratio,
+                    pillar_status, pillar_input_tracking, financial_quality_score, is_value_trap, value_trap_reasons
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 timestamp, stock, decision, confidence, reason, inst_data, macro_data, news,
                 bank_coverage, risk_info, pe_peg, model_used, raw_json,
@@ -252,7 +307,12 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                 structural_stop_price, structural_target_price,
                 vol_factor, atr_pct, primary_driver, falsification_bull, falsification_bear,
                 model_confidence, model_quant_score, model_pillar_scores,
-                no_trade_reason, model_data_completeness, deterministic_data_completeness
+                no_trade_reason, model_data_completeness, deterministic_data_completeness,
+                implied_volatility, expected_move, expected_move_pct, stop_distance, stop_distance_pct,
+                expected_move_stop_ratio, volatility_regime, days_to_next_event, next_event_type, next_event_date,
+                sell_type, short_reward_risk_ratio, structural_short_stop_price, structural_short_target_price,
+                short_stop_distance, short_stop_distance_pct, short_expected_move_stop_ratio,
+                pillar_status, pillar_input_tracking, financial_quality_score, is_value_trap, value_trap_reasons
             ))
         conn.commit()
     print(f"[DB] Successfully saved {len(results)} analysis records to database.")

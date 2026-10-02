@@ -24,6 +24,8 @@ from catalyst_service import (
     DIP_BUY,
     EXTENSION_SELL,
     DIP_MIN_COMPOSITE,
+    EXTENSION_MAX_COMPOSITE,
+    SHORT_MAX_COMPOSITE,
     CATALYST_CONFIDENCE_BOOST,
     CATALYST_CONFIDENCE_CEILING,
     build_relevance_needles,
@@ -123,7 +125,9 @@ def gated_confidence(composite, pillar_scores: dict, data_completeness: float = 
     Returns a float rounded to 2 decimals. Fully deterministic -- the model's own
     stated confidence is recorded separately as model_confidence.
     """
-    def _f(v, default=50.0):
+    def _f(v, default=None):
+        if v is None:
+            return default
         try:
             return float(v)
         except (TypeError, ValueError):
@@ -131,12 +135,19 @@ def gated_confidence(composite, pillar_scores: dict, data_completeness: float = 
 
     comp = _f(composite, 50.0)
     keys = ["trend", "sector", "alpha", "valuation_history", "peer_valuation"]
-    values = [_f((pillar_scores or {}).get(k), 50.0) for k in keys]
+    valid_values = []
+    for k in keys:
+        val = _f((pillar_scores or {}).get(k), None)
+        if val is not None:
+            valid_values.append(val)
 
     distance = max(0.0, min(1.0, abs(comp - 50.0) / 50.0))
-    mean_p = sum(values) / len(values)
-    dispersion = sum(abs(v - mean_p) for v in values) / (len(values) * 50.0)
-    agreement = 1.0 - max(0.0, min(1.0, dispersion))
+    if valid_values:
+        mean_p = sum(valid_values) / len(valid_values)
+        dispersion = sum(abs(v - mean_p) for v in valid_values) / (len(valid_values) * 50.0)
+        agreement = 1.0 - max(0.0, min(1.0, dispersion))
+    else:
+        agreement = 0.5
 
     try:
         completeness = max(0.0, min(1.0, float(data_completeness)))
@@ -179,6 +190,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         decision = "SELL"
     else:
         decision = "HOLD"
+    original_decision = decision
 
     # Normalize model confidence -- kept as a reference; the authoritative `confidence`
     # is overwritten below by the deterministic gated_confidence() signal-quality formula.
@@ -206,6 +218,13 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     if not isinstance(raw_pillars, dict):
         raw_pillars = {}
 
+    pillar_status = deterministic_scores.get("pillar_status") or {}
+    pillar_input_tracking = deterministic_scores.get("pillar_input_tracking") or {}
+    fq_info = deterministic_scores.get("financial_quality") or {}
+    fq_score = deterministic_scores.get("financial_quality_score")
+    is_value_trap = bool(deterministic_scores.get("is_value_trap", False))
+    value_trap_reasons = deterministic_scores.get("value_trap_reasons", [])
+
     pillar_scores = {}
     model_pillar_scores = {}
     for det_key, model_key, out_key in (
@@ -215,10 +234,19 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         ("valuation_history_score", "valuation_history", "valuation_history"),
         ("peer_valuation_score", "peer_valuation", "peer_valuation"),
     ):
-        det_val = deterministic_scores.get(det_key)
-        # Deterministic pillar wins whenever it was computed; the model value is only a fallback
-        # when the deterministic score is absent (e.g., standalone normalize calls).
-        pillar_scores[out_key] = _to_float(det_val if det_val is not None else raw_pillars.get(model_key), 50.0)
+        if det_key in deterministic_scores:
+            det_val = deterministic_scores.get(det_key)
+            pillar_scores[out_key] = _to_float(det_val, None) if det_val is not None else None
+        elif model_key in deterministic_scores:
+            det_val = deterministic_scores.get(model_key)
+            pillar_scores[out_key] = _to_float(det_val, None) if det_val is not None else None
+        elif deterministic_scores:
+            # Deterministic scores dictionary was provided but this pillar was missing/excluded
+            pillar_scores[out_key] = None
+        else:
+            # Deterministic pipeline was not run; fall back to raw model pillars
+            model_val = raw_pillars.get(model_key)
+            pillar_scores[out_key] = _to_float(model_val, None) if model_val is not None else None
         model_pillar_scores[out_key] = _to_float(raw_pillars.get(model_key), None)
 
     # Array Fields
@@ -255,19 +283,24 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     if decision == "HOLD":
         confidence = round(min(confidence, 0.60), 2)
 
+    price_v = _to_float(m_data.get("current_price"), 0.0)
+    atr_v = _to_float(m_data.get("atr"), 0.0)
+    stop_v = _to_float(m_data.get("suggested_stop_loss"), 0.0)
+    target_v = _to_float(m_data.get("suggested_target_price"), 0.0)
+
     # Reward:Risk setup geometry -- deterministic, computed from market data, not the model.
     # Channel-anchored so the ratio varies with price position inside the 20-day range.
     rr_info = QuantitativeScoringService.compute_channel_reward_risk(
-        m_data.get("current_price"),
-        m_data.get("atr"),
+        price_v,
+        atr_v,
         m_data.get("high_20d"),
         m_data.get("low_20d"),
-        m_data.get("suggested_stop_loss"),
-        m_data.get("suggested_target_price")
+        stop_v,
+        target_v
     )
     analyst_rr_info = QuantitativeScoringService.compute_reward_risk(
-        m_data.get("current_price"),
-        m_data.get("suggested_stop_loss"),
+        price_v,
+        stop_v,
         m_data.get("analyst_target_price")
     )
     rr = rr_info.get("reward_risk_ratio")
@@ -275,10 +308,26 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     analyst_rr = analyst_rr_info.get("reward_risk_ratio")
     dist_resistance = rr_info.get("distance_to_resistance_atr")
 
+    # Short Reward:Risk setup geometry -- deterministic, channel-anchored
+    short_rr_info = QuantitativeScoringService.compute_channel_short_reward_risk(
+        price_v,
+        atr_v,
+        m_data.get("high_20d"),
+        m_data.get("low_20d"),
+        m_data.get("suggested_short_stop_loss"),
+        m_data.get("suggested_short_target_price")
+    )
+    short_rr = short_rr_info.get("reward_risk_ratio")
+    short_breakeven = short_rr_info.get("breakeven_win_rate")
+    structural_short_stop = short_rr_info.get("structural_stop")
+    structural_short_target = short_rr_info.get("structural_target")
+    dist_short_resistance = short_rr_info.get("distance_to_resistance_atr")
+    dist_short_support = short_rr_info.get("distance_to_support_atr")
+
     # Volatility risk profile -- deterministic ATR dampener, mirrors RiskAgent's HIGH threshold.
-    vol_factor = QuantitativeScoringService.compute_vol_factor(m_data.get("atr"), m_data.get("current_price"))
+    vol_factor = QuantitativeScoringService.compute_vol_factor(atr_v, price_v)
     try:
-        atr_pct = round((float(m_data.get("atr") or 0.0) / float(m_data.get("current_price") or 1.0)) * 100.0, 2)
+        atr_pct = round((float(atr_v) / float(price_v if price_v > 0 else 1.0)) * 100.0, 2)
     except (TypeError, ValueError):
         atr_pct = 0.0
 
@@ -290,6 +339,71 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
             gloomberb_payload.get("earnings", {}).get("earnings_date")
         )
 
+    # Options Implied Volatility & Expected Move metrics
+    options_data = gloomberb_payload.get("options") or {}
+    iv_val = options_data.get("implied_volatility_pct")
+    if iv_val is None:
+        iv_val = QuantitativeScoringService._clean_float(
+            options_data.get("implied_volatility") or m_data.get("implied_volatility"), None
+        )
+    expected_move = QuantitativeScoringService._clean_float(
+        options_data.get("expected_move") or m_data.get("expected_move"), None
+    )
+    expected_move_pct = QuantitativeScoringService._clean_float(
+        options_data.get("expected_move_pct") or m_data.get("expected_move_pct"), None
+    )
+    dte_opt = options_data.get("days_to_expiration") or horizon_days or 10
+    if expected_move is None and iv_val is not None and iv_val > 0.0 and price_v > 0.0:
+        em_calc = QuantitativeScoringService.compute_expected_move(
+            price_v, iv_val, dte=dte_opt, atm_straddle=options_data.get("atm_straddle")
+        )
+        expected_move = em_calc.get("expected_move")
+        expected_move_pct = em_calc.get("expected_move_pct")
+
+    # Setup risk: Expected move vs Stop distance
+    em_eval = QuantitativeScoringService.evaluate_expected_move_vs_stop(price_v, stop_v, expected_move)
+    stop_distance = em_eval.get("stop_distance")
+    stop_distance_pct = em_eval.get("stop_distance_pct")
+    em_stop_ratio = em_eval.get("ratio")
+    stop_inside_expected_move = bool(em_eval.get("stop_inside_expected_move"))
+
+    # Short setup risk: Expected move vs overhead Short Stop distance
+    short_em_eval = QuantitativeScoringService.evaluate_short_expected_move_vs_stop(
+        price_v, structural_short_stop, expected_move
+    )
+    short_stop_distance = short_em_eval.get("stop_distance")
+    short_stop_distance_pct = short_em_eval.get("stop_distance_pct")
+    short_em_stop_ratio = short_em_eval.get("ratio")
+    short_stop_inside_expected_move = bool(short_em_eval.get("stop_inside_expected_move"))
+
+    # Scheduled company events beyond earnings (dividends, splits, investor days)
+    events_payload = gloomberb_payload.get("events") or {}
+    days_to_next_event = m_data.get("days_to_next_event")
+    if days_to_next_event is None:
+        days_to_next_event = events_payload.get("days_to_next_event")
+    next_event_type = m_data.get("next_event_type") or events_payload.get("next_event_type") or "COMPANY_EVENT"
+    next_event_date = m_data.get("next_event_date") or events_payload.get("next_event_date")
+
+    days_to_ex_div = m_data.get("days_to_ex_dividend") or events_payload.get("days_to_ex_dividend")
+    if days_to_ex_div is not None and (days_to_next_event is None or days_to_ex_div < days_to_next_event):
+        days_to_next_event = days_to_ex_div
+        next_event_type = "EX_DIVIDEND"
+        next_event_date = m_data.get("ex_dividend_date") or events_payload.get("ex_dividend_date")
+
+    event_risk_info = QuantitativeScoringService.evaluate_event_risk(
+        days_to_earnings=days_to_earnings,
+        days_to_next_event=days_to_next_event,
+        next_event_type=next_event_type,
+        next_event_date=next_event_date
+    )
+
+    # Multi-source Volatility Regime (combining ATR, IV, HV)
+    hv_20d = _to_float(m_data.get("hv_20d"), None)
+    vol_regime_info = QuantitativeScoringService.evaluate_volatility_regime(
+        atr_v, price_v, implied_volatility=iv_val, historical_volatility=hv_20d
+    )
+    vol_regime = vol_regime_info.get("vol_regime", "NORMAL")
+
     # Decision origin: a trade's edge must come from price structure + composite + setup geometry,
     # never from a headline. News/macro/geopolitical events can confirm or veto, but cannot initiate.
     primary_driver = str(data.get("primary_driver") or "QUANT_STRUCTURE").upper()
@@ -298,6 +412,46 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     def _append_risk(note):
         if note not in key_risks:
             key_risks.append(note)
+
+    # Explicit risk checks beyond earnings blackout (unconditionally documented in key_risks)
+    if stop_inside_expected_move:
+        _append_risk(
+            f"Option-implied expected move (${expected_move:.2f} / {expected_move_pct:.1f}%) "
+            f"exceeds stop distance (${stop_distance:.2f} / {stop_distance_pct:.1f}%); "
+            f"stop is placed inside expected market volatility noise."
+        )
+    elif em_stop_ratio is not None and em_stop_ratio >= 0.8:
+        _append_risk(
+            f"Elevated volatility buffer compression: stop distance (${stop_distance:.2f}) "
+            f"is close to option-implied expected move (${expected_move:.2f}, ratio {em_stop_ratio:.2f}x)."
+        )
+
+    if event_risk_info.get("is_blackout") and event_risk_info.get("reason_code") == "EVENT_RISK":
+        _append_risk(f"Scheduled company event risk: {event_risk_info.get('description')}.")
+    elif days_to_next_event is not None and days_to_next_event <= 7:
+        _append_risk(f"Upcoming scheduled company event: '{next_event_type}' in {days_to_next_event} day(s).")
+
+    if vol_regime_info.get("is_extreme"):
+        _append_risk(
+            f"Extreme volatility regime detected ({'; '.join(vol_regime_info.get('reasons', []))}); "
+            f"market pricing severe tail risk."
+        )
+    elif vol_regime == "ELEVATED" and vol_regime_info.get("reasons"):
+        _append_risk(
+            f"Elevated volatility regime ({'; '.join(vol_regime_info.get('reasons', []))}); "
+            f"option implied volatility premium is heightened."
+        )
+
+    # Missing data visibility notes (unconditionally documented in key_risks)
+    unavail_pillars = [k for k, st in pillar_status.items() if st == "unavailable"]
+    if unavail_pillars:
+        _append_risk(f"Missing data visibility: {', '.join(unavail_pillars)} pillar(s) unavailable; excluded from quantitative composite.")
+
+    # Financial quality & value-trap alerts (unconditionally documented in key_risks)
+    if is_value_trap:
+        _append_risk(f"Value-Trap Alert: {'; '.join(value_trap_reasons or ['low valuation multiple masks balance-sheet solvency or cash-burn risk'])}.")
+    elif fq_info.get("flags"):
+        _append_risk(f"Financial quality notice: {'; '.join(fq_info.get('flags'))}.")
 
     # NO_TRADE reason codes: set whenever a deterministic gate vetoes a directional call.
     # None means the decision is the model's own signal, not a forced downgrade.
@@ -384,6 +538,44 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
             f"(capped at {CATALYST_CONFIDENCE_CEILING})."
         )
 
+    # Determine SELL intention: short-term bearish directional trade (SHORT) vs exiting/trimming long holding (LONG_EXIT)
+    raw_sell_type = str(data.get("sell_type") or m_data.get("sell_type") or "").upper()
+    is_explicit_holding = (
+        bool(m_data.get("is_holding"))
+        or _to_float(m_data.get("shares"), 0.0) > 0.0
+        or str(m_data.get("position", "")).upper() in ("LONG", "HOLDING")
+        or str(data.get("position_type", "")).upper() in ("LONG", "HOLDING")
+        or str(data.get("action_type", "")).upper() in ("EXIT", "TRIM", "CLOSE", "REDUCE", "SELL_LONG", "TAKE_PROFIT")
+    )
+    if raw_sell_type in ("SHORT", "SHORT_SALE", "BEARISH_TRADE"):
+        sell_type = "SHORT"
+    elif raw_sell_type in ("LONG_EXIT", "EXIT", "TRIM", "REDUCE", "SELL_LONG", "TAKE_PROFIT"):
+        sell_type = "LONG_EXIT"
+    elif is_explicit_holding:
+        sell_type = "LONG_EXIT"
+    elif catalyst_path and catalyst_direction == EXTENSION_SELL and stop_v > 0 and stop_v < price_v:
+        # Certified extension sell with long stops provided represents profit taking on long exposure
+        sell_type = "LONG_EXIT"
+    else:
+        sell_type = "SHORT"
+
+    if decision == "SELL" and sell_type == "SHORT":
+        if short_stop_inside_expected_move:
+            _append_risk(
+                f"Option-implied expected move (${expected_move:.2f} / {expected_move_pct:.1f}%) "
+                f"exceeds short overhead stop distance (${short_stop_distance:.2f} / {short_stop_distance_pct:.1f}%); "
+                f"short overhead stop is placed inside expected market volatility noise."
+            )
+        elif short_em_stop_ratio is not None and short_em_stop_ratio >= 0.8:
+            _append_risk(
+                f"Elevated volatility buffer compression: short stop distance (${short_stop_distance:.2f}) "
+                f"is close to option-implied expected move (${expected_move:.2f}, ratio {short_em_stop_ratio:.2f}x)."
+            )
+        if days_to_ex_div is not None and days_to_ex_div <= 7:
+            _append_risk(
+                f"Upcoming ex-dividend date in {days_to_ex_div} day(s); short sellers incur dividend liability and borrow recall risk."
+            )
+
     # Deterministic BUY gates: momentum/valuation anchors cannot override setup geometry or risk.
     # Hard post-model rule: the model's BUY is advisory and is only certified when the
     # DETERMINISTIC composite (computed from market data, not echoed by the model) is >= 70,
@@ -439,12 +631,18 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
             else:
                 gate_reasons.append(f"reward:risk ratio {rr:.2f} < 1.5")
 
+        if is_value_trap:
+            gate_reasons.append(f"value-trap risk ({'; '.join(value_trap_reasons or ['low valuation multiple masks balance-sheet solvency or cash-burn risk'])})")
+
         if gate_reasons:
             decision = "HOLD"
             gates_applied = True
-            no_trade_reason = (
-                "RR_TOO_LOW" if any("reward:risk" in r for r in gate_reasons) else "INSUFFICIENT_EVIDENCE"
-            )
+            if is_value_trap:
+                no_trade_reason = "VALUE_TRAP"
+            elif any("reward:risk" in r for r in gate_reasons):
+                no_trade_reason = "RR_TOO_LOW"
+            else:
+                no_trade_reason = "INSUFFICIENT_EVIDENCE"
             _append_risk(
                 "BUY downgraded to HOLD (deterministic BUY eligibility): " + "; ".join(gate_reasons) + "."
             )
@@ -457,13 +655,33 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
                 f"binary gap-risk event; do not initiate a fresh position into it."
             )
             _append_risk(note)
-        elif vol_factor < 0.85:
+        elif event_risk_info.get("is_blackout") and event_risk_info.get("reason_code") == "EVENT_RISK":
             decision = "HOLD"
             gates_applied = True
-            no_trade_reason = "INSUFFICIENT_EVIDENCE"
+            no_trade_reason = "EVENT_RISK"
             note = (
-                f"BUY downgraded to HOLD: extreme volatility (ATR {atr_pct}% of price, "
-                f"vol factor {vol_factor:.2f}); composite is dampened to {quant_score}/100."
+                f"BUY downgraded to HOLD: {event_risk_info.get('description')}; "
+                f"do not initiate a fresh position into a scheduled company event."
+            )
+            _append_risk(note)
+        elif vol_factor < 0.85 or vol_regime_info.get("is_extreme"):
+            decision = "HOLD"
+            gates_applied = True
+            no_trade_reason = "VOLATILITY_REGIME" if vol_regime_info.get("is_extreme") and vol_factor >= 0.85 else "INSUFFICIENT_EVIDENCE"
+            reasons_str = "; ".join(vol_regime_info.get("reasons", [])) if vol_regime_info.get("reasons") else f"ATR {atr_pct}% of price, vol factor {vol_factor:.2f}"
+            note = (
+                f"BUY downgraded to HOLD: extreme volatility ({reasons_str}); "
+                f"composite is dampened to {quant_score}/100."
+            )
+            _append_risk(note)
+        elif stop_inside_expected_move:
+            decision = "HOLD"
+            gates_applied = True
+            no_trade_reason = "EXPECTED_MOVE_EXCEEDS_STOP"
+            note = (
+                f"BUY downgraded to HOLD: option-implied expected move (${expected_move:.2f} / {expected_move_pct:.1f}%) "
+                f"exceeds stop distance (${stop_distance:.2f} / {stop_distance_pct:.1f}%); "
+                f"stop is placed inside normal volatility noise, creating high stop-out probability."
             )
             _append_risk(note)
         elif not liquidity_ok:
@@ -489,6 +707,152 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
                 f"${_to_float(m_data.get('current_price'), 0.0):.2f} (analyst RR {analyst_rr:.2f})."
             )
             _append_risk(note)
+
+    elif decision == "SELL":
+        det_composite = deterministic_scores.get("composite_quantitative_score")
+        if det_composite is None:
+            det_composite = deterministic_scores.get("raw_composite")
+
+        if sell_type == "LONG_EXIT":
+            # EXIT / TRIM OF AN EXISTING LONG HOLDING
+            # Allowed when stop is breached, target is reached, thesis is broken, extension certified, or de-risking.
+            stop_hit = stop_v > 0.0 and price_v <= stop_v
+            target_hit = target_v > 0.0 and price_v >= target_v
+            thesis_broken = (
+                (det_composite is not None and float(det_composite) < 50.0)
+                or (pillar_scores.get("trend") is not None and float(pillar_scores.get("trend")) < 40.0)
+            )
+            extension_exit = catalyst_path and catalyst_direction == EXTENSION_SELL
+            event_derisking = (days_to_earnings is not None and days_to_earnings <= 3) or (
+                event_risk_info.get("is_blackout") and event_risk_info.get("reason_code") == "EVENT_RISK"
+            )
+
+            if not (stop_hit or target_hit or thesis_broken or extension_exit or event_derisking):
+                # Holding thesis is fully intact -- prevent premature liquidation of a winning holding
+                if det_composite is not None and float(det_composite) >= 70.0:
+                    decision = "HOLD"
+                    gates_applied = True
+                    no_trade_reason = "HOLDING_THESIS_INTACT"
+                    _append_risk(
+                        f"SELL (LONG_EXIT) downgraded to HOLD: holding thesis is intact "
+                        f"(deterministic composite {float(det_composite):.1f} >= 70.0, "
+                        f"price ${price_v:.2f} above stop ${stop_v:.2f}, target ${target_v:.2f} not reached). "
+                        f"Maintain position."
+                    )
+        else:
+            # SHORT-TERM BEARISH DIRECTIONAL TRADE (SHORT SALE)
+            # Symmetric deterministic eligibility gates to BUY:
+            short_composite_ceiling = EXTENSION_MAX_COMPOSITE if (catalyst_path and catalyst_direction == EXTENSION_SELL) else SHORT_MAX_COMPOSITE
+            try:
+                composite_ok = det_composite is not None and float(det_composite) <= short_composite_ceiling
+            except (TypeError, ValueError):
+                composite_ok = False
+
+            market_data_ok = (
+                price_v > 0.0 and atr_v > 0.0
+                and structural_short_stop is not None and structural_short_stop > price_v
+                and structural_short_target is not None and structural_short_target < price_v
+                and (m_data.get("rsi14") is not None or m_data.get("rvol_20d") is not None)
+            )
+
+            coverage_ok = (
+                data_completeness >= 0.80
+                and deterministic_scores.get("composite_quantitative_score") is not None
+            )
+
+            short_rr_ok = short_rr is not None and short_rr >= 1.5
+
+            gate_reasons = []
+            if not composite_ok:
+                if det_composite is None:
+                    gate_reasons.append("deterministic composite could not be computed from market data")
+                else:
+                    gate_reasons.append(
+                        f"deterministic composite {float(det_composite):.1f}/100 > {short_composite_ceiling:.0f} ceiling "
+                        f"(requires structural breakdown <= {SHORT_MAX_COMPOSITE:.0f} or certified extension <= {EXTENSION_MAX_COMPOSITE:.0f})"
+                    )
+            if not market_data_ok:
+                gate_reasons.append("invalid or stale market data for short setup (valid price, ATR, short stop > entry, target < entry required)")
+            if not coverage_ok:
+                if not deterministic_scores.get("composite_quantitative_score"):
+                    gate_reasons.append("data coverage inadequate: no deterministic composite could be computed from market data")
+                else:
+                    gate_reasons.append(f"data coverage {data_completeness * 100:.0f}% < 80% bar")
+            if not short_rr_ok:
+                if short_rr is None:
+                    gate_reasons.append("short reward:risk ratio unavailable from setup geometry")
+                else:
+                    gate_reasons.append(f"short reward:risk ratio {short_rr:.2f} < 1.5")
+
+            if gate_reasons:
+                decision = "HOLD"
+                gates_applied = True
+                no_trade_reason = (
+                    "RR_TOO_LOW" if any("reward:risk" in r for r in gate_reasons) else "INSUFFICIENT_EVIDENCE"
+                )
+                _append_risk(
+                    "SELL (SHORT) downgraded to HOLD (deterministic SHORT eligibility): " + "; ".join(gate_reasons) + "."
+                )
+            elif days_to_earnings is not None and days_to_earnings <= 3:
+                decision = "HOLD"
+                gates_applied = True
+                no_trade_reason = "EARNINGS_BLACKOUT"
+                note = (
+                    f"SELL (SHORT) downgraded to HOLD: earnings report in {days_to_earnings} day(s) is a "
+                    f"binary upside gap-risk event; do not initiate a fresh short position into it."
+                )
+                _append_risk(note)
+            elif days_to_ex_div is not None and days_to_ex_div <= 2:
+                decision = "HOLD"
+                gates_applied = True
+                no_trade_reason = "EVENT_RISK"
+                note = (
+                    f"SELL (SHORT) downgraded to HOLD: ex-dividend date in {days_to_ex_div} day(s); "
+                    f"short sellers incur mandatory dividend payment liabilities and lender recall risk."
+                )
+                _append_risk(note)
+            elif event_risk_info.get("is_blackout") and event_risk_info.get("reason_code") == "EVENT_RISK":
+                decision = "HOLD"
+                gates_applied = True
+                no_trade_reason = "EVENT_RISK"
+                note = (
+                    f"SELL (SHORT) downgraded to HOLD: {event_risk_info.get('description')}; "
+                    f"do not initiate a fresh short position into a scheduled company event."
+                )
+                _append_risk(note)
+            elif vol_factor < 0.85 or vol_regime_info.get("is_extreme"):
+                decision = "HOLD"
+                gates_applied = True
+                no_trade_reason = "VOLATILITY_REGIME" if vol_regime_info.get("is_extreme") and vol_factor >= 0.85 else "INSUFFICIENT_EVIDENCE"
+                reasons_str = "; ".join(vol_regime_info.get("reasons", [])) if vol_regime_info.get("reasons") else f"ATR {atr_pct}% of price, vol factor {vol_factor:.2f}"
+                note = (
+                    f"SELL (SHORT) downgraded to HOLD: extreme volatility ({reasons_str}); "
+                    f"short squeeze and margin tail risks are heightened."
+                )
+                _append_risk(note)
+            elif short_stop_inside_expected_move:
+                decision = "HOLD"
+                gates_applied = True
+                no_trade_reason = "EXPECTED_MOVE_EXCEEDS_STOP"
+                note = (
+                    f"SELL (SHORT) downgraded to HOLD: option-implied expected move (${expected_move:.2f} / {expected_move_pct:.1f}%) "
+                    f"exceeds short overhead stop distance (${short_stop_distance:.2f} / {short_stop_distance_pct:.1f}%); "
+                    f"overhead stop is placed inside normal volatility noise, creating high stop-out probability."
+                )
+                _append_risk(note)
+            elif not liquidity_ok:
+                decision = "HOLD"
+                gates_applied = True
+                no_trade_reason = "LOW_LIQUIDITY"
+                note = (
+                    f"SELL (SHORT) downgraded to HOLD: insufficient liquidity "
+                    f"(RVOL {rvol_20d_val if rvol_20d_val is not None else 'N/A'}x, "
+                    f"20d avg dollar volume "
+                    f"${avg_dollar_vol_20d_val if avg_dollar_vol_20d_val is not None else 'N/A'}); "
+                    f"short locates and exits are unreliable below "
+                    f"{LIQUIDITY_MIN_RVOL_20D}x RVOL / ${LIQUIDITY_MIN_AVG_DOLLAR_VOL_20D / 1_000_000:.0f}M."
+                )
+                _append_risk(note)
 
     # Decision-probability consistency (Point 4): unless a hard gate overrode the model, the decision
     # must equal the argmax of its own buy/hold/sell probabilities. A unique max is required; ties keep
@@ -552,9 +916,14 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         "atr_pct": atr_pct,
         "primary_driver": primary_driver,
         "falsification_bull": str(data.get("falsification_bull") or ""),
-        "falsification_bear": str(data.get("falsification_bear") or ""),
         "pillar_scores": pillar_scores,
         "model_pillar_scores": model_pillar_scores,
+        "pillar_status": pillar_status,
+        "pillar_input_tracking": pillar_input_tracking,
+        "financial_quality": fq_info,
+        "financial_quality_score": fq_score,
+        "is_value_trap": is_value_trap,
+        "value_trap_reasons": value_trap_reasons,
         "reward_risk_ratio": rr,
         "breakeven_win_rate": breakeven,
         "analyst_target_rr": analyst_rr,
@@ -582,6 +951,23 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         "yield_spread_10y2y": yield_spread_10y2y,
         "fear_greed_score": fear_greed_score,
         "days_to_earnings": days_to_earnings,
+        "implied_volatility": iv_val,
+        "expected_move": expected_move,
+        "expected_move_pct": expected_move_pct,
+        "stop_distance": stop_distance,
+        "stop_distance_pct": stop_distance_pct,
+        "expected_move_stop_ratio": em_stop_ratio,
+        "volatility_regime": vol_regime,
+        "days_to_next_event": days_to_next_event,
+        "next_event_type": next_event_type,
+        "next_event_date": next_event_date,
+        "sell_type": sell_type if (original_decision == "SELL" or decision == "SELL") else None,
+        "short_reward_risk_ratio": short_rr,
+        "structural_short_stop_price": structural_short_stop,
+        "structural_short_target_price": structural_short_target,
+        "short_stop_distance": short_stop_distance,
+        "short_stop_distance_pct": short_stop_distance_pct,
+        "short_expected_move_stop_ratio": short_em_stop_ratio,
         # Backward compatibility for SQLite DB string storage
         "reason": "; ".join(bull_case),
         "risk_assessment": "; ".join(key_risks),

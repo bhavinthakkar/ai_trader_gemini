@@ -494,21 +494,161 @@ class GloomberbService:
                 bs["quick_ratio"] = info.get("quickRatio", "N/A")
             if "current_ratio" not in bs or bs.get("current_ratio") == "N/A":
                 bs["current_ratio"] = info.get("currentRatio", "N/A")
+            if "total_debt" not in bs or bs.get("total_debt") == "N/A":
+                bs["total_debt"] = info.get("totalDebt", "N/A")
+            if "ebitda" not in financials["income_statement"] or financials["income_statement"].get("ebitda") == "N/A":
+                financials["income_statement"]["ebitda"] = info.get("ebitda", "N/A")
+            if "operating_cash_flow" not in financials["cash_flow"] or financials["cash_flow"].get("operating_cash_flow") == "N/A":
+                financials["cash_flow"]["operating_cash_flow"] = info.get("operatingCashflow", "N/A")
+            if "free_cash_flow" not in financials["cash_flow"] or financials["cash_flow"].get("free_cash_flow") == "N/A":
+                financials["cash_flow"]["free_cash_flow"] = info.get("freeCashflow", "N/A")
+            if "shares_outstanding" not in bs or bs.get("shares_outstanding") == "N/A":
+                bs["shares_outstanding"] = info.get("sharesOutstanding", "N/A")
         except Exception as e:
             print(f"[GloomberbService] Financials enrichment warning for {symbol}: {e}")
 
+        # 4. Financial Quality, Cash Flow Margins & Balance-Sheet Solvency Metrics
+        fq = {
+            "free_cash_flow": None,
+            "operating_cash_flow": None,
+            "revenue": None,
+            "net_income": None,
+            "ebitda": None,
+            "operating_income": None,
+            "total_debt": None,
+            "total_cash": None,
+            "net_debt": None,
+            "fcf_margin": None,
+            "fcf_trend": None,
+            "operating_margin": None,
+            "operating_margin_trend": None,
+            "net_debt_to_ebitda": None,
+            "interest_coverage": None,
+            "earnings_quality_ratio": None,
+            "shares_outstanding": None,
+            "share_dilution_rate": None,
+        }
+
+        def _to_clean_float(val):
+            if val is None or str(val).strip().upper() in ("N/A", "-", "", "NONE"):
+                return None
+            try:
+                s = str(val).replace("%", "").replace("$", "").replace(",", "").strip()
+                return float(s)
+            except Exception:
+                return None
+
+        inc_data = financials.get("income_statement", {})
+        cf_data = financials.get("cash_flow", {})
+        bs_data = financials.get("balance_sheet", {})
+
+        rev_val = _to_clean_float(inc_data.get("revenue"))
+        op_inc_val = _to_clean_float(inc_data.get("operating_income"))
+        net_inc_val = _to_clean_float(inc_data.get("net_income"))
+        ebitda_val = _to_clean_float(inc_data.get("ebitda"))
+
+        ocf_val = _to_clean_float(cf_data.get("operating_cash_flow"))
+        fcf_val = _to_clean_float(cf_data.get("free_cash_flow"))
+        capex_val = _to_clean_float(cf_data.get("capital_expenditure"))
+
+        if fcf_val is None and ocf_val is not None and capex_val is not None:
+            fcf_val = ocf_val - abs(capex_val)
+
+        debt_val = _to_clean_float(bs_data.get("total_debt"))
+        cash_val = _to_clean_float(bs_data.get("total_cash") or bs_data.get("cash_and_equivalents"))
+
+        fq["revenue"] = rev_val
+        fq["operating_income"] = op_inc_val
+        fq["net_income"] = net_inc_val
+        fq["ebitda"] = ebitda_val
+        fq["operating_cash_flow"] = ocf_val
+        fq["free_cash_flow"] = fcf_val
+        fq["total_debt"] = debt_val
+        fq["total_cash"] = cash_val
+
+        # Free Cash Flow Margin
+        if fcf_val is not None and rev_val is not None and rev_val > 0:
+            fq["fcf_margin"] = round((fcf_val / rev_val) * 100.0, 2)
+            financials["key_ratios"]["fcf_margin"] = f"{fq['fcf_margin']:.2f}%"
+
+        # Operating Margin
+        if op_inc_val is not None and rev_val is not None and rev_val > 0:
+            fq["operating_margin"] = round((op_inc_val / rev_val) * 100.0, 2)
+        elif "operating_margins" in financials["key_ratios"]:
+            fq["operating_margin"] = _to_clean_float(financials["key_ratios"]["operating_margins"])
+
+        # Net Debt & Net Debt / EBITDA
+        if debt_val is not None and cash_val is not None:
+            net_debt_calc = round(debt_val - cash_val, 2)
+            fq["net_debt"] = net_debt_calc
+            if ebitda_val and ebitda_val > 0:
+                fq["net_debt_to_ebitda"] = round(net_debt_calc / ebitda_val, 2)
+                financials["key_ratios"]["net_debt_to_ebitda"] = f"{fq['net_debt_to_ebitda']:.2f}x"
+            elif net_debt_calc <= 0:
+                fq["net_debt_to_ebitda"] = 0.0
+                financials["key_ratios"]["net_debt_to_ebitda"] = "Net Cash"
+
+        # Earnings Quality Ratio (Operating Cash Flow / Net Income)
+        if ocf_val is not None and net_inc_val is not None and abs(net_inc_val) > 0:
+            fq["earnings_quality_ratio"] = round(ocf_val / net_inc_val if net_inc_val > 0 else ocf_val / abs(net_inc_val), 2)
+            financials["key_ratios"]["earnings_quality_ratio"] = f"{fq['earnings_quality_ratio']:.2f}x"
+
+        # Interest Coverage
+        int_exp = _to_clean_float(inc_data.get("interest_expense"))
+        if int_exp is not None and int_exp > 0 and op_inc_val is not None:
+            fq["interest_coverage"] = round(op_inc_val / int_exp, 2)
+            financials["key_ratios"]["interest_coverage"] = f"{fq['interest_coverage']:.2f}x"
+        elif debt_val == 0 or (fq["net_debt"] is not None and fq["net_debt"] <= 0):
+            fq["interest_coverage"] = 999.0  # Unleveraged / pristine
+            financials["key_ratios"]["interest_coverage"] = "Fortress (Net Cash)"
+
+        # Share count and historical trend
+        shares_curr = _to_clean_float(bs_data.get("shares_outstanding"))
+        if shares_curr is not None:
+            fq["shares_outstanding"] = shares_curr
+
+        # Multi-period trend evaluation across quarterly or annual statements
+        if fin_data and isinstance(fin_data, dict):
+            stmts = fin_data.get("quarterlyStatements") or fin_data.get("annualStatements")
+            if isinstance(stmts, list) and len(stmts) >= 2:
+                prev = stmts[1]
+                prev_rev = _to_clean_float(prev.get("revenue") or prev.get("totalRevenue"))
+                prev_op = _to_clean_float(prev.get("operatingIncome"))
+                prev_ocf = _to_clean_float(prev.get("operatingCashFlow"))
+                prev_capex = _to_clean_float(prev.get("capitalExpenditure"))
+                prev_fcf = prev_ocf - abs(prev_capex) if (prev_ocf is not None and prev_capex is not None) else None
+
+                if prev_rev and prev_rev > 0:
+                    if prev_op is not None and fq["operating_margin"] is not None:
+                        fq["operating_margin_trend"] = round(fq["operating_margin"] - ((prev_op / prev_rev) * 100.0), 2)
+                    if prev_fcf is not None and fq["fcf_margin"] is not None:
+                        fq["fcf_trend"] = round(fq["fcf_margin"] - ((prev_fcf / prev_rev) * 100.0), 2)
+
+                prev_shares = _to_clean_float(prev.get("sharesOutstanding") or prev.get("commonStockSharesOutstanding"))
+                if prev_shares and fq["shares_outstanding"]:
+                    fq["share_dilution_rate"] = round(((fq["shares_outstanding"] - prev_shares) / prev_shares) * 100.0, 2)
+
+        financials["financial_quality"] = fq
         return financials
 
     def fetch_options_chain(self, symbol: str) -> dict:
         """Sources Options Chains, Put/Call ratios, and Implied Volatility (IV) metrics natively via Gloomberb CLI."""
+        import datetime
         options_data = {
             "implied_volatility": "N/A",
+            "implied_volatility_pct": None,
             "put_call_ratio": "N/A",
             "call_volume": 0,
             "put_volume": 0,
             "call_open_interest": 0,
             "put_open_interest": 0,
             "expiration_dates": [],
+            "nearest_expiration": None,
+            "days_to_expiration": None,
+            "expected_move": None,
+            "expected_move_pct": None,
+            "atm_straddle": None,
+            "volatility_regime": "NORMAL",
             "unusual_activity": "Normal options volume flow",
             "category": "Options"
         }
@@ -520,6 +660,7 @@ class GloomberbService:
             calls = cli_options.get("calls", []) or []
             puts = cli_options.get("puts", []) or []
             exp_timestamps = cli_options.get("expirationDates", []) or []
+            underlying_price = cli_options.get("underlyingPrice") or cli_options.get("stockPrice")
 
             # Format expiration dates
             formatted_exps = []
@@ -529,6 +670,16 @@ class GloomberbService:
                 except Exception:
                     formatted_exps.append(str(ts))
             options_data["expiration_dates"] = formatted_exps
+            if formatted_exps:
+                options_data["nearest_expiration"] = formatted_exps[0]
+                try:
+                    exp_dt = datetime.datetime.strptime(formatted_exps[0], "%Y-%m-%d").date()
+                    dte = max((exp_dt - datetime.date.today()).days, 1)
+                except Exception:
+                    dte = 7
+                options_data["days_to_expiration"] = dte
+            else:
+                dte = 7
 
             call_vol = sum(c.get("volume", 0) or 0 for c in calls)
             put_vol = sum(p.get("volume", 0) or 0 for p in puts)
@@ -553,9 +704,50 @@ class GloomberbService:
 
             # Compute mean Implied Volatility
             iv_values = [c.get("impliedVolatility") for c in calls if c.get("impliedVolatility") is not None]
+            mean_iv = None
             if iv_values:
                 mean_iv = sum(iv_values) / len(iv_values)
-                options_data["implied_volatility"] = f"{mean_iv * 100:.1f}%"
+                iv_pct = round(mean_iv * 100.0, 2)
+                options_data["implied_volatility"] = f"{iv_pct:.1f}%"
+                options_data["implied_volatility_pct"] = iv_pct
+                if iv_pct < 20.0:
+                    options_data["volatility_regime"] = "CALM"
+                elif iv_pct <= 40.0:
+                    options_data["volatility_regime"] = "NORMAL"
+                elif iv_pct <= 65.0:
+                    options_data["volatility_regime"] = "ELEVATED"
+                else:
+                    options_data["volatility_regime"] = "EXTREME"
+
+            # Compute ATM Straddle & Expected Move
+            if underlying_price and calls and puts:
+                try:
+                    s_price = float(underlying_price)
+                    atm_c = min(calls, key=lambda c: abs(float(c.get("strike", 0)) - s_price))
+                    atm_p = min(puts, key=lambda p: abs(float(p.get("strike", 0)) - s_price))
+                    c_bid, c_ask = float(atm_c.get("bid", 0) or 0), float(atm_c.get("ask", 0) or 0)
+                    c_price = (c_bid + c_ask) / 2.0 if (c_bid > 0 and c_ask > 0) else float(atm_c.get("lastPrice", 0) or 0)
+                    p_bid, p_ask = float(atm_p.get("bid", 0) or 0), float(atm_p.get("ask", 0) or 0)
+                    p_price = (p_bid + p_ask) / 2.0 if (p_bid > 0 and p_ask > 0) else float(atm_p.get("lastPrice", 0) or 0)
+                    if c_price > 0 and p_price > 0:
+                        straddle = round(c_price + p_price, 2)
+                        em = round(0.85 * straddle, 2)
+                        options_data["atm_straddle"] = straddle
+                        options_data["expected_move"] = em
+                        options_data["expected_move_pct"] = round((em / s_price) * 100.0, 2)
+                except Exception:
+                    pass
+
+            if not options_data.get("expected_move") and mean_iv and underlying_price:
+                try:
+                    s_price = float(underlying_price)
+                    em = round(s_price * mean_iv * ((dte / 365.0) ** 0.5), 2)
+                    options_data["expected_move"] = em
+                    options_data["expected_move_pct"] = round(mean_iv * ((dte / 365.0) ** 0.5) * 100.0, 2)
+                except Exception:
+                    pass
+            elif not options_data.get("expected_move_pct") and mean_iv:
+                options_data["expected_move_pct"] = round(mean_iv * ((dte / 365.0) ** 0.5) * 100.0, 2)
 
             return options_data
 
@@ -563,9 +755,31 @@ class GloomberbService:
         try:
             ticker = yf.Ticker(symbol)
             expirations = ticker.options
+            stock_price = None
+            try:
+                fast_info = getattr(ticker, "fast_info", None)
+                if fast_info and getattr(fast_info, "last_price", None):
+                    stock_price = float(fast_info.last_price)
+            except Exception:
+                pass
+            if not stock_price:
+                try:
+                    info = getattr(ticker, "info", {}) or {}
+                    stock_price = float(info.get("regularMarketPrice") or info.get("currentPrice") or 0.0)
+                except Exception:
+                    pass
+
             if expirations:
                 options_data["expiration_dates"] = list(expirations[:4])
                 near_exp = expirations[0]
+                options_data["nearest_expiration"] = near_exp
+                try:
+                    exp_dt = datetime.datetime.strptime(near_exp, "%Y-%m-%d").date()
+                    dte = max((exp_dt - datetime.date.today()).days, 1)
+                except Exception:
+                    dte = 7
+                options_data["days_to_expiration"] = dte
+
                 opt_chain = ticker.option_chain(near_exp)
                 calls = opt_chain.calls
                 puts = opt_chain.puts
@@ -579,9 +793,54 @@ class GloomberbService:
                 pc_ratio = round(put_vol / call_vol, 2) if call_vol > 0 else 0.85
                 options_data["put_call_ratio"] = pc_ratio
 
+                mean_iv = None
                 if 'impliedVolatility' in calls and not calls['impliedVolatility'].empty:
-                    mean_iv = calls['impliedVolatility'].mean()
-                    options_data["implied_volatility"] = f"{mean_iv * 100:.1f}%"
+                    mean_iv = float(calls['impliedVolatility'].mean())
+                    iv_pct = round(mean_iv * 100.0, 2)
+                    options_data["implied_volatility"] = f"{iv_pct:.1f}%"
+                    options_data["implied_volatility_pct"] = iv_pct
+                    if iv_pct < 20.0:
+                        options_data["volatility_regime"] = "CALM"
+                    elif iv_pct <= 40.0:
+                        options_data["volatility_regime"] = "NORMAL"
+                    elif iv_pct <= 65.0:
+                        options_data["volatility_regime"] = "ELEVATED"
+                    else:
+                        options_data["volatility_regime"] = "EXTREME"
+
+                if not stock_price and not calls.empty and 'underlyingPrice' in calls.columns:
+                    try:
+                        stock_price = float(calls['underlyingPrice'].iloc[0])
+                    except Exception:
+                        pass
+
+                if stock_price and stock_price > 0 and not calls.empty and not puts.empty:
+                    try:
+                        idx_c = (calls['strike'] - stock_price).abs().idxmin()
+                        c_row = calls.loc[idx_c]
+                        c_bid, c_ask = float(c_row.get('bid', 0) or 0), float(c_row.get('ask', 0) or 0)
+                        c_price = (c_bid + c_ask) / 2.0 if (c_bid > 0 and c_ask > 0) else float(c_row.get('lastPrice', 0) or 0)
+
+                        idx_p = (puts['strike'] - stock_price).abs().idxmin()
+                        p_row = puts.loc[idx_p]
+                        p_bid, p_ask = float(p_row.get('bid', 0) or 0), float(p_row.get('ask', 0) or 0)
+                        p_price = (p_bid + p_ask) / 2.0 if (p_bid > 0 and p_ask > 0) else float(p_row.get('lastPrice', 0) or 0)
+
+                        if c_price > 0 and p_price > 0:
+                            straddle = round(c_price + p_price, 2)
+                            em = round(0.85 * straddle, 2)
+                            options_data["atm_straddle"] = straddle
+                            options_data["expected_move"] = em
+                            options_data["expected_move_pct"] = round((em / stock_price) * 100.0, 2)
+                    except Exception:
+                        pass
+
+                if not options_data.get("expected_move") and mean_iv and stock_price and stock_price > 0:
+                    em = round(stock_price * mean_iv * ((dte / 365.0) ** 0.5), 2)
+                    options_data["expected_move"] = em
+                    options_data["expected_move_pct"] = round(mean_iv * ((dte / 365.0) ** 0.5) * 100.0, 2)
+                elif not options_data.get("expected_move_pct") and mean_iv:
+                    options_data["expected_move_pct"] = round(mean_iv * ((dte / 365.0) ** 0.5) * 100.0, 2)
         except Exception as e:
             print(f"[GloomberbService] Options chain fetch warning for {symbol}: {e}")
 
@@ -730,13 +989,22 @@ class GloomberbService:
         return earnings_data
 
     def fetch_events(self, symbol: str) -> dict:
-        """Sources historical quarterly earnings surprises, dividends, and splits via gloomberb events."""
+        """Sources historical quarterly earnings surprises, dividends, splits, and upcoming scheduled company events."""
+        import datetime
         events_data = {
             "symbol": symbol,
             "historical_earnings_surprises": [],
             "recent_dividends": [],
+            "upcoming_events": [],
+            "days_to_next_event": None,
+            "next_event_type": None,
+            "next_event_date": None,
+            "days_to_ex_dividend": None,
+            "ex_dividend_date": None,
             "category": "Events"
         }
+
+        today_dt = datetime.date.today()
 
         cli_events = self.run_cli("events", symbol)
         if cli_events and isinstance(cli_events, dict):
@@ -751,6 +1019,77 @@ class GloomberbService:
                         "surprise_pct": f"{float(sp):+.2f}%" if sp is not None else "N/A"
                     })
             events_data["recent_dividends"] = cli_events.get("dividends", [])[:3]
+
+            # Check CLI dividends for upcoming ex-dividend
+            for div in cli_events.get("dividends", []):
+                div_date_str = div.get("date") or div.get("exDate")
+                if div_date_str:
+                    try:
+                        d_dt = datetime.datetime.strptime(str(div_date_str)[:10], "%Y-%m-%d").date()
+                        diff = (d_dt - today_dt).days
+                        if diff >= 0:
+                            if events_data["days_to_ex_dividend"] is None or diff < events_data["days_to_ex_dividend"]:
+                                events_data["days_to_ex_dividend"] = diff
+                                events_data["ex_dividend_date"] = d_dt.isoformat()
+                                events_data["upcoming_events"].append({
+                                    "event_type": "EX_DIVIDEND",
+                                    "date": d_dt.isoformat(),
+                                    "days_to_event": diff,
+                                    "description": f"Ex-dividend date (${div.get('amount', 'N/A')})"
+                                })
+                    except Exception:
+                        pass
+
+        # Supplemental upcoming company events from yfinance calendar / info
+        try:
+            ticker = yf.Ticker(symbol)
+            cal = getattr(ticker, "calendar", None)
+            ex_dt_val = None
+            if isinstance(cal, dict):
+                for k in ("Ex-Dividend Date", "Dividend Date", "exDividendDate"):
+                    if k in cal and cal[k]:
+                        ex_dt_val = cal[k]
+                        break
+            elif hasattr(cal, "empty") and not cal.empty:
+                for k in ("Ex-Dividend Date", "Dividend Date"):
+                    if k in cal.index:
+                        ex_dt_val = cal.loc[k].iloc[0]
+                        break
+
+            if ex_dt_val is None:
+                info = getattr(ticker, "info", {}) or {}
+                ex_div_ts = info.get("exDividendDate")
+                if ex_div_ts:
+                    if isinstance(ex_div_ts, (int, float)):
+                        ex_dt_val = datetime.date.fromtimestamp(ex_div_ts)
+                    else:
+                        ex_dt_val = str(ex_div_ts)
+
+            if ex_dt_val is not None:
+                if isinstance(ex_dt_val, (datetime.date, datetime.datetime)):
+                    t_dt = ex_dt_val.date() if isinstance(ex_dt_val, datetime.datetime) else ex_dt_val
+                else:
+                    t_dt = datetime.datetime.strptime(str(ex_dt_val)[:10], "%Y-%m-%d").date()
+                diff = (t_dt - today_dt).days
+                if diff >= 0:
+                    if events_data["days_to_ex_dividend"] is None or diff < events_data["days_to_ex_dividend"]:
+                        events_data["days_to_ex_dividend"] = diff
+                        events_data["ex_dividend_date"] = t_dt.isoformat()
+                        events_data["upcoming_events"].append({
+                            "event_type": "EX_DIVIDEND",
+                            "date": t_dt.isoformat(),
+                            "days_to_event": diff,
+                            "description": "Ex-Dividend Date"
+                        })
+        except Exception:
+            pass
+
+        # Resolve nearest scheduled company event
+        if events_data["upcoming_events"]:
+            nearest = min(events_data["upcoming_events"], key=lambda e: e.get("days_to_event", 999))
+            events_data["days_to_next_event"] = nearest.get("days_to_event")
+            events_data["next_event_type"] = nearest.get("event_type")
+            events_data["next_event_date"] = nearest.get("date")
 
         return events_data
 
@@ -856,6 +1195,18 @@ class GloomberbService:
                 p_fund = p_val.get("fundamentals", {}) or {}
                 if p_fund.get("forwardPE"):
                     peer_item["forward_pe"] = round(float(p_fund["forwardPE"]), 2)
+                p_ev = p_fund.get("enterpriseValue")
+                p_ebitda = p_fund.get("ebitda")
+                if p_ev and p_ebitda and p_ebitda > 0:
+                    peer_item["ev_to_ebitda"] = round(float(p_ev / p_ebitda), 2)
+                p_fcf = p_fund.get("freeCashFlow")
+                p_rev = p_fund.get("revenue")
+                if p_fcf is not None and p_rev and p_rev > 0:
+                    peer_item["fcf_margin"] = round(float((p_fcf / p_rev) * 100.0), 2)
+                p_debt = p_fund.get("totalDebt")
+                p_cash = p_fund.get("totalCash")
+                if p_debt is not None and p_cash is not None and p_ebitda and p_ebitda > 0:
+                    peer_item["net_debt_to_ebitda"] = round(float((p_debt - p_cash) / p_ebitda), 2)
             valuation["direct_peer_benchmarks"].append(peer_item)
 
         return valuation

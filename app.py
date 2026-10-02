@@ -455,15 +455,55 @@ with tab2:
                 entry_p = stock_data.get("entry_price")
                 st.metric("Entry Price", f"{curr_sym}{entry_p:.2f}" if entry_p else "N/A")
 
-            # 5-Pillar Quantitative Scores Display
+            # 5-Pillar Quantitative Scores Display with Visible Missingness
             if any(stock_data.get(k) is not None for k in ["trend_score", "sector_score", "alpha_score", "val_history_score", "peer_val_score"]):
-                st.markdown("#### 🧮 5-Pillar Quantitative Scores")
+                st.markdown("#### 🧮 5-Pillar Quantitative Scores & Data Availability")
+                p_status = {}
+                raw_st = stock_data.get("pillar_status")
+                if isinstance(raw_st, str):
+                    try:
+                        p_status = json.loads(raw_st)
+                    except Exception:
+                        pass
+                elif isinstance(raw_st, dict):
+                    p_status = raw_st
+
+                def _fmt_pillar(score, st_name):
+                    status = p_status.get(st_name, "measured" if score is not None else "unavailable")
+                    score_str = f"{score}" if score is not None else "UNAVAILABLE"
+                    return f"{score_str} ({status})"
+
                 p1, p2, p3, p4, p5 = st.columns(5)
-                p1.metric("Trend (25%)", f"{stock_data.get('trend_score', 'N/A')}")
-                p2.metric("Sector Rel (20%)", f"{stock_data.get('sector_score', 'N/A')}")
-                p3.metric("Market Alpha (20%)", f"{stock_data.get('alpha_score', 'N/A')}")
-                p4.metric("Val History (15%)", f"{stock_data.get('val_history_score', 'N/A')}")
-                p5.metric("Peer Val (20%)", f"{stock_data.get('peer_val_score', 'N/A')}")
+                p1.metric("Trend (25%)", _fmt_pillar(stock_data.get('trend_score'), "trend"))
+                p2.metric("Sector Rel (20%)", _fmt_pillar(stock_data.get('sector_score'), "sector"))
+                p3.metric("Market Alpha (20%)", _fmt_pillar(stock_data.get('alpha_score'), "alpha"))
+                p4.metric("Val History (15%)", _fmt_pillar(stock_data.get('val_history_score'), "valuation_history"))
+                p5.metric("Peer Val (20%)", _fmt_pillar(stock_data.get('peer_val_score'), "peer_valuation"))
+
+            # Financial Quality & Balance-Sheet Solvency
+            fq_sc = stock_data.get("financial_quality_score")
+            raw_j = stock_data.get("raw_json")
+            fq_dict = {}
+            if isinstance(raw_j, str):
+                try:
+                    fq_dict = json.loads(raw_j).get("financial_quality", {}).get("metrics", {})
+                except Exception:
+                    pass
+            elif isinstance(stock_data.get("financial_quality"), dict):
+                fq_dict = stock_data.get("financial_quality", {}).get("metrics", {})
+
+            if fq_sc is not None or fq_dict:
+                st.markdown("#### 💎 Financial Quality & Balance-Sheet Solvency")
+                q1, q2, q3, q4, q5 = st.columns(5)
+                q1.metric("Quality Score", f"{fq_sc}/100" if fq_sc is not None else "N/A")
+                fcf_m = fq_dict.get("fcf_margin")
+                q2.metric("FCF Margin", f"{fcf_m:.1f}%" if fcf_m is not None else "N/A")
+                op_m = fq_dict.get("operating_margin")
+                q3.metric("Operating Margin", f"{op_m:.1f}%" if op_m is not None else "N/A")
+                lev = fq_dict.get("net_debt_to_ebitda")
+                q4.metric("Net Debt/EBITDA", f"{lev:.1f}x" if (lev is not None and lev > 0) else ("Net Cash" if lev == 0 else "N/A"))
+                eq_r = fq_dict.get("earnings_quality_ratio")
+                q5.metric("OCF/Net Income", f"{eq_r:.2f}x" if eq_r is not None else "N/A")
 
             # Technical & Macro Snapshot Row
             st.markdown("#### 📈 Execution & Macro Parameters")

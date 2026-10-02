@@ -67,21 +67,75 @@ The platform operates on a **Deterministic quantitative-first architecture** pai
 
 ---
 
-## 🧮 1. Deterministic 5-Pillar Quantitative Scoring Engine
+## 🧮 1. Deterministic 5-Pillar Quantitative Scoring Engine & Visible Missingness
 
 To prevent the LLM from turning isolated positive facts into an unearned BUY decision, quantitative scores (0–100) are computed mathematically outside the model using standard financial logic:
 
-$$\text{Composite Score} = 0.25(\text{Trend}) + 0.20(\text{Sector}) + 0.20(\text{Alpha}) + 0.15(\text{Valuation History}) + 0.20(\text{Peer Valuation})$$
+$$\text{Base Composite Score} = 0.25(\text{Trend}) + 0.20(\text{Sector}) + 0.20(\text{Alpha}) + 0.15(\text{Valuation History}) + 0.20(\text{Peer Valuation})$$
 
 * **Trend Score (25%)**: Evaluates 5-day return velocity, RSI14, and EMA20/EMA50 alignment.
 * **Sector Relative Score (20%)**: Evaluates stock 5-day velocity vs. SPDR Sector ETF benchmark (`XLK`, `XLC`, `XLY`, etc.).
 * **Market Alpha Score (20%)**: Evaluates stock 5-day return relative to S&P 500 (`SPY`).
-* **Valuation History Score (15%)**: Evaluates current Forward P/E vs. company 3-year historical average P/E.
-* **Peer Valuation Score (20%)**: Benchmarks Forward P/E, P/S, EV/EBITDA, and Price/FCF against direct industry peers (e.g. NVDA vs AMD/AVGO).
+* **Valuation History Score (15%)**: Evaluates current Forward P/E vs. Trailing P/E expansion and YoY revenue growth.
+* **Peer Valuation Score (20%)**: Benchmarks Forward P/E and EV/EBITDA against direct industry peer distributions.
+
+### **Visible Missingness & Dynamic Weight Re-normalization**
+Rather than injecting an artificial 50.0 "neutral" score when inputs are absent (which falsely masks unmeasured pillars as balanced outcomes), the engine tracks input availability and freshness:
+* **Per-Input Tracking**: Every quantitative input tracks its availability (`available: bool`), freshness (`"fresh"`, `"stale"`, or `"unavailable"`), and timestamp.
+* **Pillar Status**: Each pillar is explicitly labeled as `"measured"` (all inputs available), `"partial"` (some inputs available), or `"unavailable"` (no valid inputs or benchmark missing).
+* **Null Score Representation**: Unavailable pillars have their score set to strictly `None` and are visibly reported in the dashboard and logs.
+* **Dynamic Weight Re-normalization**: The composite score dynamically re-normalizes base weights strictly across available pillars ($W_A = \sum_{i \in \text{avail}} w_i > 0$):
+
+$$\text{Raw Composite} = \frac{\sum_{i \in \text{avail}} w_i \times \text{Pillar}_i}{W_A}$$
+
+If all pillars are unavailable, the composite evaluates to `None` and triggers an `INSUFFICIENT_EVIDENCE` no-trade state.
 
 ---
 
-## ⚡ 2. Multiplicative Multi-Factor RAG Ranking Formula
+## 💎 2. Financial Quality, Solvency & Value-Trap Protection
+
+A low valuation multiple alone does not establish value. The engine evaluates comprehensive balance sheet solvency and cash generation metrics to guard against value traps:
+
+* **Free Cash Flow (FCF) Margin & Trend**: Evaluates cash conversion ($\ge 20\%$ elite, $< 0\%$ cash burn penalty) and multi-period trajectory.
+* **Operating Margin & Trend**: Measures pricing power ($\ge 25\%$ premium, $< 0\%$ unprofitability penalty).
+* **Net Debt / EBITDA Solvency**: Evaluates debt burden ($\le 0$ net cash fortress bonus, $\le 1.5\text{x}$ safe, $> 4.5\text{x}$ distressed leverage penalty).
+* **Interest Coverage Ratio**: Measures debt servicing safety ($\ge 8.0\text{x}$ or net cash fortress, $< 1.5\text{x}$ severe strain penalty).
+* **Earnings Quality Ratio ($\text{OCF} / \text{Net Income}$)**: Tests accrual divergence ($\ge 1.1\text{x}$ clean cash backing, $< 0.4\text{x}$ accrual red flag).
+* **Share Dilution Rate**: Penalizes annual share count expansion ($> 5\%/\text{yr}$) and rewards share repurchases.
+* **Peer-Relative Solvency Comparison**: Benchmarks FCF margins and leverage against direct peer group distributions.
+* **Deterministic Value-Trap Guard**: When a stock trades at a cheap multiple (Forward P/E $< 15.0$ or $\ge 20\%$ peer discount) but exhibits hazardous fundamentals ($\text{Net Debt/EBITDA} > 3.5\text{x}$, negative FCF margin, interest coverage $< 2.0\text{x}$, or Quality Score $< 40$):
+  - A 15-point value-trap penalty is applied to the composite.
+  - Directional BUY decisions are mechanically vetoed: downgraded to `HOLD` with `no_trade_reason = "VALUE_TRAP"` and documented in `key_risks`.
+
+---
+
+## 🎢 3. Event and Volatility Risk Beyond Earnings Blackout
+
+Market risk is governed by explicit structural boundaries rather than news headlines:
+
+* **Option-Implied Expected Move**: Computed via nearest ATM straddle ($0.85 \times (\text{Call} + \text{Put})$) or Black-Scholes formula ($S \times \sigma \times \sqrt{\text{DTE}/365}$).
+* **Expected Move vs. Stop Distance Comparison**: Setup risk check (`stop_inside_expected_move`). When the expected move exceeds the stop loss distance, the trade stop sits inside normal 1-SD options market noise, creating a high probability of a noise stop-out and triggering an automatic downgrade.
+* **Multi-Source Volatility Regimes**: Analyzes ATR% of price, Implied Volatility (IV), Historical Volatility (HV), and the IV/HV spread to classify regimes into `CALM`, `NORMAL`, `ELEVATED`, or `EXTREME` (IV $> 65\%$ or IV/HV $> 2.0\text{x}$ vetoes directional trades).
+* **Scheduled Company Event Blackouts**: Tracks binary event risks beyond earnings, including ex-dividend dates ($\le 2$ days blocks fresh shorts due to dividend liabilities and recall risk) and corporate conferences/splits ($\le 2$ days blocks fresh directional entries).
+
+---
+
+## ⚖️ 4. Symmetric BUY vs SELL & Short vs Holding Exit Architecture
+
+Decision criteria are fully symmetric across long and short operations, while clearly distinguishing short-term directional speculation from managing long-term positions:
+
+* **Symmetric Eligibility Checks**: Both BUY and SHORT must clear deterministic composite bars ($\ge 70$ for BUY, $\le 35$ for SHORT), data coverage ($\ge 80\%$), channel-anchored reward:risk ($\ge 1.5$), tradeable liquidity ($\ge 0.5\text{x}$ RVOL, $\ge \$1\text{M}$ 20d volume), and volatility regime safety.
+* **Long Holding Exit (`LONG_EXIT`)**:
+  - Evaluated when an existing holding is flagged for exit or trimming.
+  - Allowed when stop loss is breached, swing target is reached, fundamental thesis breaks (composite $< 50$ or trend $< 40$), extension catalyst triggers, or pre-event de-risking occurs.
+  - **Holding Thesis Guard**: Prevents premature liquidation of high-quality winning holdings when price remains above stop and composite is strong ($\ge 70$), downgrading premature exits to `HOLD` with `no_trade_reason = "HOLDING_THESIS_INTACT"`.
+* **Short Directional Trade (`SHORT`)**:
+  - Evaluates conservative channel-anchored overhead stop geometry ($\max(\text{price} + 1.5\text{ATR}, \text{high}_{20d} + 0.5\text{ATR})$) and support-bounded target ($\max(\text{price} - 2.5\text{ATR}, \text{low}_{20d} - 0.5\text{ATR})$).
+  - Vetoed during ex-dividend blackouts ($\le 2$ days) to avoid lender recall and mandatory dividend borrowing fees.
+
+---
+
+## ⚡ 5. Multiplicative Multi-Factor RAG Ranking Formula
 
 Text passage retrieval uses a pure multiplicative scoring formula:
 
@@ -105,7 +159,7 @@ $$\text{Final RAG Score} = \text{Semantic Similarity} \times \text{Source Reliab
 
 ---
 
-## ⏳ 3. Dual-Horizon Temporal RAG Partitioning
+## ⏳ 6. Dual-Horizon Temporal RAG Partitioning
 
 To avoid mixing short-term 7-day catalysts with multi-year historical filings, RAG vector retrieval is partitioned into two temporal horizons:
 
@@ -121,7 +175,7 @@ To avoid mixing short-term 7-day catalysts with multi-year historical filings, R
 
 ---
 
-## 🛡️ 4. Decoupled Pipeline Contract Architecture
+## 🛡️ 7. Decoupled Pipeline Contract Architecture
 
 To ensure strict system reliability and guarantee that raw LLM text is never formatted directly into notification alerts:
 
@@ -139,38 +193,77 @@ To ensure strict system reliability and guarantee that raw LLM text is never for
 ```
 
 1. **Nemotron (Data Producer)**: Synthesizes structured technicals and retrieved dual-horizon RAG evidence into raw JSON.
-2. **JSON Schema Validator (`normalize_master_trader_json`)**: Intercepts the LLM response, validates field types, clamps confidence scores $[0.0, 1.0]$, normalizes BUY/SELL/HOLD decisions, and injects safe defaults.
+2. **JSON Schema Validator (`normalize_master_trader_json`)**: Intercepts the LLM response, validates field types, clamps confidence scores $[0.0, 1.0]$, normalizes BUY/SELL/HOLD decisions, enforces deterministic gates, and injects safe defaults.
 3. **SQLite & API Layer**: Saves structured analysis to `trader.db` and serves real-time REST data via FastAPI.
 4. **Web & Mobile Dashboards**: Visualizes signals on Streamlit (`app.py`) and native Android (`mobile_app`).
 
 ---
 
-## 🔄 Execution Workflow
+## 🔄 8. Execution Workflow
 
 1. **Structured Data Extraction (`MarketAgent`)**: Sourcing price action, RSI14, EMA20/50, ATR, and 5-day relative alpha vs SPY.
 2. **Gloomberb CLI Ingestion (`GloomberbService`)**: Fetching 22+ official CLI channels (real-time quotes, historical price series, annual/quarterly financial statements, valuation multiples & fundamentals, options chains & flow dynamics, Form 4 insider transactions, institutional 13F holdings, Wall Street analyst consensus & price targets, earnings calendar & revision momentum, quarterly earnings surprise history, SEC EDGAR filings, breaking news catalysts, CNN Fear & Greed, Treasury yield curve, FRED macro series, economic calendar, benchmark US indices, market breadth & active movers, SPDR sector ETFs, 1Y price correlation engine, multi-symbol comparison, watchlists and portfolios).
 3. **Institutional Data Sourcing (`InstitutionalDataService`)**: Ingesting IR RSS releases, direct SEC EDGAR API filings, earnings call transcripts, press releases, Tier-1 financial media, and FRED yield curves.
-4. **Deterministic Quantitative Scoring (`QuantitativeScoringService`)**: Calculating the explicit 5-pillar composite quantitative score (0-100).
+4. **Deterministic Quantitative Scoring (`QuantitativeScoringService`)**: Calculating the explicit 5-pillar composite quantitative score (0-100), tracking visible missingness, and assessing financial quality.
 5. **Dual-Horizon Multiplicative RAG Indexing (`RAGService`)**: Indexing qualitative document chunks, embedding with FastEmbed `BAAI/bge-small-en-v1.5`, and retrieving top passages across `CURRENT CONTEXT` vs `HISTORICAL CONTEXT`.
 6. **Reasoning Synthesis (`LLMService`)**: Prompting NVIDIA Nemotron-3 Super 120B to synthesize structured metrics and dual-horizon textual evidence.
 7. **Storage & Dashboard Distribution**: Storing structured JSON records in SQLite (`trader.db`) and serving web & mobile dashboards.
 
 ---
 
-## 📋 Required JSON Output Schema
+## 📋 9. Required JSON Output Schema
 
 ```json
 {
   "stock": "NVDA",
+  "decision": "HOLD",
+  "sell_type": null,
+  "confidence": 0.70,
+  "quant_score": 71.3,
   "buy_score": 0.20,
   "hold_score": 0.65,
   "sell_score": 0.15,
-  "decision": "HOLD",
-  "confidence": 0.70,
-  "bull_case": "NVDA shows strong valuation alignment with history (85.0 score) and peers (74.76 score), supported by exceptional revenue growth (85.2% YoY)...",
-  "bear_case": "Despite robust fundamentals, NVDA exhibits weak technical and relative performance: trend score (55.36) and sector relative score (26.25)...",
-  "key_risk": "Primary risk is persistent failure to outperform sector benchmarks and generate market alpha...",
-  "missing_information": "Lacks specific forward guidance quantitatives from latest earnings call..."
+  "horizon_days": 10,
+  "no_trade_reason": null,
+  "pillar_scores": {
+    "trend": 75.0,
+    "sector": null,
+    "alpha": 65.0,
+    "valuation_history": 72.0,
+    "peer_valuation": 68.0
+  },
+  "pillar_status": {
+    "trend": "measured",
+    "sector": "unavailable",
+    "alpha": "measured",
+    "valuation_history": "measured",
+    "peer_valuation": "measured"
+  },
+  "financial_quality": {
+    "score": 82.5,
+    "status": "measured",
+    "is_value_trap": false,
+    "metrics": {
+      "fcf_margin": 24.5,
+      "operating_margin": 28.0,
+      "net_debt_to_ebitda": 0.0,
+      "interest_coverage": 999.0,
+      "earnings_quality_ratio": 1.25
+    }
+  },
+  "volatility_regime": "NORMAL",
+  "expected_move": 4.50,
+  "stop_distance": 6.00,
+  "bull_case": [
+    "NVDA shows strong valuation alignment with history and peers, supported by exceptional cash conversion."
+  ],
+  "bear_case": [
+    "Sector benchmark data unavailable; conservative risk controls exclude sector outperformance from composite."
+  ],
+  "key_risks": [
+    "Missing data visibility: sector pillar unavailable; excluded from quantitative composite.",
+    "Option-implied expected move ($4.50 / 4.1%) within stop boundaries ($6.00 / 5.5%)."
+  ]
 }
 ```
 
