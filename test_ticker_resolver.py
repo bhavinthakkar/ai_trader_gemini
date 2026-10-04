@@ -94,6 +94,28 @@ class TestTickerResolver(unittest.TestCase):
         self.assertEqual(res_us["symbol"], "NVDA")
         self.assertEqual(res_us["currency"], "USD")
 
+    def test_resolve_mu_stock(self):
+        # Default / AUTO resolution should preserve US ticker MU
+        res = ticker_resolver.resolve_symbol("MU")
+        self.assertEqual(res["symbol"], "MU")
+        self.assertEqual(res["company_name"], "Micron Technology, Inc.")
+        self.assertEqual(res["currency"], "USD")
+        self.assertEqual(res["currency_symbol"], "$")
+        self.assertFalse(res["is_european"])
+
+        # Explicit European request should resolve to dual-listing
+        res_eu = ticker_resolver.resolve_symbol("MU", force_european=True)
+        self.assertEqual(res_eu["symbol"], "MQN.DE")
+        self.assertEqual(res_eu["currency"], "EUR")
+        self.assertTrue(res_eu["is_european"])
+
+    def test_resolve_native_european_stock(self):
+        # Plain ticker for German stock SAP should resolve to European exchange
+        res = ticker_resolver.resolve_symbol("SAP")
+        self.assertEqual(res["symbol"], "SAP.DE")
+        self.assertEqual(res["currency"], "EUR")
+        self.assertTrue(res["is_european"])
+
     def test_resolve_already_suffixed_symbol(self):
         res = ticker_resolver.resolve_symbol("RHM.DE")
         self.assertEqual(res["symbol"], "RHM.DE")

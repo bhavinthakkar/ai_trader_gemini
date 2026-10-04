@@ -218,8 +218,8 @@ def fetch_active_movers(
 
 @app.get("/api/resolve", tags=["Market Screener"])
 def resolve_ticker(
-    query: str = Query(..., description="ISIN, WKN, or ticker symbol (e.g. US67066G1040, NVD.DE, AAPL)"),
-    prefer_exchange: str = Query(default="DE", description="Preferred German exchange"),
+    query: str = Query(..., description="ISIN, WKN, or ticker symbol (e.g. US67066G1040, NVD.DE, AAPL, MU)"),
+    prefer_exchange: str = Query(default="AUTO", description="Preferred exchange (AUTO, DE, MU, US)"),
     force_european: bool = Query(default=False, description="Map US tickers to German gettex/XETRA equivalents"),
 ):
     """Resolves ISIN or ticker to exchange symbol and currency."""
@@ -255,7 +255,11 @@ def _run_single_analysis_job(job_id: str, symbol: str, model: str, is_eu: bool):
         RUNNING_JOBS[job_id]["exit_code"] = proc.returncode
         RUNNING_JOBS[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
         if proc.returncode == 0:
-            RUNNING_JOBS[job_id]["status"] = "completed"
+            if "No analysis results generated." in (proc.stdout or ""):
+                RUNNING_JOBS[job_id]["status"] = "failed"
+                RUNNING_JOBS[job_id]["error"] = f"No analysis results generated for {symbol}. Insufficient price data or ticker not found."
+            else:
+                RUNNING_JOBS[job_id]["status"] = "completed"
         else:
             RUNNING_JOBS[job_id]["status"] = "failed"
             RUNNING_JOBS[job_id]["error"] = proc.stderr[-1000:] if proc.stderr else proc.stdout[-1000:]
@@ -276,7 +280,8 @@ def trigger_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks):
         resolved = resolve_symbol(clean_sym, prefer_exchange="DE", force_european=True)
         target_symbol = resolved["symbol"]
     else:
-        target_symbol = clean_sym
+        resolved = resolve_symbol(clean_sym, prefer_exchange="AUTO", force_european=False)
+        target_symbol = resolved["symbol"]
 
     job_id = f"job_{target_symbol}_{int(datetime.now().timestamp())}"
 

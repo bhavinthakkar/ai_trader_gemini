@@ -1172,7 +1172,7 @@ def main():
     if raw_ticker:
         raw_list = [t.strip().upper() for t in raw_ticker.split(",") if t.strip()]
         watchlist = [
-            resolve_symbol(t, prefer_exchange=args.prefer_exchange, force_european=force_eu)["symbol"]
+            resolve_symbol(t, prefer_exchange=args.prefer_exchange if force_eu else "AUTO", force_european=force_eu)["symbol"]
             for t in raw_list
         ]
     else:
@@ -1196,7 +1196,11 @@ def main():
             print(f"\n--- [{idx}/{len(watchlist)}] Processing {symbol} ---")
 
             # 1. Technical Data Collection (RSI / EMA / ATR / Volume / RVOL / Channels)
-            m_data = market_agent.analyze(symbol)
+            m_data = market_agent.analyze(
+                symbol,
+                prefer_exchange=args.prefer_exchange if force_eu else "AUTO",
+                force_european=force_eu,
+            )
             if not m_data:
                 print(f"Skipping {symbol}: Insufficient price data.")
                 continue
@@ -1356,7 +1360,7 @@ def main():
 
     if not all_results:
         print("\nNo analysis results generated.")
-        return
+        sys.exit(1)
 
     print("\n================ Aggregated Analysis Output ================")
     print(json.dumps(all_results, indent=2))

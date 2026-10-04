@@ -78,6 +78,8 @@ const STOCK_NAMES = {
   'SET.DE': 'Meta Platforms, Inc.',
   'AMD.DE': 'Advanced Micro Devices, Inc.',
   '2PP.DE': 'PayPal Holdings, Inc.',
+  'MQN.DE': 'Micron Technology, Inc.',
+  'MQN.MU': 'Micron Technology, Inc.',
 };
 
 /**
@@ -249,7 +251,17 @@ export default function App() {
               setAnalyzing(false);
               setAnalysisStatus('');
               Alert.alert('✅ Analysis Complete', `Signal for ${symbol} has been generated and saved!`);
-              loadSignalsData();
+              await loadSignalsData();
+              try {
+                const targetUpper = symbol.trim().toUpperCase();
+                const checkRes = await fetch(`${apiUrl}/api/signals/latest?days=7&search=${targetUpper}`);
+                if (checkRes.ok) {
+                  const checkData = await checkRes.json();
+                  if (checkData.signals && checkData.signals.length > 0) {
+                    setSelectedStock(checkData.signals[0]);
+                  }
+                }
+              } catch (e) {}
             } else if (jobData.status === 'failed' || jobData.status === 'error') {
               clearInterval(interval);
               setAnalyzing(false);

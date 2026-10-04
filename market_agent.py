@@ -10,7 +10,7 @@ class MarketAgent:
     Supports US, European (gettex / EIX / XETRA) tickers, ISINs, and WKNs.
     """
     
-    def analyze(self, symbol: str, prefer_exchange: str = "DE", force_european: bool = False) -> dict:
+    def analyze(self, symbol: str, prefer_exchange: str = "AUTO", force_european: bool = False) -> dict:
         resolved = resolve_symbol(symbol, prefer_exchange=prefer_exchange, force_european=force_european)
         query_sym = resolved["symbol"]
 
@@ -22,6 +22,17 @@ class MarketAgent:
         try:
             ticker = yf.Ticker(query_sym)
             df = ticker.history(period="6mo", interval="1d")
+
+            # Fallback to underlying US symbol if European quote is empty or delisted on Yahoo Finance
+            if (df.empty or len(df.dropna(subset=["Close"])) < 20) and resolved.get("underlying_symbol") and resolved["underlying_symbol"] != query_sym:
+                fallback_sym = resolved["underlying_symbol"]
+                print(f"[MarketAgent] Price data unavailable for '{query_sym}'; attempting fallback to underlying '{fallback_sym}'...")
+                ticker_fb = yf.Ticker(fallback_sym)
+                df_fb = ticker_fb.history(period="6mo", interval="1d")
+                if not df_fb.empty and len(df_fb.dropna(subset=["Close"])) >= 20:
+                    query_sym = fallback_sym
+                    ticker = ticker_fb
+                    df = df_fb
 
             if df.empty:
                 return {}
@@ -184,16 +195,22 @@ class MarketAgent:
                 except Exception:
                     pass
 
+            is_fallback = (query_sym != resolved.get("symbol"))
+            final_curr = "USD" if is_fallback else resolved.get("currency", "USD")
+            final_curr_sym = "$" if is_fallback else resolved.get("currency_symbol", "$")
+            final_is_eu = False if is_fallback else resolved.get("is_european", False)
+            final_venue = "US Exchange (NYSE/NASDAQ)" if is_fallback else resolved.get("exchange", "")
+
             return {
                 "symbol": query_sym,
                 "input_symbol": symbol,
                 "underlying_symbol": resolved.get("underlying_symbol", query_sym),
                 "company_name": resolved.get("company_name", query_sym),
-                "currency": resolved.get("currency", "USD"),
-                "currency_symbol": resolved.get("currency_symbol", "$"),
+                "currency": final_curr,
+                "currency_symbol": final_curr_sym,
                 "isin": resolved.get("isin", ""),
-                "exchange": resolved.get("exchange", ""),
-                "is_european": resolved.get("is_european", False),
+                "exchange": final_venue,
+                "is_european": final_is_eu,
                 "current_price": round(float(price), 2),
                 "change_5d_pct": f"{change_5d_pct:+.2f}%",
                 "market_spy_5d_pct": market_5d_pct,

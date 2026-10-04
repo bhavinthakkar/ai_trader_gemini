@@ -567,7 +567,7 @@ def lookup_isin_online(isin: str) -> Optional[str]:
 
 def resolve_symbol(
     query: str,
-    prefer_exchange: str = "DE",
+    prefer_exchange: str = "AUTO",
     force_european: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -577,11 +577,13 @@ def resolve_symbol(
       - ISIN: e.g. 'US67066G1040', 'DE0007164600', 'NL0010273215'
       - WKN: e.g. '716460', '918422'
       - European ticker: e.g. 'SAP.DE', 'NVD.MU', 'ASML.AS'
-      - Standard US ticker: e.g. 'NVDA', 'AAPL', 'TSLA'
+      - Standard US ticker: e.g. 'NVDA', 'AAPL', 'TSLA', 'MU'
       
     Args:
       query: The input identifier string.
-      prefer_exchange: 'DE' for XETRA (reference market), 'MU' for gettex (Börse München).
+      prefer_exchange: Preferred exchange venue: 'AUTO' (intelligent routing),
+                       'DE' for XETRA (reference market), 'MU' for gettex (Börse München),
+                       or 'US' for native US exchanges.
       force_european: When True, always converts US tickers to European dual-listings.
       
     Returns:
@@ -590,8 +592,13 @@ def resolve_symbol(
     raw = query.strip()
     norm = raw.upper()
 
-    target_suffix = f".{prefer_exchange.upper().lstrip('.')}"
-    default_venue = "Börse München (gettex)" if target_suffix == ".MU" else "XETRA (Deutsche Börse)"
+    pref_upper = prefer_exchange.upper().lstrip(".")
+    if pref_upper in ("MU", "GETTEX"):
+        target_suffix = ".MU"
+        default_venue = "Börse München (gettex)"
+    else:
+        target_suffix = ".DE"
+        default_venue = "XETRA (Deutsche Börse)"
 
     # 1. Exact match in ISIN directory
     if norm in _ISIN_MAP:
@@ -677,10 +684,14 @@ def resolve_symbol(
             "gettex_symbol": f"{base_tick}.MU",
         }
 
-    # 5. Standard ticker present in directory (e.g. 'NVDA', 'SAP')
+    # 5. Standard ticker present in directory (e.g. 'NVDA', 'SAP', 'MU')
     if norm in SECURITIES_DIRECTORY:
         rec = SECURITIES_DIRECTORY[norm]
-        if force_european or prefer_exchange in ("DE", "MU"):
+        is_us_security = rec.get("isin", "").startswith("US")
+
+        # Determine whether to return European dual-listing or native US ticker
+        wants_european = force_european or pref_upper in ("DE", "MU")
+        if wants_european:
             chosen_symbol = rec["gettex_symbol"] if target_suffix == ".MU" else rec["xetra_symbol"]
             return {
                 "query": raw,
@@ -696,8 +707,8 @@ def resolve_symbol(
                 "xetra_symbol": rec["xetra_symbol"],
                 "gettex_symbol": rec["gettex_symbol"],
             }
-        else:
-            # Return native US ticker
+        elif is_us_security:
+            # Return native US ticker (USD, $)
             return {
                 "query": raw,
                 "symbol": rec["us_symbol"],
@@ -709,6 +720,23 @@ def resolve_symbol(
                 "currency_symbol": "$",
                 "exchange": "US Exchange (NYSE/NASDAQ)",
                 "is_european": False,
+                "xetra_symbol": rec["xetra_symbol"],
+                "gettex_symbol": rec["gettex_symbol"],
+            }
+        else:
+            # Native European security (e.g. SAP, BMW) defaults to European exchange
+            chosen_symbol = rec["gettex_symbol"] if target_suffix == ".MU" else rec["xetra_symbol"]
+            return {
+                "query": raw,
+                "symbol": chosen_symbol,
+                "underlying_symbol": rec["us_symbol"],
+                "company_name": rec["company_name"],
+                "isin": rec["isin"],
+                "wkn": rec["wkn"],
+                "currency": rec.get("currency", "EUR"),
+                "currency_symbol": rec.get("currency_symbol", "€"),
+                "exchange": default_venue,
+                "is_european": True,
                 "xetra_symbol": rec["xetra_symbol"],
                 "gettex_symbol": rec["gettex_symbol"],
             }
