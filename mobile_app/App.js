@@ -86,17 +86,17 @@ const STOCK_NAMES = {
 function getStockName(itemOrSymbol) {
   if (!itemOrSymbol) return 'Unknown Stock';
   if (typeof itemOrSymbol === 'object') {
-    if (itemOrSymbol.company_name && itemOrSymbol.company_name !== itemOrSymbol.symbol) {
+    const sym = (itemOrSymbol.symbol || itemOrSymbol.stock || itemOrSymbol.ticker || itemOrSymbol.query || '').trim().toUpperCase();
+    const cleanSym = sym.split('.')[0];
+    if (itemOrSymbol.company_name && itemOrSymbol.company_name.trim().toUpperCase() !== sym && itemOrSymbol.company_name.trim().toUpperCase() !== cleanSym) {
       return itemOrSymbol.company_name;
     }
-    if (itemOrSymbol.name && itemOrSymbol.name !== itemOrSymbol.symbol) {
+    if (itemOrSymbol.name && itemOrSymbol.name.trim().toUpperCase() !== sym && itemOrSymbol.name.trim().toUpperCase() !== cleanSym) {
       return itemOrSymbol.name;
     }
-    const sym = (itemOrSymbol.symbol || '').toUpperCase();
-    const cleanSym = sym.split('.')[0];
-    return STOCK_NAMES[sym] || STOCK_NAMES[cleanSym] || sym || 'Unknown Stock';
+    return STOCK_NAMES[sym] || STOCK_NAMES[cleanSym] || itemOrSymbol.company_name || itemOrSymbol.name || sym || 'Unknown Stock';
   }
-  const sym = String(itemOrSymbol).toUpperCase();
+  const sym = String(itemOrSymbol).trim().toUpperCase();
   const cleanSym = sym.split('.')[0];
   return STOCK_NAMES[sym] || STOCK_NAMES[cleanSym] || sym;
 }
@@ -147,9 +147,23 @@ export default function App() {
       const signalsRes = await fetch(`${apiUrl}/api/signals/latest?days=${recencyDays}&sort_by=date&order=${signalSortOrder}`);
       if (signalsRes.ok) {
         const sigData = await signalsRes.json();
-        setLatestSignals(sigData.signals || []);
-        if (sigData.signals && sigData.signals.length > 0 && !selectedStock) {
-          setSelectedStock(sigData.signals[0]);
+        const sigs = sigData.signals || [];
+        setLatestSignals(sigs);
+        if (sigs.length > 0) {
+          if (!selectedStock || !sigs.some((s) => (s.symbol || s.stock) === (selectedStock.symbol || selectedStock.stock))) {
+            setSelectedStock(sigs[0]);
+          }
+        } else if (!selectedStock) {
+          // If no signals in current window, fetch all-time latest to ensure Deep-Dive has a stock populated
+          try {
+            const allRes = await fetch(`${apiUrl}/api/signals/latest?days=365&sort_by=date&order=desc`);
+            if (allRes.ok) {
+              const allData = await allRes.json();
+              if (allData.signals && allData.signals.length > 0) {
+                setSelectedStock(allData.signals[0]);
+              }
+            }
+          } catch (e) {}
         }
       }
     } catch (err) {
@@ -486,6 +500,32 @@ export default function App() {
                   <Text style={styles.actionBtnText}>{analyzing ? 'Running...' : '🚀 Analyze'}</Text>
                 </TouchableOpacity>
               </View>
+
+              {/* Real-time Stock Name Lookup Preview */}
+              {inspectQuery.trim().length > 0 && (
+                <View style={styles.lookupPreviewRow}>
+                  <Text style={styles.lookupPreviewLabel}>Stock Name:</Text>
+                  <Text style={styles.lookupPreviewName}>{getStockName(inspectQuery)}</Text>
+                  {(() => {
+                    const cleanQ = inspectQuery.trim().toUpperCase();
+                    const match =
+                      latestSignals.find((s) => (s.symbol || s.stock || '').toUpperCase() === cleanQ) ||
+                      historyRecords.find((s) => (s.symbol || s.stock || '').toUpperCase() === cleanQ);
+                    if (match) {
+                      return (
+                        <TouchableOpacity
+                          style={styles.lookupSelectBtn}
+                          onPress={() => setSelectedStock(match)}
+                        >
+                          <Text style={styles.lookupSelectBtnText}>View Analysis</Text>
+                        </TouchableOpacity>
+                      );
+                    }
+                    return null;
+                  })()}
+                </View>
+              )}
+
               {analysisStatus ? (
                 <View style={styles.statusBox}>
                   <ActivityIndicator size="small" color="#3B82F6" />
@@ -494,13 +534,40 @@ export default function App() {
               ) : null}
             </View>
 
+            {/* Quick Stock Switcher in Deep-Dive */}
+            {latestSignals.length > 0 && (
+              <View style={styles.stockSelectorSection}>
+                <Text style={styles.stockSelectorLabel}>Select Stock to Inspect:</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.stockSelectorScroll}>
+                  {latestSignals.map((item) => {
+                    const isSelected =
+                      selectedStock &&
+                      (selectedStock.symbol || selectedStock.stock) === (item.symbol || item.stock);
+                    return (
+                      <TouchableOpacity
+                        key={item.id || item.symbol}
+                        style={[styles.stockPill, isSelected && styles.stockPillActive]}
+                        onPress={() => setSelectedStock(item)}
+                      >
+                        <Text style={[styles.stockPillText, isSelected && styles.stockPillTextActive]}>
+                          {getStockName(item)}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            )}
+
             {/* Selected Stock Inspection */}
             {selectedStock ? (
               <View style={styles.detailContainer}>
                 <View style={styles.detailHeader}>
                   <View style={styles.signalTitleContainer}>
-                    <Text style={styles.detailTitle} numberOfLines={1}>{getStockName(selectedStock)}</Text>
-                    <Text style={styles.detailSubtitle}>{selectedStock.symbol} • Model: {selectedStock.model_used || '6-Agent Ensemble'}</Text>
+                    <Text style={styles.detailTitle}>{getStockName(selectedStock)}</Text>
+                    <Text style={styles.detailSubtitle}>
+                      {selectedStock.symbol || selectedStock.stock} • Model: {selectedStock.model_used || '6-Agent Ensemble'}
+                    </Text>
                   </View>
                   <View
                     style={[
@@ -516,6 +583,22 @@ export default function App() {
                     ]}
                   >
                     <Text style={styles.badgeText}>{selectedStock.decision}</Text>
+                  </View>
+                </View>
+
+                {/* Stock Identification Banner */}
+                <View style={styles.companyBanner}>
+                  <View style={styles.companyBannerCol}>
+                    <Text style={styles.companyBannerLabel}>Company Name</Text>
+                    <Text style={styles.companyBannerName}>{getStockName(selectedStock)}</Text>
+                  </View>
+                  <View style={styles.companyBannerCol}>
+                    <Text style={styles.companyBannerLabel}>Ticker Symbol</Text>
+                    <Text style={styles.companyBannerSymbol}>{selectedStock.symbol || selectedStock.stock}</Text>
+                  </View>
+                  <View style={styles.companyBannerCol}>
+                    <Text style={styles.companyBannerLabel}>Analysis Date</Text>
+                    <Text style={styles.companyBannerDate}>🕒 {selectedStock.timestamp || 'Latest'}</Text>
                   </View>
                 </View>
 
@@ -597,7 +680,17 @@ export default function App() {
               </View>
             ) : (
               <View style={styles.emptyCard}>
-                <Text style={styles.emptyText}>Select a stock from the Signals tab or search above.</Text>
+                <Text style={styles.emptyText}>Select a stock from the Signals tab or choose an analyzed stock below.</Text>
+                {latestSignals.length > 0 && (
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { marginTop: 12 }]}
+                    onPress={() => setSelectedStock(latestSignals[0])}
+                  >
+                    <Text style={styles.actionBtnText}>
+                      Inspect {getStockName(latestSignals[0])}
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
           </View>
@@ -1156,6 +1249,104 @@ const styles = StyleSheet.create({
   statusBoxText: {
     color: '#93C5FD',
     fontSize: 12,
+  },
+  lookupPreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#212C3D',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  lookupPreviewLabel: {
+    fontSize: 12,
+    color: '#94A3B8',
+  },
+  lookupPreviewName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#60A5FA',
+    flex: 1,
+  },
+  lookupSelectBtn: {
+    backgroundColor: '#2563EB',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  lookupSelectBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  stockSelectorSection: {
+    marginBottom: 12,
+  },
+  stockSelectorLabel: {
+    fontSize: 12,
+    color: '#94A3B8',
+    marginBottom: 6,
+    fontWeight: '600',
+  },
+  stockSelectorScroll: {
+    flexDirection: 'row',
+  },
+  stockPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    backgroundColor: '#151B26',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#212C3D',
+    marginRight: 8,
+  },
+  stockPillActive: {
+    backgroundColor: '#1E293B',
+    borderColor: '#3B82F6',
+  },
+  stockPillText: {
+    fontSize: 12,
+    color: '#94A3B8',
+    fontWeight: '600',
+  },
+  stockPillTextActive: {
+    color: '#60A5FA',
+    fontWeight: '700',
+  },
+  companyBanner: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: '#0E131F',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1E293B',
+    padding: 10,
+    marginBottom: 12,
+  },
+  companyBannerCol: {
+    flex: 1,
+  },
+  companyBannerLabel: {
+    fontSize: 10,
+    color: '#64748B',
+    marginBottom: 2,
+    textTransform: 'uppercase',
+  },
+  companyBannerName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#F8FAFC',
+  },
+  companyBannerSymbol: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#38BDF8',
+  },
+  companyBannerDate: {
+    fontSize: 11,
+    color: '#94A3B8',
   },
   detailContainer: {
     backgroundColor: '#151B26',
