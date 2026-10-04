@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
   Text,
@@ -17,6 +17,90 @@ import { StatusBar } from 'expo-status-bar';
 // Default backend API URL (Workstation Local Area Network IP)
 const DEFAULT_API_URL = 'http://192.168.0.94:8000';
 
+// Pre-curated Stock / Company Names Map (US & European Dual-Listings)
+const STOCK_NAMES = {
+  NVDA: 'NVIDIA Corporation',
+  AAPL: 'Apple Inc.',
+  TSLA: 'Tesla, Inc.',
+  MSFT: 'Microsoft Corporation',
+  AMZN: 'Amazon.com, Inc.',
+  GOOGL: 'Alphabet Inc. (Class A)',
+  GOOG: 'Alphabet Inc. (Class C)',
+  GOOL: 'Alphabet Inc. (Class A)',
+  META: 'Meta Platforms, Inc.',
+  AMD: 'Advanced Micro Devices, Inc.',
+  INTC: 'Intel Corporation',
+  COIN: 'Coinbase Global, Inc.',
+  AVGO: 'Broadcom Inc.',
+  PLTR: 'Palantir Technologies Inc.',
+  BABA: 'Alibaba Group Holding',
+  BAC: 'Bank of America Corp.',
+  NFLX: 'Netflix Inc.',
+  SMCI: 'Super Micro Computer, Inc.',
+  MSTR: 'MicroStrategy Inc.',
+  QCOM: 'Qualcomm Inc.',
+  ARM: 'Arm Holdings plc',
+  MU: 'Micron Technology, Inc.',
+  CRWD: 'CrowdStrike Holdings',
+  PANW: 'Palo Alto Networks',
+  CRM: 'Salesforce Inc.',
+  ADBE: 'Adobe Inc.',
+  ORCL: 'Oracle Corporation',
+  CSCO: 'Cisco Systems Inc.',
+  PYPL: 'PayPal Holdings, Inc.',
+  SAP: 'SAP SE',
+  SIE: 'Siemens AG',
+  RHM: 'Rheinmetall AG',
+  ALV: 'Allianz SE',
+  DTE: 'Deutsche Telekom AG',
+  MBG: 'Mercedes-Benz Group AG',
+  BMW: 'Bayerische Motoren Werke AG',
+  AIR: 'Airbus SE',
+  IFX: 'Infineon Technologies AG',
+  BAS: 'BASF SE',
+  BAYN: 'Bayer AG',
+  VOW3: 'Volkswagen AG',
+  MUV2: 'Munich Re',
+  DBK: 'Deutsche Bank AG',
+  ASML: 'ASML Holding N.V.',
+  MC: 'LVMH Moët Hennessy',
+  JPM: 'JPMorgan Chase & Co.',
+  V: 'Visa Inc.',
+  DIS: 'The Walt Disney Company',
+  FLKR: 'Flickr',
+  // European dual-listings
+  'NVD.DE': 'NVIDIA Corporation',
+  'APC.DE': 'Apple Inc.',
+  'TL0.DE': 'Tesla, Inc.',
+  'MSF.DE': 'Microsoft Corporation',
+  'AMZ.DE': 'Amazon.com, Inc.',
+  'ABEA.DE': 'Alphabet Inc. (Class A)',
+  'SET.DE': 'Meta Platforms, Inc.',
+  'AMD.DE': 'Advanced Micro Devices, Inc.',
+  '2PP.DE': 'PayPal Holdings, Inc.',
+};
+
+/**
+ * Returns the human-readable stock/company name instead of the ticker symbol.
+ */
+function getStockName(itemOrSymbol) {
+  if (!itemOrSymbol) return 'Unknown Stock';
+  if (typeof itemOrSymbol === 'object') {
+    if (itemOrSymbol.company_name && itemOrSymbol.company_name !== itemOrSymbol.symbol) {
+      return itemOrSymbol.company_name;
+    }
+    if (itemOrSymbol.name && itemOrSymbol.name !== itemOrSymbol.symbol) {
+      return itemOrSymbol.name;
+    }
+    const sym = (itemOrSymbol.symbol || '').toUpperCase();
+    const cleanSym = sym.split('.')[0];
+    return STOCK_NAMES[sym] || STOCK_NAMES[cleanSym] || sym || 'Unknown Stock';
+  }
+  const sym = String(itemOrSymbol).toUpperCase();
+  const cleanSym = sym.split('.')[0];
+  return STOCK_NAMES[sym] || STOCK_NAMES[cleanSym] || sym;
+}
+
 export default function App() {
   const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
   const [activeTab, setActiveTab] = useState('signals'); // 'signals' | 'deepdive' | 'movers' | 'history' | 'settings'
@@ -29,6 +113,7 @@ export default function App() {
   const [signalDecisionFilter, setSignalDecisionFilter] = useState('ALL');
   const [signalSearch, setSignalSearch] = useState('');
   const [recencyDays, setRecencyDays] = useState(7);
+  const [signalSortOrder, setSignalSortOrder] = useState('desc'); // 'desc' (newest analysis first) | 'asc' (oldest first)
 
   // Deep-Dive State
   const [selectedStock, setSelectedStock] = useState(null);
@@ -59,7 +144,7 @@ export default function App() {
         setConnected(true);
       }
 
-      const signalsRes = await fetch(`${apiUrl}/api/signals/latest?days=${recencyDays}`);
+      const signalsRes = await fetch(`${apiUrl}/api/signals/latest?days=${recencyDays}&sort_by=date&order=${signalSortOrder}`);
       if (signalsRes.ok) {
         const sigData = await signalsRes.json();
         setLatestSignals(sigData.signals || []);
@@ -70,7 +155,7 @@ export default function App() {
     } catch (err) {
       setConnected(false);
     }
-  }, [apiUrl, recencyDays, selectedStock]);
+  }, [apiUrl, recencyDays, selectedStock, signalSortOrder]);
 
   // Fetch Active Movers
   const loadMoversData = useCallback(async () => {
@@ -172,12 +257,23 @@ export default function App() {
     }
   };
 
-  // Filtered Signals
-  const filteredSignals = latestSignals.filter((s) => {
-    const matchesDecision = signalDecisionFilter === 'ALL' || s.decision === signalDecisionFilter;
-    const matchesSearch = !signalSearch || s.symbol.toUpperCase().includes(signalSearch.toUpperCase());
-    return matchesDecision && matchesSearch;
-  });
+  // Filtered & Sorted Signals (Sorted by date the analysis executed)
+  const filteredSignals = useMemo(() => {
+    return latestSignals
+      .filter((s) => {
+        const matchesDecision = signalDecisionFilter === 'ALL' || s.decision === signalDecisionFilter;
+        const query = signalSearch.trim().toUpperCase();
+        const stockName = (s.company_name || getStockName(s) || '').toUpperCase();
+        const matchesSearch =
+          !query || s.symbol.toUpperCase().includes(query) || stockName.includes(query);
+        return matchesDecision && matchesSearch;
+      })
+      .sort((a, b) => {
+        const timeA = a.timestamp ? new Date(a.timestamp.replace(' ', 'T')).getTime() || 0 : 0;
+        const timeB = b.timestamp ? new Date(b.timestamp.replace(' ', 'T')).getTime() || 0 : 0;
+        return signalSortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+      });
+  }, [latestSignals, signalDecisionFilter, signalSearch, signalSortOrder]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -258,7 +354,7 @@ export default function App() {
             <View style={styles.filterSection}>
               <TextInput
                 style={styles.searchInput}
-                placeholder="Search symbol (e.g. NVDA, AAPL)..."
+                placeholder="Search stock name or symbol (e.g. Apple, NVDA)..."
                 placeholderTextColor="#64748B"
                 value={signalSearch}
                 onChangeText={setSignalSearch}
@@ -280,10 +376,22 @@ export default function App() {
               </View>
             </View>
 
-            {/* Signal List Cards */}
-            <Text style={styles.sectionHeading}>
-              Active Recommendations ({filteredSignals.length})
-            </Text>
+            {/* Signal List Cards Header with Execution Date Sort Toggle */}
+            <View style={styles.sectionHeadingRow}>
+              <Text style={[styles.sectionHeading, { marginTop: 0, marginBottom: 0 }]}>
+                Active Recommendations ({filteredSignals.length})
+              </Text>
+              <TouchableOpacity
+                style={styles.sortToggleBtn}
+                onPress={() => setSignalSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'))}
+                accessibilityRole="button"
+                accessibilityLabel="Toggle execution date sort order"
+              >
+                <Text style={styles.sortToggleText}>
+                  {signalSortOrder === 'desc' ? '📅 Date: Newest ↓' : '📅 Date: Oldest ↑'}
+                </Text>
+              </TouchableOpacity>
+            </View>
 
             {filteredSignals.length === 0 ? (
               <View style={styles.emptyCard}>
@@ -306,8 +414,10 @@ export default function App() {
                     }}
                   >
                     <View style={styles.signalHeader}>
-                      <View>
-                        <Text style={styles.signalSymbol}>{item.symbol}</Text>
+                      <View style={styles.signalTitleContainer}>
+                        <Text style={styles.signalSymbol} numberOfLines={1}>
+                          {getStockName(item)}
+                        </Text>
                         <Text style={styles.signalModel}>{item.model_used || '6-Agent AI'}</Text>
                       </View>
                       <View style={[styles.badge, { backgroundColor: badgeColor }]}>
@@ -343,7 +453,7 @@ export default function App() {
                     ) : null}
 
                     <View style={styles.cardFooter}>
-                      <Text style={styles.cardTimestamp}>🕒 {item.timestamp}</Text>
+                      <Text style={styles.cardTimestamp}>🕒 Analyzed: {item.timestamp}</Text>
                       <Text style={styles.cardLink}>Inspect Details →</Text>
                     </View>
                   </TouchableOpacity>
@@ -388,9 +498,9 @@ export default function App() {
             {selectedStock ? (
               <View style={styles.detailContainer}>
                 <View style={styles.detailHeader}>
-                  <View>
-                    <Text style={styles.detailTitle}>{selectedStock.symbol}</Text>
-                    <Text style={styles.detailSubtitle}>Model: {selectedStock.model_used || '6-Agent Ensemble'}</Text>
+                  <View style={styles.signalTitleContainer}>
+                    <Text style={styles.detailTitle} numberOfLines={1}>{getStockName(selectedStock)}</Text>
+                    <Text style={styles.detailSubtitle}>{selectedStock.symbol} • Model: {selectedStock.model_used || '6-Agent Ensemble'}</Text>
                   </View>
                   <View
                     style={[
@@ -583,7 +693,7 @@ export default function App() {
           <View style={styles.tabContainer}>
             <TextInput
               style={styles.searchInput}
-              placeholder="Search historical symbol..."
+              placeholder="Search historical stock name or symbol..."
               placeholderTextColor="#64748B"
               value={historySearch}
               onChangeText={setHistorySearch}
@@ -591,15 +701,22 @@ export default function App() {
             <Text style={styles.sectionHeading}>Past Signals Log ({historyRecords.length})</Text>
 
             {historyRecords
-              .filter((r) => !historySearch || r.symbol.toUpperCase().includes(historySearch.toUpperCase()))
+              .filter((r) => {
+                const q = historySearch.trim().toUpperCase();
+                const name = getStockName(r).toUpperCase();
+                return !q || r.symbol.toUpperCase().includes(q) || name.includes(q);
+              })
               .map((rec) => (
                 <View key={rec.id} style={styles.historyCard}>
                   <View style={styles.signalHeader}>
-                    <Text style={styles.signalSymbol}>{rec.symbol}</Text>
+                    <View style={styles.signalTitleContainer}>
+                      <Text style={styles.signalSymbol} numberOfLines={1}>{getStockName(rec)}</Text>
+                      <Text style={styles.signalModel}>{rec.model_used || '6-Agent AI'}</Text>
+                    </View>
                     <Text style={styles.historyDec}>{rec.decision}</Text>
                   </View>
                   <Text style={styles.historyReason} numberOfLines={2}>{rec.reason}</Text>
-                  <Text style={styles.cardTimestamp}>🕒 {rec.timestamp} | {rec.model_used}</Text>
+                  <Text style={styles.cardTimestamp}>🕒 Analyzed: {rec.timestamp}</Text>
                 </View>
               ))}
           </View>
@@ -876,12 +993,32 @@ const styles = StyleSheet.create({
   filterChipTextActive: {
     color: '#60A5FA',
   },
+  sectionHeadingRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 6,
+    marginBottom: 10,
+  },
   sectionHeading: {
     fontSize: 15,
     fontWeight: '700',
     color: '#E2E8F0',
     marginTop: 6,
     marginBottom: 10,
+  },
+  sortToggleBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: '#1E293B',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  sortToggleText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#60A5FA',
   },
   signalCard: {
     backgroundColor: '#151B26',
@@ -896,6 +1033,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 10,
+  },
+  signalTitleContainer: {
+    flex: 1,
+    marginRight: 10,
   },
   signalSymbol: {
     fontSize: 18,

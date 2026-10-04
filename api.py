@@ -110,10 +110,18 @@ def health_check():
 def fetch_latest_signals(
     days: Optional[int] = Query(default=7, ge=1, le=365, description="Filter signals within last N days (null for all-time)"),
     decision: Optional[str] = Query(default=None, description="Filter by decision: BUY, SELL, or HOLD"),
-    search: Optional[str] = Query(default=None, description="Search ticker symbol"),
+    search: Optional[str] = Query(default=None, description="Search ticker symbol or company name"),
+    sort_by: Optional[str] = Query(default="date", description="Sort by 'date' (analysis execution timestamp) or 'symbol'"),
+    order: Optional[str] = Query(default="desc", description="Sort order: 'desc' (newest first) or 'asc' (oldest first)"),
 ):
     """Returns the newest signal for each stock within the recency window."""
     signals = get_latest_signals(max_age_days=days)
+
+    # Ensure company_name is populated
+    for s in signals:
+        if not s.get("company_name"):
+            info = resolve_symbol(s.get("symbol", ""))
+            s["company_name"] = info.get("company_name") or s.get("symbol")
 
     if decision:
         dec_filter = decision.strip().upper()
@@ -121,7 +129,16 @@ def fetch_latest_signals(
 
     if search:
         q = search.strip().upper()
-        signals = [s for s in signals if q in s.get("symbol", "").upper()]
+        signals = [
+            s for s in signals
+            if q in s.get("symbol", "").upper() or q in (s.get("company_name") or "").upper()
+        ]
+
+    # Sort signals
+    if sort_by == "date":
+        signals.sort(key=lambda s: str(s.get("timestamp") or ""), reverse=(order.lower() != "asc"))
+    elif sort_by == "symbol":
+        signals.sort(key=lambda s: str(s.get("symbol") or "").upper(), reverse=(order.lower() == "desc"))
 
     return {
         "count": len(signals),

@@ -298,6 +298,16 @@ SECURITIES_DIRECTORY: Dict[str, Dict[str, Any]] = {
         "currency": "EUR",
         "currency_symbol": "€",
     },
+    "PYPL": {
+        "company_name": "PayPal Holdings, Inc.",
+        "isin": "US70450Y1038",
+        "wkn": "A14R7U",
+        "us_symbol": "PYPL",
+        "xetra_symbol": "2PP.DE",
+        "gettex_symbol": "2PP.MU",
+        "currency": "EUR",
+        "currency_symbol": "€",
+    },
 
     # ------------------ European Native Leaders (DAX / Euro Stoxx) ------------------
     "SAP": {

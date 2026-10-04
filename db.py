@@ -101,7 +101,8 @@ def init_db(db_path=DB_PATH):
             "pillar_input_tracking": "TEXT",
             "financial_quality_score": "REAL",
             "is_value_trap": "INTEGER",
-            "value_trap_reasons": "TEXT"
+            "value_trap_reasons": "TEXT",
+            "company_name": "TEXT"
         }
 
         cursor.execute("PRAGMA table_info(signals);")
@@ -318,17 +319,20 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
     print(f"[DB] Successfully saved {len(results)} analysis records to database.")
 
 
-def get_latest_signals(db_path=DB_PATH, max_age_days: int | None = 7) -> list:
+def get_latest_signals(db_path=DB_PATH, max_age_days: int | None = 7, order_by: str = "date_desc") -> list:
     """
     Returns the most recent analysis record for each stock symbol.
     By default, restricts to signals generated within the last `max_age_days` (default: 7 days / 1 week).
     Pass max_age_days=None or max_age_days=0 to disable the recency filter and return all-time latest signals.
+    `order_by`: 'date_desc' (newest analysis first) or 'symbol_asc' (alphabetical).
     """
     init_db(db_path)
+    order_clause = "ORDER BY s.timestamp DESC, s.id DESC" if order_by == "date_desc" else "ORDER BY s.symbol ASC"
+
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
         if max_age_days and max_age_days > 0:
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT s.*
                 FROM signals s
                 INNER JOIN (
@@ -338,10 +342,10 @@ def get_latest_signals(db_path=DB_PATH, max_age_days: int | None = 7) -> list:
                     GROUP BY symbol
                 ) latest ON s.id = latest.max_id
                 WHERE s.timestamp >= datetime('now', ?)
-                ORDER BY s.symbol ASC;
+                {order_clause};
             """, (f"-{max_age_days} days", f"-{max_age_days} days"))
         else:
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT s.*
                 FROM signals s
                 INNER JOIN (
@@ -349,10 +353,19 @@ def get_latest_signals(db_path=DB_PATH, max_age_days: int | None = 7) -> list:
                     FROM signals
                     GROUP BY symbol
                 ) latest ON s.id = latest.max_id
-                ORDER BY s.symbol ASC;
+                {order_clause};
             """)
         rows = cursor.fetchall()
-        return [dict(r) for r in rows]
+        signals = [dict(r) for r in rows]
+        try:
+            from ticker_resolver import resolve_symbol
+            for s in signals:
+                if not s.get("company_name"):
+                    info = resolve_symbol(s.get("symbol", ""))
+                    s["company_name"] = info.get("company_name") or s.get("symbol")
+        except Exception:
+            pass
+        return signals
 
 
 def get_signal_history(symbol: str = None, limit: int = 100, db_path=DB_PATH) -> list:
@@ -376,7 +389,16 @@ def get_signal_history(symbol: str = None, limit: int = 100, db_path=DB_PATH) ->
                 LIMIT ?;
             """, (limit,))
         rows = cursor.fetchall()
-        return [dict(r) for r in rows]
+        records = [dict(r) for r in rows]
+        try:
+            from ticker_resolver import resolve_symbol
+            for r in records:
+                if not r.get("company_name"):
+                    info = resolve_symbol(r.get("symbol", ""))
+                    r["company_name"] = info.get("company_name") or r.get("symbol")
+        except Exception:
+            pass
+        return records
 
 
 def get_summary_stats(db_path=DB_PATH, max_age_days: int | None = 7) -> dict:
