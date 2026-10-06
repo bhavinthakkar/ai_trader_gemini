@@ -1136,6 +1136,9 @@ def main():
         sys.exit(1)
 
     model_choice = str(raw_model).strip().lower()
+    if model_choice in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
+        print("[main] Notice: Space Bunny Alpha ('bunny') is no longer available on OpenRouter; automatically redirecting to 'free' preset.")
+        model_choice = "free"
     valid_models = [
         "nemotron", "nvidia", "ultra", "nemotron-ultra", "550b",
         "kimi", "kimi-k3", "k3", "moonshot",

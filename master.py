@@ -733,6 +733,9 @@ Examples:
     # Determine model choice
     raw_model = args.model_opt or args.model_arg or "free"
     model_choice = str(raw_model).strip().lower()
+    if model_choice in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
+        print("[master] Notice: Space Bunny Alpha ('bunny') is no longer available on OpenRouter; automatically redirecting to 'free' preset.")
+        model_choice = "free"
 
     if model_choice not in VALID_MODELS:
         print(f"\n❌ ERROR: Invalid model choice '{raw_model}'!")

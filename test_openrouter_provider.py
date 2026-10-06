@@ -42,11 +42,10 @@ class OpenRouterRoutingTests(unittest.TestCase):
     def test_openrouter_label_mentions_free(self):
         self.assertIn("free", get_model_label("openrouter").lower())
 
-    def test_bunny_is_removed_and_unsupported(self):
+    def test_bunny_is_removed_and_redirects_to_free(self):
         for alias in ("bunny", "space-bunny", "space-bunny-alpha", "SPACE-BUNNY-ALPHA", "sb", "stealth/space-bunny-alpha"):
             self.assertNotIn(alias, MODEL_REGISTRY)
-        with self.assertRaises(ValueError):
-            query_llm("sys", "user", model_choice="bunny")
+            self.assertEqual(normalize_model_key(alias), "free")
 
 
 @patch.dict(__import__("os").environ, {"OPENROUTER_API_KEY": "test-key"}, clear=False)

@@ -287,6 +287,9 @@ def normalize_model_key(model_choice: str) -> str:
         key = "kimi"
     if key in ["qwen-llamacpp", "llamacpp", "qwen2.5", "qwen2.5-14b"]:
         key = "qwen"
+    if key in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
+        print("[llm_service] Notice: Space Bunny Alpha ('bunny') is no longer available on OpenRouter; redirecting to 'free' preset.")
+        key = "free"
     return key
 
 

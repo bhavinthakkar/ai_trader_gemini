@@ -245,8 +245,13 @@ def _run_single_analysis_job(job_id: str, symbol: str, model: str, is_eu: bool):
     RUNNING_JOBS[job_id]["status"] = "running"
     RUNNING_JOBS[job_id]["started_at"] = datetime.now(timezone.utc).isoformat()
 
+    # Gracefully redirect retired bunny model to free preset
+    effective_model = model.strip().lower()
+    if effective_model in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
+        effective_model = "free"
+
     main_script = BASE_DIR / "main.py"
-    cmd = [sys.executable, str(main_script), model, symbol]
+    cmd = [sys.executable, str(main_script), effective_model, symbol]
     if is_eu:
         cmd.append("--eu")
 
@@ -283,12 +288,16 @@ def trigger_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks):
         resolved = resolve_symbol(clean_sym, prefer_exchange="AUTO", force_european=False)
         target_symbol = resolved["symbol"]
 
+    req_model = req.model.strip().lower()
+    if req_model in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
+        req_model = "free"
+
     job_id = f"job_{target_symbol}_{int(datetime.now().timestamp())}"
 
     RUNNING_JOBS[job_id] = {
         "job_id": job_id,
         "target_symbol": target_symbol,
-        "model": req.model,
+        "model": req_model,
         "status": "queued",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -297,7 +306,7 @@ def trigger_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks):
         _run_single_analysis_job,
         job_id=job_id,
         symbol=target_symbol,
-        model=req.model,
+        model=req_model,
         is_eu=req.is_eu,
     )
 
