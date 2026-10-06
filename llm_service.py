@@ -182,12 +182,6 @@ MODEL_REGISTRY = {
         "model": "openrouter/free",
         "fallbacks": ["minimax/minimax-m3:free", "nvidia/nemotron-3-super-120b-a12b:free"],
         "label": "OpenRouter Free Models Router (openrouter/free)"
-    },
-    "bunny": {
-        "provider": "openrouter",
-        "model": "stealth/space-bunny-alpha",
-        "default_reasoning_effort": "low",
-        "label": "Space Bunny Alpha (OpenRouter, free, 1M context)"
     }
 }
 
@@ -291,8 +285,6 @@ def normalize_model_key(model_choice: str) -> str:
         key = "super"
     if key in ["kimi", "kimi-k3", "k3", "moonshot"]:
         key = "kimi"
-    if key in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
-        key = "bunny"
     if key in ["qwen-llamacpp", "llamacpp", "qwen2.5", "qwen2.5-14b"]:
         key = "qwen"
     return key
@@ -328,11 +320,10 @@ def query_llm(
       - 'gemini': Cloud Gemini 3.1 Pro
       - 'openrouter': OpenRouter Free Models Router (openrouter/free)
       - 'free': Nemotron-3 Ultra 550B first, falling back to Super 120B on stall
-      - 'bunny': Space Bunny Alpha via OpenRouter (free, 1M context, reasoning pinned to low)
       - 'qwen' / 'llamacpp': Local Qwen model through the OpenAI-compatible llama.cpp server
     """
     if not model_choice or not str(model_choice).strip():
-        raise ValueError("Model choice argument is required. Valid choices: 'nemotron', 'ultra', 'kimi', 'gemini', 'openrouter', 'free', 'bunny', 'qwen', 'llamacpp'")
+        raise ValueError("Model choice argument is required. Valid choices: 'nemotron', 'ultra', 'kimi', 'gemini', 'openrouter', 'free', 'qwen', 'llamacpp'")
 
     key = normalize_model_key(model_choice)
 

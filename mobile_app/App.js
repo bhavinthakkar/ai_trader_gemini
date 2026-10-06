@@ -234,7 +234,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           symbol: symbol.trim().toUpperCase(),
-          model: 'bunny',
+          model: 'free',
           is_eu: activeMarket === 'EU',
         }),
       });
@@ -784,7 +784,7 @@ export default function App() {
                         triggerAnalysis(m.symbol);
                       }}
                     >
-                      <Text style={styles.moverActionBtnText}>⚡ Analyze with bunny</Text>
+                      <Text style={styles.moverActionBtnText}>⚡ Analyze with AI</Text>
                     </TouchableOpacity>
                   </View>
                 );

@@ -187,7 +187,6 @@ class ModelRegistryTests(unittest.TestCase):
             "openrouter",
             "free",
             "openrouter/free",
-            "bunny",
             "minimax",
             "minimax-m3",
             "m3",

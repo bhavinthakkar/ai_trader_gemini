@@ -69,7 +69,7 @@ class TestAPI(unittest.TestCase):
     @unittest.mock.patch("api._run_single_analysis_job")
     def test_analyze_trigger(self, mock_job):
         # Test queuing endpoint (mocking background task)
-        resp = self.client.post("/api/analyze", json={"symbol": "AAPL", "model": "bunny", "is_eu": False})
+        resp = self.client.post("/api/analyze", json={"symbol": "AAPL", "model": "free", "is_eu": False})
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["status"], "queued")

@@ -10,8 +10,6 @@ import requests
 import llm_service
 from llm_service import MODEL_REGISTRY, get_model_label, normalize_model_key, query_llm
 
-BUNNY = "stealth/space-bunny-alpha"
-
 
 def _sse(obj):
     return ("data: " + json.dumps(obj)).encode()
@@ -30,43 +28,36 @@ def stream_response(pieces=(), reasoning=(), status=200, text=""):
     return response
 
 
-class BunnyRoutingTests(unittest.TestCase):
-    def test_aliases_resolve_to_bunny(self):
-        for alias in ("bunny", "space-bunny", "space-bunny-alpha", "SPACE-BUNNY-ALPHA", "sb"):
-            self.assertEqual(normalize_model_key(alias), "bunny")
-
-    def test_bunny_targets_the_model_via_openrouter(self):
-        config = MODEL_REGISTRY["bunny"]
-        self.assertEqual(config["provider"], "openrouter")
-        self.assertEqual(config["model"], BUNNY)
-        self.assertEqual(config["default_reasoning_effort"], "low")
-
-    def test_bunny_is_not_aliased_to_openrouter_free(self):
-        self.assertNotEqual(normalize_model_key("bunny"), "openrouter")
-        self.assertNotEqual(MODEL_REGISTRY["bunny"]["model"], "openrouter/free")
-
-    def test_bunny_label_mentions_free(self):
-        self.assertIn("free", get_model_label("bunny").lower())
-
-    def test_bunny_is_separate_from_free_preset(self):
-        self.assertEqual(MODEL_REGISTRY["free"]["provider"], "nvidia")
-        self.assertNotEqual(MODEL_REGISTRY["free"]["model"], BUNNY)
-
-    def test_existing_openrouter_aliases_unchanged(self):
+class OpenRouterRoutingTests(unittest.TestCase):
+    def test_existing_openrouter_aliases_resolve_to_openrouter(self):
         for alias in ("openrouter", "openrouter/free", "or", "minimax", "m3"):
             self.assertEqual(normalize_model_key(alias), "openrouter")
-        self.assertIsNone(MODEL_REGISTRY["openrouter"].get("default_reasoning_effort"))
+
+    def test_openrouter_targets_the_model_via_openrouter(self):
+        config = MODEL_REGISTRY["openrouter"]
+        self.assertEqual(config["provider"], "openrouter")
+        self.assertEqual(config["model"], "openrouter/free")
+        self.assertIsNone(config.get("default_reasoning_effort"))
+
+    def test_openrouter_label_mentions_free(self):
+        self.assertIn("free", get_model_label("openrouter").lower())
+
+    def test_bunny_is_removed_and_unsupported(self):
+        for alias in ("bunny", "space-bunny", "space-bunny-alpha", "SPACE-BUNNY-ALPHA", "sb", "stealth/space-bunny-alpha"):
+            self.assertNotIn(alias, MODEL_REGISTRY)
+        with self.assertRaises(ValueError):
+            query_llm("sys", "user", model_choice="bunny")
 
 
 @patch.dict(__import__("os").environ, {"OPENROUTER_API_KEY": "test-key"}, clear=False)
-class BunnyRequestTests(unittest.TestCase):
-    def call(self, responder, model_choice="bunny", **kwargs):
+class OpenRouterRequestTests(unittest.TestCase):
+    def call(self, responder, model_choice="openrouter", **kwargs):
         with patch("llm_service.requests.post", side_effect=responder) as post, patch(
             "llm_service.time.sleep"
         ):
             return query_llm("sys", "user", model_choice=model_choice, **kwargs), post
 
-    def test_pins_low_reasoning_effort_by_default(self):
+    def test_default_openrouter_route_sends_no_reasoning_effort(self):
         seen = {}
 
         def responder(url, headers=None, json=None, timeout=None, stream=None):
@@ -74,8 +65,8 @@ class BunnyRequestTests(unittest.TestCase):
             return stream_response(['{"decision": "HOLD"}'])
 
         self.call(responder)
-        self.assertEqual(seen["model"], BUNNY)
-        self.assertEqual(seen["reasoning_effort"], "low")
+        self.assertEqual(seen["model"], "openrouter/free")
+        self.assertNotIn("reasoning_effort", seen)
         self.assertIs(seen["stream"], True)
         self.assertEqual(seen["response_format"], {"type": "json_object"})
 
@@ -131,39 +122,39 @@ class BunnyRequestTests(unittest.TestCase):
 
         def responder(url, headers=None, json=None, timeout=None, stream=None):
             calls.append(json["model"])
-            if json["model"] == BUNNY:
+            if json["model"] == "openrouter/free":
                 return stream_response(["not json at all"])
             return stream_response(['{"decision": "HOLD"}'])
 
-        with patch.dict(MODEL_REGISTRY["bunny"], {"fallbacks": ["vendor/other"]}, clear=False):
+        with patch.dict(MODEL_REGISTRY["openrouter"], {"fallbacks": ["vendor/other"]}, clear=False):
             out, _ = self.call(responder)
         self.assertEqual(out, '{"decision": "HOLD"}')
-        self.assertEqual(calls, [BUNNY, "vendor/other"])
+        self.assertEqual(calls, ["openrouter/free", "vendor/other"])
 
     def test_read_timeout_moves_to_next_candidate(self):
         calls = []
 
         def responder(url, headers=None, json=None, timeout=None, stream=None):
             calls.append(json["model"])
-            if json["model"] == BUNNY:
+            if json["model"] == "openrouter/free":
                 raise requests.exceptions.ReadTimeout("read timed out")
             return stream_response(['{"decision": "HOLD"}'])
 
-        with patch.dict(MODEL_REGISTRY["bunny"], {"fallbacks": ["vendor/other"]}, clear=False):
+        with patch.dict(MODEL_REGISTRY["openrouter"], {"fallbacks": ["vendor/other"]}, clear=False):
             out, _ = self.call(responder)
         self.assertEqual(out, '{"decision": "HOLD"}')
-        self.assertEqual(calls, [BUNNY, "vendor/other"])
+        self.assertEqual(calls, ["openrouter/free", "vendor/other"])
 
     def test_rate_limit_moves_to_next_candidate(self):
         calls = []
 
         def responder(url, headers=None, json=None, timeout=None, stream=None):
             calls.append(json["model"])
-            if json["model"] == BUNNY:
+            if json["model"] == "openrouter/free":
                 return stream_response(status=429, text="rate limited")
             return stream_response(['{"decision": "HOLD"}'])
 
-        with patch.dict(MODEL_REGISTRY["bunny"], {"fallbacks": ["vendor/other"]}, clear=False):
+        with patch.dict(MODEL_REGISTRY["openrouter"], {"fallbacks": ["vendor/other"]}, clear=False):
             out, _ = self.call(responder)
         self.assertEqual(out, '{"decision": "HOLD"}')
 
@@ -174,22 +165,11 @@ class BunnyRequestTests(unittest.TestCase):
             calls.append(json["model"])
             return stream_response(['{"a":1}'])
 
-        with patch.dict(MODEL_REGISTRY["bunny"], {"fallbacks": ["vendor/other"]}, clear=False), \
+        with patch.dict(MODEL_REGISTRY["openrouter"], {"fallbacks": ["vendor/other"]}, clear=False), \
                 patch.object(llm_service, "OPENROUTER_TOTAL_TIMEOUT", -1):
             with self.assertRaises(RuntimeError):
                 self.call(responder)
         self.assertEqual(calls, [])
-
-    def test_existing_openrouter_route_sends_no_reasoning_effort(self):
-        seen = {}
-
-        def responder(url, headers=None, json=None, timeout=None, stream=None):
-            seen.update(json)
-            return stream_response(['{"decision": "HOLD"}'])
-
-        self.call(responder, model_choice="openrouter")
-        self.assertNotIn("reasoning_effort", seen)
-        self.assertIs(seen["stream"], True)
 
     def test_progress_is_reported(self):
         def responder(url, headers=None, json=None, timeout=None, stream=None):

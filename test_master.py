@@ -262,7 +262,7 @@ class TestMasterOrchestration(unittest.TestCase):
 
         with patch("master.run_main_analysis") as mock_main:
             report = master.run_master(
-                model="bunny",
+                model="free",
                 limit=2,
                 dry_run=True,
             )
@@ -326,7 +326,7 @@ class TestMasterCLI(unittest.TestCase):
     """Tests CLI argument parsing and error handling."""
 
     def test_valid_models(self):
-        for m in ["free", "gemini", "bunny", "nemotron", "super", "ultra", "kimi", "qwen", "llamacpp"]:
+        for m in ["free", "gemini", "nemotron", "super", "ultra", "kimi", "qwen", "llamacpp"]:
             self.assertIn(m, master.VALID_MODELS)
 
 

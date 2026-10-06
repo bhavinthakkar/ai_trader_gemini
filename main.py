@@ -1123,7 +1123,7 @@ def main():
     raw_model = args.model_opt or args.model_arg
     if not raw_model:
         print("\n❌ ERROR: Model argument is required!")
-        print("Usage: python main.py {nemotron|ultra|kimi|super|gemini|openrouter|free|bunny|qwen|llamacpp|qwen-llamacpp} [ticker]")
+        print("Usage: python main.py {nemotron|ultra|kimi|super|gemini|openrouter|free|qwen|llamacpp|qwen-llamacpp} [ticker]")
         print("       python main.py portfolio {model}")
         print("  - nemotron / ultra : Cloud Nemotron-3 Ultra 550B (NVIDIA)")
         print("  - kimi             : Moonshot AI Kimi-K3 (NVIDIA)")
@@ -1131,7 +1131,6 @@ def main():
         print("  - gemini           : Cloud Gemini 3.1 Pro")
         print("  - openrouter       : OpenRouter Free Models Router (openrouter/free)")
         print("  - free             : Nemotron-3 Ultra 550B first, Super 120B fallback on stall")
-        print("  - bunny            : Space Bunny Alpha via OpenRouter (free, 1M context)")
         print("  - qwen / llamacpp  : Local Qwen 2.5 14B via Vulkan-enabled llama.cpp")
         print("  - qwen-llamacpp    : Explicit alias for the Vulkan-enabled llama.cpp server\n")
         sys.exit(1)
@@ -1142,14 +1141,13 @@ def main():
         "kimi", "kimi-k3", "k3", "moonshot",
         "super", "nemotron-super", "120b",
         "gemini", "openrouter", "free", "openrouter/free",
-        "bunny", "space-bunny", "sb",
         "minimax", "minimax-m3", "minimax_m3", "m3",
         "qwen", "llamacpp", "qwen-llamacpp",
         "portfolio"
     ]
     if model_choice not in valid_models:
         print(f"\n❌ ERROR: Invalid model choice '{raw_model}'!")
-        print("Supported choices are: 'nemotron' (Ultra 550B), 'kimi' (Kimi-K3), 'super' (120B), 'gemini', 'openrouter', 'free' (Ultra 550B then Super 120B), 'bunny' (Space Bunny Alpha, free 1M-context), 'qwen' / 'llamacpp' / 'qwen-llamacpp', 'portfolio'\n")
+        print("Supported choices are: 'nemotron' (Ultra 550B), 'kimi' (Kimi-K3), 'super' (120B), 'gemini', 'openrouter', 'free' (Ultra 550B then Super 120B), 'qwen' / 'llamacpp' / 'qwen-llamacpp', 'portfolio'\n")
         sys.exit(1)
 
     if model_choice == "portfolio":

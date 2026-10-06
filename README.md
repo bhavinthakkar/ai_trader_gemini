@@ -395,25 +395,6 @@ When the total budget is hit the current model is abandoned and the fallback is 
 
 To reach OpenRouter's free-model router instead, pass `openrouter` (or `openrouter/free`).
 
-### **Run Pipeline with Space Bunny Alpha (`bunny`, free, 1M context)**
-```bash
-./venv/bin/python main.py bunny ORCL
-```
-```bash
-./venv/bin/python main.py bunny ORCL,NVDA
-```
-
-`bunny` calls `stealth/space-bunny-alpha` on OpenRouter and needs `OPENROUTER_API_KEY`. Pricing is **$0 per token** with a 1M-token context window, so it costs nothing but consumes no NVIDIA quota either.
-
-Its reasoning is **mandatory** and defaults to `max` effort, which is slow — roughly **214s** on a ~6.8k-token prompt versus **39s** at `low` effort. The client therefore pins `reasoning_effort=low` for this model. Override it when you want deeper reasoning and can accept the latency:
-```bash
-./venv/bin/python main.py bunny ORCL --reasoning-effort high
-```
-
-On an identical prompt, for reference: `bunny` 39.2s, Nemotron-3 Super 120B 101.4s, Nemotron-3 Ultra 550B 191.7s.
-
-The model is anonymous, about a week old, unmoderated, and not version-pinned, so outputs are not reproducible or auditable. It is exposed as a separate opt-in choice and does not alter the `free` preset. Because it is free with no stated guarantee of continued availability, it has no fallback model configured — a failure raises rather than silently switching.
-
 ### **Run Pipeline with OpenRouter Free Models Router (`openrouter/free`)**
 ```bash
 ./venv/bin/python main.py openrouter AAPL
@@ -602,7 +583,7 @@ sudo bash systemd/uninstall_services.sh
 
 ## 🛠️ Technology Stack
 
-* **LLM Reasoning**: Moonshot AI Kimi-K3 (`moonshotai/kimi-k3` via NVIDIA NIM), NVIDIA Nemotron-3 Ultra 550B (`nvidia/nemotron-3-ultra-550b-a55b`) & Super 120B (`nvidia/nemotron-3-super-120b`), the `free` preset (Ultra 550B first, Super 120B fallback on stall), Space Bunny Alpha (`bunny` via OpenRouter, $0/token, 1M context), OpenRouter Free Models Router (`openrouter/free`, 200k context window), Gemini 3.1 Pro, and local Qwen 2.5 14B through Vulkan-enabled llama.cpp (`qwen` / `llamacpp` / `qwen-llamacpp`, 8K compact profile).
+* **LLM Reasoning**: Moonshot AI Kimi-K3 (`moonshotai/kimi-k3` via NVIDIA NIM), NVIDIA Nemotron-3 Ultra 550B (`nvidia/nemotron-3-ultra-550b-a55b`) & Super 120B (`nvidia/nemotron-3-super-120b`), the `free` preset (Ultra 550B first, Super 120B fallback on stall), OpenRouter Free Models Router (`openrouter/free`, 200k context window), Gemini 3.1 Pro, and local Qwen 2.5 14B through Vulkan-enabled llama.cpp (`qwen` / `llamacpp` / `qwen-llamacpp`, 8K compact profile).
 * **Vector Embeddings**: FastEmbed (`BAAI/bge-small-en-v1.5`, 384-dimensional dense vectors).
 * **CLI Terminal Feed**: Official `gloom-sh/gloomberb` CLI.
 * **Macro Data**: FRED API (US Treasury Yield Curve) & CNN Fear & Greed Index.

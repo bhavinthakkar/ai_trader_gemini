@@ -67,12 +67,12 @@ RUNNING_JOBS: Dict[str, Dict[str, Any]] = {}
 
 class AnalyzeRequest(BaseModel):
     symbol: str = Field(..., description="Stock symbol or European ISIN (e.g. NVDA, US67066G1040, NVD.DE)")
-    model: str = Field(default="bunny", description="AI Model to run (e.g. bunny, gemini, nemotron, kimi, qwen)")
+    model: str = Field(default="free", description="AI Model to run (e.g. free, gemini, nemotron, kimi, qwen)")
     is_eu: bool = Field(default=False, description="Flag for European gettex/XETRA tickers")
 
 
 class MasterRunRequest(BaseModel):
-    model: str = Field(default="bunny", description="AI Model to run across top active stocks")
+    model: str = Field(default="free", description="AI Model to run across top active stocks")
     limit: int = Field(default=5, ge=1, le=25, description="Number of top active stocks to analyze")
     dashboard_limit: int = Field(default=10, ge=1, le=50, description="Number of active stocks to screen")
     market: str = Field(default="US", description="Market to scan: 'US' or 'EU'")

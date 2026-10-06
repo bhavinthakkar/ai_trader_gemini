@@ -14,7 +14,6 @@ Usage:
   python master.py [model] [options]
   python master.py free
   python master.py gemini --limit 5
-  python master.py bunny --limit 3 --dry-run
   python master.py qwen -t NVDA,TSLA,INTC
 """
 
@@ -56,7 +55,6 @@ VALID_MODELS = [
     "kimi", "kimi-k3", "k3", "moonshot",
     "super", "nemotron-super", "120b",
     "gemini", "openrouter", "free", "openrouter/free",
-    "bunny", "space-bunny", "sb",
     "minimax", "minimax-m3", "minimax_m3", "m3",
     "qwen", "llamacpp", "qwen-llamacpp",
 ]
@@ -587,9 +585,6 @@ Examples:
   # Run on top 3 most traded stocks with Gemini:
   python master.py gemini --limit 3
 
-  # Run on Space Bunny Alpha (free 1M context):
-  python master.py bunny -n 5
-
   # Run local Qwen 2.5 14B via llama.cpp:
   python master.py qwen -n 3
 
@@ -604,7 +599,7 @@ Examples:
         "model_arg",
         nargs="?",
         default=None,
-        help="LLM model choice for main.py (default: 'free'). Choices: 'free', 'gemini', 'bunny', 'nemotron', 'ultra', 'super', 'kimi', 'openrouter', 'qwen', 'llamacpp', etc."
+        help="LLM model choice for main.py (default: 'free'). Choices: 'free', 'gemini', 'nemotron', 'ultra', 'super', 'kimi', 'openrouter', 'qwen', 'llamacpp', etc."
     )
     parser.add_argument(
         "--model", "-m",
