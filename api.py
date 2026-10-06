@@ -67,12 +67,12 @@ RUNNING_JOBS: Dict[str, Dict[str, Any]] = {}
 
 class AnalyzeRequest(BaseModel):
     symbol: str = Field(..., description="Stock symbol or European ISIN (e.g. NVDA, US67066G1040, NVD.DE)")
-    model: str = Field(default="free", description="AI Model to run (e.g. free, gemini, nemotron, kimi, qwen)")
+    model: str = Field(default="ling", description="AI Model to run (e.g. ling, free, gemini, nemotron, kimi, qwen)")
     is_eu: bool = Field(default=False, description="Flag for European gettex/XETRA tickers")
 
 
 class MasterRunRequest(BaseModel):
-    model: str = Field(default="free", description="AI Model to run across top active stocks")
+    model: str = Field(default="ling", description="AI Model to run across top active stocks")
     limit: int = Field(default=5, ge=1, le=25, description="Number of top active stocks to analyze")
     dashboard_limit: int = Field(default=10, ge=1, le=50, description="Number of active stocks to screen")
     market: str = Field(default="US", description="Market to scan: 'US' or 'EU'")
@@ -245,10 +245,10 @@ def _run_single_analysis_job(job_id: str, symbol: str, model: str, is_eu: bool):
     RUNNING_JOBS[job_id]["status"] = "running"
     RUNNING_JOBS[job_id]["started_at"] = datetime.now(timezone.utc).isoformat()
 
-    # Gracefully redirect retired bunny model to free preset
+    # Gracefully redirect retired bunny model to ling (inclusionAI: Ling 3.1 Flash)
     effective_model = model.strip().lower()
     if effective_model in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
-        effective_model = "free"
+        effective_model = "ling"
 
     main_script = BASE_DIR / "main.py"
     cmd = [sys.executable, str(main_script), effective_model, symbol]
@@ -290,7 +290,7 @@ def trigger_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks):
 
     req_model = req.model.strip().lower()
     if req_model in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
-        req_model = "free"
+        req_model = "ling"
 
     job_id = f"job_{target_symbol}_{int(datetime.now().timestamp())}"
 
@@ -313,8 +313,9 @@ def trigger_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks):
     return {
         "job_id": job_id,
         "target_symbol": target_symbol,
+        "model": req_model,
         "status": "queued",
-        "message": f"Queued 6-agent analysis for '{target_symbol}' using model '{req.model}'.",
+        "message": f"Queued 6-agent analysis for '{target_symbol}' using model '{req_model}'.",
     }
 
 

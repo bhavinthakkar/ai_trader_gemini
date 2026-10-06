@@ -51,6 +51,7 @@ MAIN_SCRIPT = os.path.join(BASE_DIR, "main.py")
 DEFAULT_DB_PATH = os.path.join(BASE_DIR, "trader.db")
 
 VALID_MODELS = [
+    "ling", "ling-3.1", "ling-flash", "ling-3.1-flash", "inclusionai", "inclusionai/ling-3.1-flash",
     "nemotron", "nvidia", "ultra", "nemotron-ultra", "550b",
     "kimi", "kimi-k3", "k3", "moonshot",
     "super", "nemotron-super", "120b",
@@ -599,7 +600,7 @@ Examples:
         "model_arg",
         nargs="?",
         default=None,
-        help="LLM model choice for main.py (default: 'free'). Choices: 'free', 'gemini', 'nemotron', 'ultra', 'super', 'kimi', 'openrouter', 'qwen', 'llamacpp', etc."
+        help="LLM model choice for main.py (default: 'free'). Choices: 'ling', 'free', 'gemini', 'nemotron', 'ultra', 'super', 'kimi', 'openrouter', 'qwen', 'llamacpp', etc."
     )
     parser.add_argument(
         "--model", "-m",
@@ -734,8 +735,8 @@ Examples:
     raw_model = args.model_opt or args.model_arg or "free"
     model_choice = str(raw_model).strip().lower()
     if model_choice in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
-        print("[master] Notice: Space Bunny Alpha ('bunny') is no longer available on OpenRouter; automatically redirecting to 'free' preset.")
-        model_choice = "free"
+        print("[master] Notice: Space Bunny Alpha ('bunny') is no longer available on OpenRouter; automatically redirecting to 'ling' (inclusionAI: Ling 3.1 Flash).")
+        model_choice = "ling"
 
     if model_choice not in VALID_MODELS:
         print(f"\n❌ ERROR: Invalid model choice '{raw_model}'!")

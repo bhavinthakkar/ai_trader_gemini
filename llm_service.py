@@ -182,6 +182,42 @@ MODEL_REGISTRY = {
         "model": "openrouter/free",
         "fallbacks": ["minimax/minimax-m3:free", "nvidia/nemotron-3-super-120b-a12b:free"],
         "label": "OpenRouter Free Models Router (openrouter/free)"
+    },
+    "ling": {
+        "provider": "openrouter",
+        "model": "inclusionai/ling-3.1-flash",
+        "fallbacks": ["openrouter/free", "nvidia/nemotron-3-super-120b-a12b:free"],
+        "label": "inclusionAI: Ling 3.1 Flash (OpenRouter, free, 262k context)"
+    },
+    "ling-3.1": {
+        "provider": "openrouter",
+        "model": "inclusionai/ling-3.1-flash",
+        "fallbacks": ["openrouter/free", "nvidia/nemotron-3-super-120b-a12b:free"],
+        "label": "inclusionAI: Ling 3.1 Flash (OpenRouter, free, 262k context)"
+    },
+    "ling-flash": {
+        "provider": "openrouter",
+        "model": "inclusionai/ling-3.1-flash",
+        "fallbacks": ["openrouter/free", "nvidia/nemotron-3-super-120b-a12b:free"],
+        "label": "inclusionAI: Ling 3.1 Flash (OpenRouter, free, 262k context)"
+    },
+    "ling-3.1-flash": {
+        "provider": "openrouter",
+        "model": "inclusionai/ling-3.1-flash",
+        "fallbacks": ["openrouter/free", "nvidia/nemotron-3-super-120b-a12b:free"],
+        "label": "inclusionAI: Ling 3.1 Flash (OpenRouter, free, 262k context)"
+    },
+    "inclusionai": {
+        "provider": "openrouter",
+        "model": "inclusionai/ling-3.1-flash",
+        "fallbacks": ["openrouter/free", "nvidia/nemotron-3-super-120b-a12b:free"],
+        "label": "inclusionAI: Ling 3.1 Flash (OpenRouter, free, 262k context)"
+    },
+    "inclusionai/ling-3.1-flash": {
+        "provider": "openrouter",
+        "model": "inclusionai/ling-3.1-flash",
+        "fallbacks": ["openrouter/free", "nvidia/nemotron-3-super-120b-a12b:free"],
+        "label": "inclusionAI: Ling 3.1 Flash (OpenRouter, free, 262k context)"
     }
 }
 
@@ -287,9 +323,11 @@ def normalize_model_key(model_choice: str) -> str:
         key = "kimi"
     if key in ["qwen-llamacpp", "llamacpp", "qwen2.5", "qwen2.5-14b"]:
         key = "qwen"
+    if key in ["ling", "ling-3.1", "ling-flash", "ling-3.1-flash", "inclusionai/ling-3.1-flash", "inclusionai", "inclusion"]:
+        key = "ling"
     if key in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
-        print("[llm_service] Notice: Space Bunny Alpha ('bunny') is no longer available on OpenRouter; redirecting to 'free' preset.")
-        key = "free"
+        print("[llm_service] Notice: Space Bunny Alpha ('bunny') is no longer available on OpenRouter; redirecting to 'ling' (inclusionAI: Ling 3.1 Flash).")
+        key = "ling"
     return key
 
 
@@ -317,6 +355,7 @@ def query_llm(
     """
     Executes an LLM chat query based on the model short name.
     Supported model short names:
+      - 'ling' / 'ling-3.1' / 'ling-flash': inclusionAI: Ling 3.1 Flash via OpenRouter (free, 262k context)
       - 'nemotron' / 'ultra' / '550b': Cloud Nemotron-3 Ultra 550B (NVIDIA API)
       - 'kimi' / 'kimi-k3' / 'k3': Moonshot AI Kimi-K3 (NVIDIA API)
       - 'super' / '120b': Cloud Nemotron-3 Super 120B (NVIDIA API)
@@ -326,7 +365,7 @@ def query_llm(
       - 'qwen' / 'llamacpp': Local Qwen model through the OpenAI-compatible llama.cpp server
     """
     if not model_choice or not str(model_choice).strip():
-        raise ValueError("Model choice argument is required. Valid choices: 'nemotron', 'ultra', 'kimi', 'gemini', 'openrouter', 'free', 'qwen', 'llamacpp'")
+        raise ValueError("Model choice argument is required. Valid choices: 'ling', 'free', 'nemotron', 'ultra', 'kimi', 'gemini', 'openrouter', 'qwen', 'llamacpp'")
 
     key = normalize_model_key(model_choice)
 
@@ -533,43 +572,58 @@ def query_llm(
             }
             if eff_effort:
                 payload["reasoning_effort"] = eff_effort
-            try:
-                response = requests.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers=headers,
-                    json=payload,
-                    timeout=(OPENROUTER_CONNECT_TIMEOUT, OPENROUTER_READ_TIMEOUT),
-                    stream=True
-                )
-                if response.status_code == 200:
-                    cleaned = clean_think_tags(_collect_sse_content(
-                        response, candidate_model, chain_deadline,
-                        OPENROUTER_PROGRESS_INTERVAL, OPENROUTER_TOTAL_TIMEOUT))
-                    try:
-                        _ = extract_json(cleaned)
-                        return cleaned
-                    except Exception as parse_err:
-                        print(f"[llm_service] OpenRouter model '{candidate_model}' returned "
-                              f"non-JSON/invalid output ({parse_err}). Trying fallback...")
-                        last_error = parse_err
-                        continue
-                elif response.status_code in [429, 502, 503, 504]:
-                    print(f"[llm_service] OpenRouter model {candidate_model} returned {response.status_code}: {response.text[:200]}. Trying fallback...")
-                    last_error = RuntimeError(f"OpenRouter call failed ({response.status_code}): {response.text}")
-                    continue
-                else:
-                    print(f"[llm_service] OpenRouter model {candidate_model} returned {response.status_code}. Trying fallback...")
-                    last_error = RuntimeError(f"OpenRouter API call failed ({response.status_code}): {response.text}")
-                    continue
-            except TimeBudgetExceeded as e:
-                last_error = e
-                print(f"[llm_service] OpenRouter model {candidate_model} hit the "
-                      f"{OPENROUTER_TOTAL_TIMEOUT}s total budget. Trying fallback...")
-                continue
-            except requests.exceptions.RequestException as e:
-                last_error = e
-                print(f"[llm_service] OpenRouter connection error with {candidate_model}: {e}. Trying fallback...")
-                continue
+            for attempt in range(2):
+                try:
+                    response = requests.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers=headers,
+                        json=payload,
+                        timeout=(OPENROUTER_CONNECT_TIMEOUT, OPENROUTER_READ_TIMEOUT),
+                        stream=True
+                    )
+                    if response.status_code == 200:
+                        cleaned = clean_think_tags(_collect_sse_content(
+                            response, candidate_model, chain_deadline,
+                            OPENROUTER_PROGRESS_INTERVAL, OPENROUTER_TOTAL_TIMEOUT))
+                        try:
+                            _ = extract_json(cleaned)
+                            return cleaned
+                        except Exception as parse_err:
+                            print(f"[llm_service] OpenRouter model '{candidate_model}' returned "
+                                  f"non-JSON/invalid output ({parse_err}). Trying fallback...")
+                            last_error = parse_err
+                            break
+                    elif response.status_code == 429:
+                        if attempt == 0:
+                            print(f"[llm_service] OpenRouter model '{candidate_model}' rate limited (429). Retrying in 2s...")
+                            time.sleep(2)
+                            continue
+                        else:
+                            print(f"[llm_service] OpenRouter model {candidate_model} returned 429: {response.text[:200]}. Trying fallback...")
+                            last_error = RuntimeError(f"OpenRouter call failed (429): {response.text}")
+                            break
+                    elif response.status_code in [502, 503, 504]:
+                        if attempt == 0:
+                            print(f"[llm_service] OpenRouter model '{candidate_model}' returned {response.status_code}. Retrying in 2s...")
+                            time.sleep(2)
+                            continue
+                        else:
+                            print(f"[llm_service] OpenRouter model {candidate_model} returned {response.status_code}. Trying fallback...")
+                            last_error = RuntimeError(f"OpenRouter call failed ({response.status_code}): {response.text}")
+                            break
+                    else:
+                        print(f"[llm_service] OpenRouter model {candidate_model} returned {response.status_code}. Trying fallback...")
+                        last_error = RuntimeError(f"OpenRouter API call failed ({response.status_code}): {response.text}")
+                        break
+                except TimeBudgetExceeded as e:
+                    last_error = e
+                    print(f"[llm_service] OpenRouter model {candidate_model} hit the "
+                          f"{OPENROUTER_TOTAL_TIMEOUT}s total budget. Trying fallback...")
+                    break
+                except requests.exceptions.RequestException as e:
+                    last_error = e
+                    print(f"[llm_service] OpenRouter connection error with {candidate_model}: {e}. Trying fallback...")
+                    break
 
         if last_error:
             raise last_error

@@ -393,7 +393,15 @@ When the total budget is hit the current model is abandoned and the fallback is 
 
 > Note: `kimi` currently points at `moonshotai/kimi-k3`, which the NVIDIA gateway is returning `504` for (after ~300s, at every reasoning effort). The retired `moonshotai/kimi-k2-instruct` and `kimi-k2-thinking` return `410 Gone`, and `moonshotai/kimi-k2.6` returns `404`. Use `free` or `super` until Kimi is served again.
 
-To reach OpenRouter's free-model router instead, pass `openrouter` (or `openrouter/free`).
+To reach OpenRouter's free-model router instead, pass `openrouter` (or `openrouter/free`). Or use the fast, high-context **inclusionAI: Ling 3.1 Flash** model via `ling`.
+
+### **Run Pipeline with inclusionAI Ling 3.1 Flash (`ling`)**
+```bash
+./venv/bin/python main.py ling NVDA
+```
+```bash
+./venv/bin/python main.py ling AAPL,TSLA
+```
 
 ### **Run Pipeline with OpenRouter Free Models Router (`openrouter/free`)**
 ```bash
@@ -583,7 +591,7 @@ sudo bash systemd/uninstall_services.sh
 
 ## 🛠️ Technology Stack
 
-* **LLM Reasoning**: Moonshot AI Kimi-K3 (`moonshotai/kimi-k3` via NVIDIA NIM), NVIDIA Nemotron-3 Ultra 550B (`nvidia/nemotron-3-ultra-550b-a55b`) & Super 120B (`nvidia/nemotron-3-super-120b`), the `free` preset (Ultra 550B first, Super 120B fallback on stall), OpenRouter Free Models Router (`openrouter/free`, 200k context window), Gemini 3.1 Pro, and local Qwen 2.5 14B through Vulkan-enabled llama.cpp (`qwen` / `llamacpp` / `qwen-llamacpp`, 8K compact profile).
+* **LLM Reasoning**: inclusionAI Ling 3.1 Flash (`inclusionai/ling-3.1-flash` via OpenRouter, free, 262k context window), OpenRouter Free Models Router (`openrouter/free`, 200k context window), Moonshot AI Kimi-K3 (`moonshotai/kimi-k3` via NVIDIA NIM), NVIDIA Nemotron-3 Ultra 550B (`nvidia/nemotron-3-ultra-550b-a55b`) & Super 120B (`nvidia/nemotron-3-super-120b`), the `free` preset (Ultra 550B first, Super 120B fallback on stall), Gemini 3.1 Pro, and local Qwen 2.5 14B through Vulkan-enabled llama.cpp (`qwen` / `llamacpp` / `qwen-llamacpp`, 8K compact profile).
 * **Vector Embeddings**: FastEmbed (`BAAI/bge-small-en-v1.5`, 384-dimensional dense vectors).
 * **CLI Terminal Feed**: Official `gloom-sh/gloomberb` CLI.
 * **Macro Data**: FRED API (US Treasury Yield Curve) & CNN Fear & Greed Index.

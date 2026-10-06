@@ -326,7 +326,7 @@ class TestMasterCLI(unittest.TestCase):
     """Tests CLI argument parsing and error handling."""
 
     def test_valid_models(self):
-        for m in ["free", "gemini", "nemotron", "super", "ultra", "kimi", "qwen", "llamacpp"]:
+        for m in ["free", "gemini", "nemotron", "super", "ultra", "kimi", "qwen", "llamacpp", "ling"]:
             self.assertIn(m, master.VALID_MODELS)
 
 

@@ -190,6 +190,12 @@ class ModelRegistryTests(unittest.TestCase):
             "minimax",
             "minimax-m3",
             "m3",
+            "ling",
+            "ling-3.1",
+            "ling-flash",
+            "ling-3.1-flash",
+            "inclusionai",
+            "inclusionai/ling-3.1-flash",
         }
         self.assertEqual(set(MODEL_REGISTRY), expected_keys)
         self.assertEqual(

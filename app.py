@@ -390,7 +390,7 @@ with tab2:
         ).strip().upper()
     with lookup_col2:
         st.markdown("<div class='hide-on-mobile' style='height: 28px;'></div>", unsafe_allow_html=True)
-        analyze_isin_btn = st.button("🚀 Analyze with AI", key="analyze_isin_button", use_container_width=True)
+        analyze_isin_btn = st.button("🚀 Analyze with Ling 3.1", key="analyze_isin_button", use_container_width=True)
 
     symbol_list = [s["symbol"] for s in latest_signals] if latest_signals else []
 
@@ -405,10 +405,10 @@ with tab2:
         )
 
         if analyze_isin_btn:
-            with st.status(f"🚀 Running 6-Agent AI Swing Synthesis on {res_sym}...", expanded=True) as status_box:
+            with st.status(f"🚀 Running 6-Agent AI Swing Synthesis on {res_sym} via Ling 3.1...", expanded=True) as status_box:
                 st.write(f"Launching main.py for {res_sym}...")
                 main_script = os.path.join(BASE_DIR, "main.py")
-                cmd = [sys.executable, main_script, "free", res_sym, "--eu"]
+                cmd = [sys.executable, main_script, "ling", res_sym, "--eu"]
                 try:
                     proc = subprocess.run(cmd, cwd=BASE_DIR, capture_output=True, text=True)
                     if proc.returncode == 0:
@@ -624,10 +624,10 @@ with tab3:
     with top_ctrl2:
         limit_val = st.selectbox("Number of Active Stocks:", options=[10, 15, 20, 25], index=0)
         analyse_count = st.selectbox(
-            "AI Analysis Count:",
+            "AI Analysis Count (Ling 3.1):",
             options=[3, 5, 10],
             index=1,
-            help="Number of top active stocks to sequentially analyze with main.py using AI preset ('free')"
+            help="Number of top active stocks to sequentially analyze with main.py using inclusionAI: Ling 3.1 Flash ('ling')"
         )
     with top_ctrl3:
         if st.button("🔄 Refresh Active Data", key="refresh_active_stocks", use_container_width=True):
@@ -637,7 +637,7 @@ with tab3:
         run_analyse = st.button(
             "🚀 Refresh active data & Analyse",
             key="refresh_and_analyse_stocks",
-            help="Refreshes active stocks data and executes master.py using AI preset (free)",
+            help="Refreshes active stocks data and executes master.py using inclusionAI: Ling 3.1 Flash (ling)",
             use_container_width=True,
             type="primary"
         )
@@ -648,7 +648,7 @@ with tab3:
         cmd = [
             sys.executable,
             master_script,
-            "free",
+            "ling",
             "--limit", str(analyse_count),
             "--dashboard-limit", str(limit_val),
             "--market", selected_market,
@@ -656,7 +656,7 @@ with tab3:
             "--no-streamlit",
         ]
         status_market_label = f"Europe (gettex / XETRA: {selected_exchange})" if is_eu else "US Markets"
-        with st.status(f"🚀 Running Gloomberb Master Orchestration ({status_market_label} | Model: free, Limit: {analyse_count})...", expanded=True) as status_box:
+        with st.status(f"🚀 Running Gloomberb Master Orchestration ({status_market_label} | Model: ling, Limit: {analyse_count})...", expanded=True) as status_box:
             st.write(f"Initializing active volume screener [{selected_market}] & launching 6-agent AI swing analysis...")
             log_box = st.empty()
             logs = []
@@ -684,7 +684,7 @@ with tab3:
                 rc = proc.wait()
                 if rc == 0:
                     status_box.update(label=f"✅ Master Analysis Complete for Top {analyse_count} Stocks!", state="complete", expanded=False)
-                    st.success(f"Successfully analyzed top {analyse_count} active stocks! Trade signals saved to database.")
+                    st.success(f"Successfully analyzed top {analyse_count} active stocks using Ling 3.1 Flash ('ling')! Trade signals saved to database.")
                 else:
                     status_box.update(label=f"⚠️ Pipeline finished with exit code {rc}", state="error", expanded=True)
                     st.warning(f"Master script exited with code {rc}. Check details in log above.")

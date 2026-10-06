@@ -80,8 +80,32 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(job_resp.status_code, 200)
         job_data = job_resp.json()
         self.assertEqual(job_data["target_symbol"], "AAPL")
+        self.assertEqual(job_data["model"], "free")
         mock_job.assert_called_once()
+
+    @unittest.mock.patch("api._run_single_analysis_job")
+    def test_analyze_trigger_defaults_to_ling(self, mock_job):
+        resp = self.client.post("/api/analyze", json={"symbol": "NVDA"})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["model"], "ling")
+
+        job_resp = self.client.get(f"/api/jobs/{data['job_id']}")
+        self.assertEqual(job_resp.status_code, 200)
+        self.assertEqual(job_resp.json()["model"], "ling")
+
+    @unittest.mock.patch("api._run_single_analysis_job")
+    def test_analyze_trigger_redirects_bunny_to_ling(self, mock_job):
+        resp = self.client.post("/api/analyze", json={"symbol": "NVDA", "model": "bunny"})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["model"], "ling")
+
+        job_resp = self.client.get(f"/api/jobs/{data['job_id']}")
+        self.assertEqual(job_resp.status_code, 200)
+        self.assertEqual(job_resp.json()["model"], "ling")
 
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -42,10 +42,20 @@ class OpenRouterRoutingTests(unittest.TestCase):
     def test_openrouter_label_mentions_free(self):
         self.assertIn("free", get_model_label("openrouter").lower())
 
-    def test_bunny_is_removed_and_redirects_to_free(self):
+    def test_ling_aliases_resolve_to_ling(self):
+        for alias in ("ling", "ling-3.1", "ling-flash", "ling-3.1-flash", "inclusionai", "inclusionai/ling-3.1-flash"):
+            self.assertEqual(normalize_model_key(alias), "ling")
+
+    def test_ling_targets_inclusionai_model_via_openrouter(self):
+        config = MODEL_REGISTRY["ling"]
+        self.assertEqual(config["provider"], "openrouter")
+        self.assertEqual(config["model"], "inclusionai/ling-3.1-flash")
+        self.assertIn("openrouter/free", config.get("fallbacks", []))
+
+    def test_bunny_redirects_to_ling(self):
         for alias in ("bunny", "space-bunny", "space-bunny-alpha", "SPACE-BUNNY-ALPHA", "sb", "stealth/space-bunny-alpha"):
             self.assertNotIn(alias, MODEL_REGISTRY)
-            self.assertEqual(normalize_model_key(alias), "free")
+            self.assertEqual(normalize_model_key(alias), "ling")
 
 
 @patch.dict(__import__("os").environ, {"OPENROUTER_API_KEY": "test-key"}, clear=False)

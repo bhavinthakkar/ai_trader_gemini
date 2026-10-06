@@ -1123,8 +1123,9 @@ def main():
     raw_model = args.model_opt or args.model_arg
     if not raw_model:
         print("\n❌ ERROR: Model argument is required!")
-        print("Usage: python main.py {nemotron|ultra|kimi|super|gemini|openrouter|free|qwen|llamacpp|qwen-llamacpp} [ticker]")
+        print("Usage: python main.py {ling|nemotron|ultra|kimi|super|gemini|openrouter|free|qwen|llamacpp|qwen-llamacpp} [ticker]")
         print("       python main.py portfolio {model}")
+        print("  - ling / ling-3.1  : inclusionAI: Ling 3.1 Flash via OpenRouter (free, 262k context)")
         print("  - nemotron / ultra : Cloud Nemotron-3 Ultra 550B (NVIDIA)")
         print("  - kimi             : Moonshot AI Kimi-K3 (NVIDIA)")
         print("  - super            : Cloud Nemotron-3 Super 120B (NVIDIA)")
@@ -1137,9 +1138,10 @@ def main():
 
     model_choice = str(raw_model).strip().lower()
     if model_choice in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
-        print("[main] Notice: Space Bunny Alpha ('bunny') is no longer available on OpenRouter; automatically redirecting to 'free' preset.")
-        model_choice = "free"
+        print("[main] Notice: Space Bunny Alpha ('bunny') is no longer available on OpenRouter; automatically redirecting to 'ling' preset.")
+        model_choice = "ling"
     valid_models = [
+        "ling", "ling-3.1", "ling-flash", "ling-3.1-flash", "inclusionai", "inclusionai/ling-3.1-flash",
         "nemotron", "nvidia", "ultra", "nemotron-ultra", "550b",
         "kimi", "kimi-k3", "k3", "moonshot",
         "super", "nemotron-super", "120b",
@@ -1150,7 +1152,7 @@ def main():
     ]
     if model_choice not in valid_models:
         print(f"\n❌ ERROR: Invalid model choice '{raw_model}'!")
-        print("Supported choices are: 'nemotron' (Ultra 550B), 'kimi' (Kimi-K3), 'super' (120B), 'gemini', 'openrouter', 'free' (Ultra 550B then Super 120B), 'qwen' / 'llamacpp' / 'qwen-llamacpp', 'portfolio'\n")
+        print("Supported choices are: 'ling' (Ling 3.1 Flash), 'free' (Ultra 550B then Super 120B), 'nemotron' (Ultra 550B), 'kimi' (Kimi-K3), 'super' (120B), 'gemini', 'openrouter', 'qwen' / 'llamacpp' / 'qwen-llamacpp', 'portfolio'\n")
         sys.exit(1)
 
     if model_choice == "portfolio":
