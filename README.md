@@ -1,6 +1,6 @@
 # ⚡ Gloomberb Multi-Agent AI Trader & Dual-Horizon RAG Analysis Engine
 
-An autonomous, multi-agent financial reasoning system designed for deterministic stock swing trading analysis. Powered by **Moonshot AI Kimi-K3**, **NVIDIA Nemotron-3 Ultra 550B & Super 120B**, **Deterministic 5-Pillar Quantitative Scoring**, **Multi-Query Dual-Horizon FastEmbed RAG**, the **official Gloomberb CLI**, and a **16-Channel Institutional Data Pipeline**.
+An autonomous, multi-agent financial reasoning system designed for 20-session (about one-month) stock forecasting and trade research. Powered by **Moonshot AI Kimi-K3**, **NVIDIA Nemotron-3 Ultra 550B & Super 120B**, **Deterministic 5-Pillar Quantitative Scoring**, **Multi-Query Dual-Horizon FastEmbed RAG**, the **official Gloomberb CLI**, and a **16-Channel Institutional Data Pipeline**.
 
 ---
 
@@ -90,25 +90,35 @@ $$\text{Raw Composite} = \frac{\sum_{i \in \text{avail}} w_i \times \text{Pillar
 
 If all pillars are unavailable, the composite evaluates to `None` and triggers an `INSUFFICIENT_EVIDENCE` no-trade state.
 
-### Long-Horizon ML Context
+### One-Month ML Score in the Decision Composite
 
-The trader can include the point-in-time XGBoost ranking from the sibling
-`stock_ml` repository as separate context for US S&P 500 stocks. Refresh its data
-and score the current universe with:
+The trader consumes the point-in-time 20-session XGBoost scores from the sibling
+`stock_ml` repository for US S&P 500 stocks. Refresh and score the current
+universe with:
 
 ```bash
 cd ../stock_ml
-./.venv/bin/python score_current_universe.py
+./.venv/bin/python score_current_universe_1m.py
 ```
 
-The analysis reads `../stock_ml/data/xgb_current_scores.csv` by default. Set
+The analysis reads `../stock_ml/data/xgb_current_scores_1m.csv` by default. Set
 `STOCK_ML_SCORES_PATH` to use another export. Scores older than seven days are
-ignored. The model estimates 252-session excess returns, while this trader makes
-1–10 day decisions, so the ML rank is retained as context and does not directly
-set or gate the trade decision. The LLM is asked to assess the short-term setup
-independently and explain material disagreement. US is the default market and
-keeps symbols on their US listings; use `--market EU` (or `--eu`) to resolve
-European listings and exchange preferences.
+ignored. The rank percentile maps to 0–100 and contributes **20%** of the hybrid
+quantitative score; the existing five-pillar market composite contributes 80%.
+That hybrid score drives the BUY, SHORT, and holding-thesis quantitative gates
+and confidence calculation. Fresh ML availability is required for the LLM to
+return an explicit `ml_signal_assessment` (supportive, conflicting, or neutral),
+which is retained in the signal JSON for audit. Existing data coverage,
+reward:risk, liquidity, volatility, and event safeguards remain in force. If
+the ML export is missing or stale, the system falls back to the five-pillar
+score alone. The prediction is expected 20-session excess return, not a
+probability or guaranteed return. The LLM also returns `forecast_20d` as
+OUTPERFORM, MARKET_LIKE, or UNDERPERFORM with confidence and rationale. This
+forecast is recorded separately from BUY/SELL/HOLD, which remains an actionable
+trade decision subject to the existing risk gates. Forecast outcome tracking
+uses 20 trading bars. US is the default market and keeps symbols on
+their US listings; use `--market EU` (or `--eu`) to resolve European listings
+and exchange preferences.
 
 ---
 
@@ -142,7 +152,7 @@ Market risk is governed by explicit structural boundaries rather than news headl
 
 ## ⚖️ 4. Symmetric BUY vs SELL & Short vs Holding Exit Architecture
 
-Decision criteria are fully symmetric across long and short operations, while clearly distinguishing short-term directional speculation from managing long-term positions:
+Decision criteria are fully symmetric across long and short operations, with a 20-trading-session forecast horizon. The relative forecast and actionable trade decision are separate: a model can forecast outperformance while returning HOLD when execution risks fail the trade gates.
 
 * **Symmetric Eligibility Checks**: Both BUY and SHORT must clear deterministic composite bars ($\ge 70$ for BUY, $\le 35$ for SHORT), data coverage ($\ge 80\%$), channel-anchored reward:risk ($\ge 1.5$), tradeable liquidity ($\ge 0.5\text{x}$ RVOL, $\ge \$1\text{M}$ 20d volume), and volatility regime safety.
 * **Long Holding Exit (`LONG_EXIT`)**:
@@ -243,7 +253,13 @@ To ensure strict system reliability and guarantee that raw LLM text is never for
   "buy_score": 0.20,
   "hold_score": 0.65,
   "sell_score": 0.15,
-  "horizon_days": 10,
+  "horizon_days": 20,
+  "horizon_sessions": 20,
+  "forecast_20d": {
+    "relative_outlook": "OUTPERFORM|MARKET_LIKE|UNDERPERFORM",
+    "confidence": 0.70,
+    "rationale": "Evidence-based relative forecast for the next 20 trading sessions"
+  },
   "no_trade_reason": null,
   "pillar_scores": {
     "trend": 75.0,

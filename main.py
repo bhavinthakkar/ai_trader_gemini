@@ -51,7 +51,7 @@ You receive short-term intelligence collected by six specialized sub-agents:
 6. Analyst Agent: Wall Street consensus, mean target price, and recent rating actions from major investment banks (BofA, Barclays, Credit Suisse, DB, Evercore, Goldman, JPM, Morgan Stanley, UBS).
 
 Your Task:
-Synthesize the insights from all six agents to deliver a definitive short-term swing trade decision (1 to 10 trading days horizon).
+Synthesize the insights from all six agents to forecast relative performance over the next 20 trading sessions (about one month) and assess whether a trade is actionable.
 
 Rules & Guidelines:
 1. Ignore stale long-term macro narratives that are already priced in, but incorporate macro yield curve & CFTC positioning context.
@@ -202,16 +202,28 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         model_confidence = round(model_confidence / 100.0, 2) if model_confidence <= 100 else 0.70
 
     try:
-        horizon_days = int(data.get("horizon_days") or 10)
+        horizon_days = int(data.get("horizon_days") or 20)
     except (ValueError, TypeError):
-        horizon_days = 10
+        horizon_days = 20
+    try:
+        horizon_sessions = int(data.get("horizon_sessions") or horizon_days)
+    except (ValueError, TypeError):
+        horizon_sessions = horizon_days
+    forecast_20d = data.get("forecast_20d") if isinstance(data.get("forecast_20d"), dict) else None
 
     # Quantitative 5-Pillar Scores. The deterministic composite calculated from real market data is
     # authoritative for decisions and confidence. The model's echoed values are stored separately
     # (model_quant_score / model_pillar_scores) for reference only and never drive the signal.
     deterministic_scores = m_data.get("deterministic_5pillar_scores", {})
     det_quant = deterministic_scores.get("composite_quantitative_score")
-    quant_score = _to_float(det_quant if det_quant is not None else data.get("quant_score"), None)
+    ml_context = m_data.get("ml_context")
+    ml_score = _to_float(ml_context.get("score_0_100"), None) if isinstance(ml_context, dict) else None
+    ml_weight = 0.20 if det_quant is not None and ml_score is not None else 0.0
+    if det_quant is not None and ml_score is not None:
+        decision_composite = round((1.0 - ml_weight) * float(det_quant) + ml_weight * ml_score, 2)
+    else:
+        decision_composite = _to_float(det_quant, None)
+    quant_score = decision_composite if decision_composite is not None else _to_float(data.get("quant_score"), None)
     if quant_score is None:
         quant_score = 50.0  # neutral fallback for display only; BUY gate uses the deterministic composite
     model_quant_score = _to_float(data.get("quant_score"), None)
@@ -278,7 +290,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     # Mechanistic confidence: a function of composite decisiveness, pillar agreement,
     # and data completeness -- NOT the model's stated number. Deterministic pillars are
     # authoritative for confidence. A HOLD never carries high conviction, so cap it.
-    conf_composite = deterministic_scores.get("composite_quantitative_score")
+    conf_composite = decision_composite
     if conf_composite is None:
         conf_composite = quant_score or 50.0
     confidence = gated_confidence(conf_composite, pillar_scores, data_completeness)
@@ -354,7 +366,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     expected_move_pct = QuantitativeScoringService._clean_float(
         options_data.get("expected_move_pct") or m_data.get("expected_move_pct"), None
     )
-    dte_opt = options_data.get("days_to_expiration") or horizon_days or 10
+    dte_opt = options_data.get("days_to_expiration") or horizon_days or 20
     if expected_move is None and iv_val is not None and iv_val > 0.0 and price_v > 0.0:
         em_calc = QuantitativeScoringService.compute_expected_move(
             price_v, iv_val, dte=dte_opt, atm_straddle=options_data.get("atm_straddle")
@@ -583,7 +595,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     # DETERMINISTIC composite (computed from market data, not echoed by the model) is >= 70,
     # the market snapshot is valid/fresh, data coverage is adequate, and reward:risk >= 1.5.
     if decision == "BUY":
-        det_composite = deterministic_scores.get("composite_quantitative_score")
+        det_composite = decision_composite
         if det_composite is None:
             det_composite = deterministic_scores.get("raw_composite")
         # A certified catalyst dip buys a discount the composite cannot score, because the composite
@@ -711,7 +723,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
             _append_risk(note)
 
     elif decision == "SELL":
-        det_composite = deterministic_scores.get("composite_quantitative_score")
+        det_composite = decision_composite
         if det_composite is None:
             det_composite = deterministic_scores.get("raw_composite")
 
@@ -913,12 +925,19 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         "hold_score": hold_score,
         "sell_score": sell_score,
         "horizon_days": horizon_days,
+        "horizon_sessions": horizon_sessions,
+        "forecast_20d": forecast_20d,
         "quant_score": quant_score,
         "model_quant_score": model_quant_score,
         "no_trade_reason": no_trade_reason,
         "deterministic_data_completeness": deterministic_completeness,
         "model_data_completeness": model_data_completeness,
-        "ml_12m_context": m_data.get("ml_12m_context") if isinstance(m_data, dict) else None,
+        "ml_signal": ml_context,
+        "ml_signal_assessment": data.get("ml_signal_assessment"),
+        "deterministic_quant_score": _to_float(det_quant, None),
+        "ml_score_0_100": ml_score,
+        "ml_weight": ml_weight,
+        "combined_quant_score": decision_composite,
         "raw_composite": deterministic_scores.get("raw_composite"),
         "vol_factor": vol_factor,
         "atr_pct": atr_pct,
@@ -1260,7 +1279,7 @@ def main():
             # instead of defaults (and so gated_confidence uses real pillar agreement).
             if isinstance(m_data, dict):
                 m_data = dict(m_data)
-                m_data["ml_12m_context"] = ml_context
+                m_data["ml_context"] = ml_context
                 m_data["deterministic_5pillar_scores"] = QuantitativeScoringService().compute_5pillar_scores(
                     m_data, gloomberb_payload, gloomberb_payload.get("sector_benchmark", {})
                 )
@@ -1292,7 +1311,12 @@ def main():
 
                 schema_failed = False
                 if res_obj:
-                    validated, errors = validate_signal_json(res_obj)
+                    validated, errors = validate_signal_json(
+                        res_obj,
+                        require_ml_assessment=bool(ml_context),
+                        required_horizon_sessions=20,
+                        require_forecast_20d=True,
+                    )
 
                     # One constrained corrective retry on strict schema violations.
                     if errors:
@@ -1303,7 +1327,9 @@ def main():
                             "Your previous response failed strict schema validation. Correct EVERY "
                             "violation below and return ONLY a single valid JSON object with the exact "
                             "same golden keys (decision, primary_driver, buy_score, hold_score, "
-                            "sell_score, horizon_days, quant_score, pillar_scores, data_completeness, "
+                            "sell_score, horizon_days=20, horizon_sessions=20, forecast_20d, "
+                            "quant_score, pillar_scores, data_completeness, "
+                            "ml_signal_assessment when an ML score was supplied, "
                             "falsification_bull, falsification_bear, bull_case, bear_case, key_risks, "
                             "missing_information). buy_score/hold_score/sell_score must each be in "
                             "[0,1] and sum to ~1.0.\n"
@@ -1324,7 +1350,12 @@ def main():
                         elif isinstance(retry_parsed, list) and len(retry_parsed) > 0 and isinstance(retry_parsed[0], dict):
                             retry_obj = retry_parsed[0]
                         if retry_obj:
-                            validated, errors = validate_signal_json(retry_obj)
+                            validated, errors = validate_signal_json(
+                                retry_obj,
+                                require_ml_assessment=bool(ml_context),
+                                required_horizon_sessions=20,
+                                require_forecast_20d=True,
+                            )
 
                     if not errors:
                         normalized_obj = normalize_master_trader_json(
@@ -1344,7 +1375,8 @@ def main():
                             "buy_score": 0.0,
                             "hold_score": 1.0,
                             "sell_score": 0.0,
-                            "horizon_days": 10,
+                            "horizon_days": 20,
+                            "horizon_sessions": 20,
                             "quant_score": None,
                             "data_completeness": None,
                             "missing_information": [

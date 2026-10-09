@@ -55,7 +55,12 @@ def normalize_probabilities(buy, hold, sell):
     return [round(v / total, 4) for v in vals]
 
 
-def validate_signal_json(obj):
+def validate_signal_json(
+    obj,
+    require_ml_assessment=False,
+    required_horizon_sessions=None,
+    require_forecast_20d=False,
+):
     """
     Validate an extracted LLM signal object against the strict schema.
 
@@ -70,6 +75,45 @@ def validate_signal_json(obj):
 
     norm = dict(obj)
     clean = lambda s: " ".join(str(s).strip().split())
+
+    # When a fresh ML score is supplied, require an explicit disposition so
+    # the LLM's use of this material input is auditable.
+    assessment = norm.get("ml_signal_assessment")
+    if require_ml_assessment and not isinstance(assessment, dict):
+        errors.append("missing required object 'ml_signal_assessment'")
+    elif assessment is not None:
+        if not isinstance(assessment, dict):
+            errors.append("ml_signal_assessment must be an object")
+        else:
+            disposition = clean(assessment.get("disposition", "")).upper()
+            if disposition not in ("SUPPORTIVE", "CONFLICTING", "NEUTRAL"):
+                errors.append("ml_signal_assessment.disposition must be SUPPORTIVE, CONFLICTING, or NEUTRAL")
+            reason = clean(assessment.get("reason", ""))
+            if not reason:
+                errors.append("ml_signal_assessment.reason must be a non-empty explanation")
+            norm["ml_signal_assessment"] = {"disposition": disposition, "reason": reason}
+
+    forecast = norm.get("forecast_20d")
+    if require_forecast_20d and not isinstance(forecast, dict):
+        errors.append("missing required object 'forecast_20d'")
+    elif forecast is not None:
+        if not isinstance(forecast, dict):
+            errors.append("forecast_20d must be an object")
+        else:
+            outlook = clean(forecast.get("relative_outlook", "")).upper()
+            if outlook not in ("OUTPERFORM", "MARKET_LIKE", "UNDERPERFORM"):
+                errors.append("forecast_20d.relative_outlook must be OUTPERFORM, MARKET_LIKE, or UNDERPERFORM")
+            forecast_confidence = _to_float(forecast.get("confidence"))
+            if forecast_confidence is None or not (0.0 <= forecast_confidence <= 1.0):
+                errors.append("forecast_20d.confidence must be numeric in [0,1]")
+            rationale = clean(forecast.get("rationale", ""))
+            if not rationale:
+                errors.append("forecast_20d.rationale must be a non-empty explanation")
+            norm["forecast_20d"] = {
+                "relative_outlook": outlook,
+                "confidence": forecast_confidence,
+                "rationale": rationale,
+            }
 
     # --- Decision enum ----------------------------------------------------
     raw_dec = norm.get("decision") or norm.get("recommendation") or norm.get("signal")
@@ -153,6 +197,27 @@ def validate_signal_json(obj):
     except (TypeError, ValueError):
         if "horizon_days" in norm:
             errors.append("horizon_days must be an integer")
+
+    if required_horizon_sessions is not None:
+        try:
+            hs = int(norm.get("horizon_sessions"))
+            if hs != int(required_horizon_sessions):
+                errors.append(f"horizon_sessions must equal {required_horizon_sessions}")
+        except (TypeError, ValueError):
+            errors.append("missing or invalid required field 'horizon_sessions'")
+        try:
+            hd = int(norm.get("horizon_days"))
+            if hd != int(required_horizon_sessions):
+                errors.append(f"horizon_days must equal {required_horizon_sessions} trading sessions")
+        except (TypeError, ValueError):
+            pass
+    elif "horizon_sessions" in norm:
+        try:
+            norm["horizon_sessions"] = int(norm["horizon_sessions"])
+            if norm["horizon_sessions"] <= 0:
+                errors.append("horizon_sessions must be > 0")
+        except (TypeError, ValueError):
+            errors.append("horizon_sessions must be an integer")
 
     # --- List fields must be lists if present -------------------------
     for key in LIST_KEYS:

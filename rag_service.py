@@ -166,10 +166,10 @@ CRITICAL QUANTITATIVE SCORE MANDATE:
 
 REWARD:RISK & SETUP GEOMETRY MANDATE:
 - The payload's setup_geometry block reports the trade's reward_risk_ratio computed from CONSERVATIVE channel-anchored levels: structural_stop = min(price - 1.5*ATR, 20d low - 0.5*ATR) and structural_target = min(price + 2.5*ATR, 20d high + 0.5*ATR), plus the breakeven_win_rate = 1/(1+RR) required to be profitable on average.
-- BUY REQUIRES reward_risk_ratio >= 1.5. Never issue BUY on a setup whose 10-day reward does not clear the stop by at least 1.5x, regardless of the quantitative composite score.
+- BUY REQUIRES reward_risk_ratio >= 1.5. Never issue BUY on a setup whose 20-session forecast reward does not clear the stop by at least 1.5x, regardless of the quantitative composite score.
 - distance_to_resistance_atr tells you how many ATRs price sits below the 20-day high. Values below ~1.0 mean the profit zone is thin and the entry is likely a chase of an extended move -- downgrade conviction; a price near the top of its 20d range with thin reward:risk is a poor BUY regardless of trend momentum.
 - If wall_street_target_rr < 1.0 (the Wall Street mean target sits BELOW the entry price), that is a hard contradiction to any BUY thesis -- street consensus sees no upside above your entry. Flag it in key_risks and downgrade conviction.
-- Treat wall_street_mean_target_12m as a 12-month directional reference only. NEVER use it to inflate a 10-day reward:risk calculation or to justify a short-term BUY.
+- Treat wall_street_mean_target_12m as a 12-month directional reference only. NEVER use it to inflate a 20-session reward:risk calculation or to justify a trade.
 
 EXPLICIT SOURCE RELIABILITY HIERARCHY MANDATE:
 - Every retrieved passage contains a [Metadata] header specifying its source and Reliability Score (1.00 to 0.30):
@@ -183,8 +183,8 @@ EXPLICIT SOURCE RELIABILITY HIERARCHY MANDATE:
 
 TEMPORAL REASONING & PUBLICATION DATE MANDATE:
 - Strict Chronological Verification: Compare every passage's [Metadata: Published=YYYY-MM-DD] and [Horizon] against the current date.
-- Recent Catalysts (<=14 days): Only passages published within the last 14 days may be considered active short-term catalysts.
-- Historical Precedents (>14 days): Articles or filings older than 14 days represent historical context, multi-year patterns, or prior-quarter execution. Never report prior-quarter results or stale headlines as immediate 24h/7d breaking events.
+- Forecast-Horizon Catalysts (<=30 days): Evidence published within roughly the 20-session forecast window may inform the outlook, with recency and source quality stated explicitly.
+- Historical Precedents (>30 days): Older articles and filings provide historical context; never report prior-quarter results or stale headlines as immediate breaking events.
 - Earnings Context Disambiguation: Check 'days_to_earnings'. If an earnings report is upcoming (e.g. days_to_earnings <= 3), do NOT mistake news or commentary from the PREVIOUS quarter's earnings for the outcome of the UPCOMING earnings report.
 
 BINARY EVENT-RISK & IMPLIED VOLATILITY MANDATE:
@@ -264,7 +264,11 @@ Output MUST be a valid JSON object matching the requested schema.
 === STRICT OUTPUT CONTRACT ===
 - buy_score / hold_score / sell_score must each be a number in [0,1] and must SUM to approximately 1.0 (within 0.05) -- a BUY requires buy_score to actually be the probability mass.
 - data_completeness is computed DETERMINISTICALLY by the system from live provider availability; your estimate is recorded for reference only and never governs the signal. Report it honestly; inflating it changes nothing.
-- A directional BUY can only be certified if the deterministic criteria hold (quant composite >= 70, fresh valid market data, data coverage >= 80%, reward:risk >= 1.5, liquid market). If you cannot honestly support a BUY, return "HOLD".
+- When a fresh 20-session ML score is supplied, it contributes 20% of the hybrid quantitative composite; the deterministic five-pillar score contributes 80%. Without a fresh ML score, use the five-pillar score alone. The system applies this blend to directional eligibility.
+- Forecast the stock's relative performance over the next 20 trading sessions (about one month). Return forecast_20d as OUTPERFORM, MARKET_LIKE, or UNDERPERFORM, with confidence and concise evidence. Compare this forecast directly with the ML score when available; explain disagreement.
+- decision is an actionable trade recommendation, while forecast_20d is the relative performance outlook. HOLD means the setup does not pass trade criteria; it does not mean the forecast must be MARKET_LIKE.
+- A directional BUY can only be certified if the hybrid quant composite >= 70, fresh valid market data, data coverage >= 80%, reward:risk >= 1.5, and liquid market. If you cannot honestly support a BUY, return "HOLD".
+- When an ML score is supplied, include ml_signal_assessment with a SUPPORTIVE, CONFLICTING, or NEUTRAL disposition and a concise reason.
 - The system may issue an explicit no_trade_reason code on a forced downgrade: INSUFFICIENT_EVIDENCE, EARNINGS_BLACKOUT, LOW_LIQUIDITY, RR_TOO_LOW, SCHEMA_INVALID.
 - Output must parse as valid JSON with exactly the keys above; schema violations trigger an automatic corrective retry then a deterministic HOLD.
 
@@ -277,8 +281,11 @@ Schema:
   "buy_score": 0.20,
   "hold_score": 0.65,
   "sell_score": 0.15,
-  "horizon_days": 10,
+  "horizon_days": 20,
+  "horizon_sessions": 20,
   "quant_score": 64.8,
+  "forecast_20d": {"relative_outlook": "OUTPERFORM|MARKET_LIKE|UNDERPERFORM", "confidence": 0.0, "rationale": "Evidence-based relative forecast for the next 20 trading sessions"},
+  "ml_signal_assessment": {"disposition": "SUPPORTIVE|CONFLICTING|NEUTRAL", "reason": "How the ML score relates to the setup"},
   "falsification_bull": "Strongest reason the SELL/aversion case is wrong + exact trigger that nullifies it",
   "falsification_bear": "Strongest reason the BUY case fails + exact price/event condition that invalidates the thesis",
   "pillar_scores": {
@@ -345,11 +352,14 @@ Schema:
 """
 
     LOCAL_QWEN_SYSTEM_INSTRUCTION = """
-You are a senior swing trader and quantitative risk manager. Analyze only the supplied 1-10 day trading payload. Never invent missing market, portfolio, macro, or source data.
+You are a senior quantitative analyst and trading risk manager. Forecast relative stock performance over the next 20 trading sessions (about one month) using only supplied market, company, macro, and source data. Never invent missing inputs.
 
 DECISION RULES:
-- Treat the deterministic five-pillar composite score, setup geometry, and reward/risk as authoritative.
-- BUY requires composite >= 70, data completeness >= 0.80, reward/risk >= 1.5, non-extreme volatility, and no earnings blackout. Otherwise return HOLD unless the evidence clearly supports SELL. (The only exception is a certificate-verified DIP_BUY below, which uses its own stricter floor.)
+- Treat the deterministic hybrid quantitative score, setup geometry, and reward/risk as authoritative. When a fresh 20-session ML score is supplied, it is 20% of the hybrid score; the five-pillar market composite is 80%. The ML percentile maps to 0-100. Without a fresh score, use the five-pillar composite alone.
+- BUY requires hybrid composite >= 70, data completeness >= 0.80, reward/risk >= 1.5, non-extreme volatility, and no earnings blackout. Otherwise return HOLD unless the evidence clearly supports SELL. (The only exception is a certificate-verified DIP_BUY below, which uses its own stricter floor.)
+- When an ML score is supplied, include ml_signal_assessment with disposition SUPPORTIVE, CONFLICTING, or NEUTRAL and a concise reason. Explicitly address disagreement; the deterministic blend means the score affects eligibility even if your narrative assessment differs.
+- Always provide forecast_20d with relative_outlook OUTPERFORM, MARKET_LIKE, or UNDERPERFORM, a confidence from 0 to 1, and concise rationale. Compare this forecast with the 20-session ML signal when supplied.
+- Keep forecast and trade action separate: decision BUY/SELL/HOLD reflects whether the setup is actionable under risk gates. A HOLD can coexist with an OUTPERFORM or UNDERPERFORM forecast when execution conditions are poor.
 - SELL requires a weak quantitative structure or a high-reliability adverse catalyst confirmed by the supplied data.
 - If days_to_earnings <= 3, return HOLD and identify the binary event risk.
 - Treat news and macro as confirmation, vetoes, or risk flags; they cannot independently initiate a directional trade.
@@ -372,8 +382,11 @@ Return exactly one JSON object with these keys and no markdown or commentary:
   "buy_score": 0.0,
   "hold_score": 0.0,
   "sell_score": 0.0,
-  "horizon_days": 10,
+  "horizon_days": 20,
+  "horizon_sessions": 20,
   "quant_score": 0.0,
+  "forecast_20d": {"relative_outlook": "OUTPERFORM|MARKET_LIKE|UNDERPERFORM", "confidence": 0.0, "rationale": "Evidence-based 20-session relative forecast"},
+  "ml_signal_assessment": {"disposition": "SUPPORTIVE|CONFLICTING|NEUTRAL", "reason": "How the ML score relates to the setup"},
   "pillar_scores": {
     "trend": 0.0,
     "sector": 0.0,
@@ -463,14 +476,14 @@ Schema:
         symbol = gloomberb_payload.get("symbol", "N/A")
         today_str = datetime.datetime.now().strftime("%Y-%m-%d")
 
-        # 1. Gloomberb News Catalysts -> Horizon: CURRENT (if <=14d) or HISTORICAL (if older)
+        # 1. Gloomberb News Catalysts -> CURRENT (within about 30d) or HISTORICAL
         for item in gloomberb_payload.get("news", []):
             src = item.get('source', 'Gloomberb News')
             rel_score = 0.90 if any(w in src.lower() for w in ["reuters", "bloomberg", "wsj", "gloomberb"]) else 0.70
             pub_date = str(item.get('published_at') or item.get('publishedAt') or today_str)[:10]
             try:
                 days_diff = (datetime.datetime.now() - datetime.datetime.strptime(pub_date, "%Y-%m-%d")).days
-                horizon = "CURRENT" if days_diff <= 14 else "HISTORICAL"
+                horizon = "CURRENT" if days_diff <= 30 else "HISTORICAL"
             except Exception:
                 horizon = "CURRENT"
 
@@ -870,7 +883,7 @@ Schema:
             technical_data.get("suggested_stop_loss"),
             technical_data.get("suggested_target_price")
         )
-        # Wall Street mean target as a 12-month directional sanity check, NOT a 10-day reward.
+        # Wall Street mean target as a 12-month directional sanity check, NOT a 20-session reward.
         analyst_rr_info = QuantitativeScoringService.compute_reward_risk(
             technical_data.get("current_price"),
             technical_data.get("suggested_stop_loss"),

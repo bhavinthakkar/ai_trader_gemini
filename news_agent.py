@@ -362,13 +362,13 @@ Market Sentiment Indicators:
 Sector Sentiment & Relative Performance:
 {sector_sentiment}
 
-Summarize today's news, 13F holdings trends, analyst ratings/actions, recent SEC EDGAR filings, macroeconomic indicators, market sentiment, and sector sentiment, and estimate their combined short-term market impact for swing trading (1 to 10 trading days).
+Summarize today's news, 13F holdings trends, analyst ratings/actions, recent SEC EDGAR filings, macroeconomic indicators, market sentiment, and sector sentiment, and estimate their combined market impact over the next 20 trading sessions (about one month).
 Return a JSON object matching this schema:
 {{
   "news_summary": "1-2 sentence summary of today's key news, 13F filings, analyst rating, SEC filing, and macroeconomic/sentiment developments",
   "news_sentiment": "BULLISH|BEARISH|NEUTRAL",
   "estimated_impact": "HIGH|MEDIUM|LOW",
-  "catalyst_note": "Specific impact of this news, institutional movement, analyst actions, SEC filings, macro environment, and sentiment on short-term price momentum"
+  "catalyst_note": "Specific impact of this news, institutional movement, analyst actions, SEC filings, macro environment, and sentiment on the 20-session outlook"
 }}
 """
 

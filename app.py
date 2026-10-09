@@ -790,7 +790,7 @@ with tab4:
 
 with tab5:
     st.subheader("🎯 Model Ground-Truth Outcome Tracking & Evaluation")
-    st.caption("Tracks how predictions performed over forward 1-to-10 trading days.")
+    st.caption("Tracks new 20-session forecasts over forward 20 trading bars. Older signals retain their original recorded horizon.")
 
     from db import update_signal_outcomes, get_connection
 
@@ -825,7 +825,7 @@ with tab5:
         df_outcomes["is_profitable"] = df_outcomes["is_profitable"].apply(lambda x: "🟢 Win" if x else "🔴 Loss")
         st.dataframe(df_outcomes, width="stretch", hide_index=True)
     else:
-        st.info("No trade outcomes evaluated yet. Signals need at least 1-10 trading days elapsed to compare against historical market bars.")
+        st.info("No trade outcomes evaluated yet. New 20-session signals are evaluated after 20 forward trading bars; older signals use their recorded horizon.")
 
 with tab6:
     st.subheader("📁 Portfolio Risk Review (Investment-Committee Memo)")
