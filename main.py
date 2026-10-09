@@ -33,6 +33,7 @@ from catalyst_service import (
 )
 from signal_schema import validate_signal_json
 from ticker_resolver import resolve_symbol
+from ml_signal_service import format_ml_context, get_ml_context
 
 WATCHLIST = ["000660.KS"]
 
@@ -917,6 +918,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         "no_trade_reason": no_trade_reason,
         "deterministic_data_completeness": deterministic_completeness,
         "model_data_completeness": model_data_completeness,
+        "ml_12m_context": m_data.get("ml_12m_context") if isinstance(m_data, dict) else None,
         "raw_composite": deterministic_scores.get("raw_composite"),
         "vol_factor": vol_factor,
         "atr_pct": atr_pct,
@@ -1177,11 +1179,14 @@ def main():
 
     market = "EU" if args.eu else args.market.upper()
     force_eu = (market == "EU")
+    # DE is the CLI's EU preference default. Keep US tickers on their US listing
+    # unless the caller explicitly selects the EU market.
+    resolve_prefer_exchange = args.prefer_exchange if force_eu else "AUTO"
     raw_ticker = args.ticker_opt or args.ticker_arg
     if raw_ticker:
         raw_list = [t.strip().upper() for t in raw_ticker.split(",") if t.strip()]
         watchlist = [
-            resolve_symbol(t, prefer_exchange=args.prefer_exchange if force_eu else "AUTO", force_european=force_eu)["symbol"]
+            resolve_symbol(t, prefer_exchange=resolve_prefer_exchange, force_european=force_eu)["symbol"]
             for t in raw_list
         ]
     else:
@@ -1207,7 +1212,7 @@ def main():
             # 1. Technical Data Collection (RSI / EMA / ATR / Volume / RVOL / Channels)
             m_data = market_agent.analyze(
                 symbol,
-                prefer_exchange=args.prefer_exchange if force_eu else "AUTO",
+                prefer_exchange=resolve_prefer_exchange,
                 force_european=force_eu,
             )
             if not m_data:
@@ -1248,11 +1253,14 @@ def main():
                 institutional_data=institutional_payload,
                 prompt_profile=prompt_profile,
             )
+            ml_context = get_ml_context(symbol)
+            context["user_prompt"] += format_ml_context(ml_context)
 
             # Attach the deterministic 5-pillar scores to m_data so normalize can fall back to them
             # instead of defaults (and so gated_confidence uses real pillar agreement).
             if isinstance(m_data, dict):
                 m_data = dict(m_data)
+                m_data["ml_12m_context"] = ml_context
                 m_data["deterministic_5pillar_scores"] = QuantitativeScoringService().compute_5pillar_scores(
                     m_data, gloomberb_payload, gloomberb_payload.get("sector_benchmark", {})
                 )

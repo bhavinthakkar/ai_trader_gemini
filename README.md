@@ -90,6 +90,26 @@ $$\text{Raw Composite} = \frac{\sum_{i \in \text{avail}} w_i \times \text{Pillar
 
 If all pillars are unavailable, the composite evaluates to `None` and triggers an `INSUFFICIENT_EVIDENCE` no-trade state.
 
+### Long-Horizon ML Context
+
+The trader can include the point-in-time XGBoost ranking from the sibling
+`stock_ml` repository as separate context for US S&P 500 stocks. Refresh its data
+and score the current universe with:
+
+```bash
+cd ../stock_ml
+./.venv/bin/python score_current_universe.py
+```
+
+The analysis reads `../stock_ml/data/xgb_current_scores.csv` by default. Set
+`STOCK_ML_SCORES_PATH` to use another export. Scores older than seven days are
+ignored. The model estimates 252-session excess returns, while this trader makes
+1–10 day decisions, so the ML rank is retained as context and does not directly
+set or gate the trade decision. The LLM is asked to assess the short-term setup
+independently and explain material disagreement. US is the default market and
+keeps symbols on their US listings; use `--market EU` (or `--eu`) to resolve
+European listings and exchange preferences.
+
 ---
 
 ## 💎 2. Financial Quality, Solvency & Value-Trap Protection
