@@ -598,6 +598,21 @@ export default function App() {
                   </View>
                 </View>
 
+                {selectedStock.decision === 'HOLD' ? (
+                  <View style={styles.narrativeBox}>
+                    <Text style={styles.narrativeTitle}>Decision Source</Text>
+                    <Text style={styles.narrativeText}>
+                      {{
+                        MODEL: 'The model chose HOLD.',
+                        GATE: 'A deterministic risk gate blocked a directional signal.',
+                        PROBABILITY_REALIGNED: 'The model probabilities favored HOLD.',
+                        SCHEMA_INVALID: 'The model output was invalid; a safe HOLD was recorded.',
+                      }[selectedStock.decision_origin] || 'Not recorded for this signal.'}
+                      {selectedStock.no_trade_reason ? ` Reason: ${selectedStock.no_trade_reason}.` : ''}
+                    </Text>
+                  </View>
+                ) : null}
+
                 {/* Stock Identification Banner */}
                 <View style={styles.companyBanner}>
                   <View style={styles.companyBannerCol}>

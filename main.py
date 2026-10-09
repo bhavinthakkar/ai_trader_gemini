@@ -191,6 +191,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     else:
         decision = "HOLD"
     original_decision = decision
+    decision_origin = "MODEL"
 
     # Normalize model confidence -- kept as a reference; the authoritative `confidence`
     # is overwritten below by the deterministic gated_confidence() signal-quality formula.
@@ -867,6 +868,10 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
                 f"{hold_score}/sell {sell_score}) but model stated {decision}."
             )
             decision = top_choices[0]
+            decision_origin = "PROBABILITY_REALIGNED"
+
+    if gates_applied:
+        decision_origin = "GATE"
 
     # A gate/realignment that lands on HOLD must not carry the conviction of a directional call.
     if decision == "HOLD":
@@ -900,6 +905,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     return {
         "stock": _ensure_str(stock),
         "decision": decision,
+        "decision_origin": decision_origin,
         "confidence": confidence,
         "model_confidence": model_confidence,
         "buy_score": buy_score,
@@ -1349,6 +1355,7 @@ def main():
                         )
                         normalized_obj["no_trade_reason"] = "SCHEMA_INVALID"
                         normalized_obj["decision"] = "HOLD"
+                        normalized_obj["decision_origin"] = "SCHEMA_INVALID"
 
                     all_results.append(normalized_obj)
                     if schema_failed:

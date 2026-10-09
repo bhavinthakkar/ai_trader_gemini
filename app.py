@@ -441,6 +441,15 @@ with tab2:
                 badge_class = "badge-buy" if dec == "BUY" else ("badge-sell" if dec == "SELL" else "badge-hold")
                 st.markdown(f"### **{stock_data['symbol']}**")
                 st.markdown(f"**Decision:** <span class='{badge_class}'>{dec}</span>", unsafe_allow_html=True)
+                if dec == "HOLD":
+                    origin = stock_data.get("decision_origin")
+                    origin_labels = {
+                        "MODEL": "Model chose HOLD",
+                        "GATE": "Directional signal blocked by a risk gate",
+                        "PROBABILITY_REALIGNED": "Probabilities favored HOLD",
+                        "SCHEMA_INVALID": "Invalid model output; safe HOLD recorded",
+                    }
+                    st.caption(f"Decision source: {origin_labels.get(origin, 'Not recorded')}")
                 ntr = stock_data.get("no_trade_reason")
                 if ntr:
                     st.markdown(f"**No-Trade Reason:** `{ntr}`")

@@ -78,6 +78,7 @@ def init_db(db_path=DB_PATH):
             "model_quant_score": "REAL",
             "model_pillar_scores": "TEXT",
             "no_trade_reason": "TEXT",
+            "decision_origin": "TEXT",
             "model_data_completeness": "REAL",
             "deterministic_data_completeness": "REAL",
             "implied_volatility": "REAL",
@@ -235,6 +236,9 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
             no_trade_reason = item.get("no_trade_reason")
             if no_trade_reason:
                 no_trade_reason = str(no_trade_reason).upper()
+            decision_origin = item.get("decision_origin")
+            if decision_origin:
+                decision_origin = str(decision_origin).upper()
             model_data_completeness = _to_float(item.get("model_data_completeness"))
             deterministic_data_completeness = _to_float(item.get("deterministic_data_completeness"))
 
@@ -289,13 +293,13 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                     structural_stop_price, structural_target_price,
                     vol_factor, atr_pct, primary_driver, falsification_bull, falsification_bear,
                     model_confidence, model_quant_score, model_pillar_scores,
-                    no_trade_reason, model_data_completeness, deterministic_data_completeness,
+                    no_trade_reason, decision_origin, model_data_completeness, deterministic_data_completeness,
                     implied_volatility, expected_move, expected_move_pct, stop_distance, stop_distance_pct,
                     expected_move_stop_ratio, volatility_regime, days_to_next_event, next_event_type, next_event_date,
                     sell_type, short_reward_risk_ratio, structural_short_stop_price, structural_short_target_price,
                     short_stop_distance, short_stop_distance_pct, short_expected_move_stop_ratio,
                     pillar_status, pillar_input_tracking, financial_quality_score, is_value_trap, value_trap_reasons
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 timestamp, stock, decision, confidence, reason, inst_data, macro_data, news,
                 bank_coverage, risk_info, pe_peg, model_used, raw_json,
@@ -308,7 +312,7 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                 structural_stop_price, structural_target_price,
                 vol_factor, atr_pct, primary_driver, falsification_bull, falsification_bear,
                 model_confidence, model_quant_score, model_pillar_scores,
-                no_trade_reason, model_data_completeness, deterministic_data_completeness,
+                no_trade_reason, decision_origin, model_data_completeness, deterministic_data_completeness,
                 implied_volatility, expected_move, expected_move_pct, stop_distance, stop_distance_pct,
                 expected_move_stop_ratio, volatility_regime, days_to_next_event, next_event_type, next_event_date,
                 sell_type, short_reward_risk_ratio, structural_short_stop_price, structural_short_target_price,
@@ -411,6 +415,12 @@ def get_summary_stats(db_path=DB_PATH, max_age_days: int | None = 7) -> dict:
     buy_count = sum(1 for s in latest if s["decision"] == "BUY")
     sell_count = sum(1 for s in latest if s["decision"] == "SELL")
     hold_count = sum(1 for s in latest if s["decision"] == "HOLD")
+    hold_origin_counts = {}
+    for signal in latest:
+        if signal["decision"] != "HOLD":
+            continue
+        origin = signal.get("decision_origin") or "NOT_RECORDED"
+        hold_origin_counts[origin] = hold_origin_counts.get(origin, 0) + 1
 
     last_run = None
     with get_connection(db_path) as conn:
@@ -425,6 +435,7 @@ def get_summary_stats(db_path=DB_PATH, max_age_days: int | None = 7) -> dict:
         "buy_count": buy_count,
         "sell_count": sell_count,
         "hold_count": hold_count,
+        "hold_origin_counts": hold_origin_counts,
         "last_run": last_run or "N/A"
     }
 

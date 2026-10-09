@@ -151,7 +151,7 @@ def fetch_latest_signals(
 def fetch_summary_metrics(
     days: Optional[int] = Query(default=7, ge=1, le=365, description="Recency window in days for metrics calculation")
 ):
-    """Returns summary counts (Tracked Stocks, Buy, Sell, Hold counts, Model Win Rate, Last Run)."""
+    """Returns decision counts, HOLD origins, performance, and last run."""
     stats = get_summary_stats(max_age_days=days)
     outcome_stats = get_outcome_performance_stats()
 
