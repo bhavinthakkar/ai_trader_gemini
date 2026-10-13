@@ -103,6 +103,176 @@ function getStockName(itemOrSymbol) {
   return STOCK_NAMES[sym] || STOCK_NAMES[cleanSym] || sym;
 }
 
+/**
+ * Extracts and formats Standalone Point-in-Time ML Alpha indicators from a signal item or ML payload.
+ */
+function getMLInfo(item, supplementalML = null) {
+  if (!item && !supplementalML) {
+    return {
+      available: false,
+      score: null,
+      scoreFormatted: 'N/A',
+      label: 'Unavailable',
+      badge: '⚪ N/A',
+      tier: 'Unranked',
+      stance: 'NEUTRAL',
+      color: '#475569',
+      bgColor: '#1E293B',
+      textColor: '#94A3B8',
+    };
+  }
+
+  // Parse raw_json if present
+  let rawData = {};
+  if (item && typeof item === 'object') {
+    if (typeof item.raw_json === 'string') {
+      try { rawData = JSON.parse(item.raw_json); } catch (e) {}
+    } else if (typeof item.raw_json === 'object' && item.raw_json !== null) {
+      rawData = item.raw_json;
+    }
+  }
+
+  const mlSig = rawData.ml_signal || rawData.ml_pipeline_context || supplementalML?.data || supplementalML || null;
+  const mlAssessment = rawData.ml_signal_assessment || null;
+  const forecast20d = rawData.forecast_20d || null;
+
+  // Derive score (0-100)
+  let score = null;
+  if (mlSig && mlSig.score_0_100 != null) {
+    score = Number(mlSig.score_0_100);
+  } else if (item && item.ml_score != null) {
+    score = Number(item.ml_score);
+  } else if (rawData.ml_score_0_100 != null) {
+    score = Number(rawData.ml_score_0_100);
+  } else if (supplementalML && supplementalML.score_0_100 != null) {
+    score = Number(supplementalML.score_0_100);
+  }
+
+  if (score == null || isNaN(score)) {
+    return {
+      available: false,
+      score: null,
+      scoreFormatted: 'N/A',
+      rank: null,
+      universeSize: null,
+      predictedReturn: null,
+      predictedReturnFormatted: 'N/A',
+      label: 'Non-S&P 500',
+      badge: '⚪ Non-S&P 500',
+      tier: 'Outside S&P 500 Universe',
+      stance: 'NEUTRAL',
+      color: '#475569',
+      bgColor: '#151D2A',
+      textColor: '#94A3B8',
+      explanation: 'Constituent outside the S&P 500 coverage universe or pending ML score.',
+    };
+  }
+
+  // Score tiers
+  let label = 'MARKET PERFORM';
+  let badge = '⚪ MARKET PERFORM';
+  let tier = 'Quintile 3 (40-60% Alpha)';
+  let stance = 'NEUTRAL';
+  let color = '#94A3B8';
+  let bgColor = '#1E293B';
+  let textColor = '#F1F5F9';
+
+  if (score >= 80) {
+    label = 'STRONG OUTPERFORM';
+    badge = '🟢 STRONG OUTPERFORM';
+    tier = 'Top Quintile (Top 20% Alpha)';
+    stance = 'BULLISH';
+    color = '#10B981';
+    bgColor = '#064E3B';
+    textColor = '#34D399';
+  } else if (score >= 60) {
+    label = 'OUTPERFORM';
+    badge = '🟢 OUTPERFORM';
+    tier = 'Quintile 2 (60-80% Alpha)';
+    stance = 'BULLISH';
+    color = '#059669';
+    bgColor = '#065F46';
+    textColor = '#6EE7B7';
+  } else if (score >= 40) {
+    label = 'MARKET PERFORM';
+    badge = '⚪ MARKET PERFORM';
+    tier = 'Quintile 3 (40-60% Alpha)';
+    stance = 'NEUTRAL';
+    color = '#64748B';
+    bgColor = '#1E293B';
+    textColor = '#CBD5E1';
+  } else if (score >= 20) {
+    label = 'UNDERPERFORM';
+    badge = '🔴 UNDERPERFORM';
+    tier = 'Quintile 4 (20-40% Alpha)';
+    stance = 'BEARISH';
+    color = '#F59E0B';
+    bgColor = '#451A03';
+    textColor = '#FCD34D';
+  } else {
+    label = 'STRONG UNDERPERFORM';
+    badge = '🔴 STRONG UNDERPERFORM';
+    tier = 'Bottom Quintile (Bottom 20% Alpha)';
+    stance = 'BEARISH';
+    color = '#EF4444';
+    bgColor = '#7F1D1D';
+    textColor = '#FCA5A5';
+  }
+
+  // Rank and universe
+  const rank = mlSig?.rank ?? item?.ml_rank ?? null;
+  const universeSize = mlSig?.universe_size ?? item?.ml_universe_size ?? 483;
+
+  // Predicted 20d return
+  let predictedReturn = mlSig?.predicted_20d_excess_return ?? item?.ml_predicted_return ?? null;
+  let predictedReturnFormatted = 'N/A';
+  if (predictedReturn != null && !isNaN(Number(predictedReturn))) {
+    const pct = Number(predictedReturn) * 100;
+    predictedReturnFormatted = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+  }
+
+  // Submodel ranks
+  const rankFundamentals = mlSig?.rank_fundamentals ?? null;
+  const rankTechnicals = mlSig?.rank_technical ?? null;
+  const inTop10 = Boolean(mlSig?.in_top_10_portfolio || mlSig?.is_top10_pick);
+  const scoreDate = mlSig?.score_date || null;
+  const modelName = mlSig?.model_name || 'XGBoost 20d PIT Alpha';
+
+  // LLM vs ML disposition
+  const disposition = mlAssessment?.disposition || item?.ml_disposition || 'NEUTRAL';
+  const dispositionReason = mlAssessment?.reason || null;
+  const forecastOutlook = forecast20d?.relative_outlook || null;
+  const forecastConfidence = forecast20d?.confidence != null ? Math.round(Number(forecast20d.confidence) * 100) : null;
+  const forecastRationale = forecast20d?.rationale || null;
+
+  return {
+    available: true,
+    score: Math.round(score * 10) / 10,
+    scoreFormatted: `${(Math.round(score * 10) / 10).toFixed(1)}/100`,
+    rank,
+    universeSize,
+    predictedReturn,
+    predictedReturnFormatted,
+    label: mlSig?.signal || item?.ml_signal_label || label,
+    badge: mlSig?.badge || badge,
+    tier: mlSig?.tier || tier,
+    stance: mlSig?.stance || stance,
+    color,
+    bgColor,
+    textColor,
+    inTop10,
+    rankFundamentals,
+    rankTechnicals,
+    scoreDate,
+    modelName,
+    disposition,
+    dispositionReason,
+    forecastOutlook,
+    forecastConfidence,
+    forecastRationale,
+  };
+}
+
 export default function App() {
   const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
   const [activeTab, setActiveTab] = useState('signals'); // 'signals' | 'deepdive' | 'movers' | 'history' | 'settings'
@@ -119,6 +289,8 @@ export default function App() {
 
   // Deep-Dive State
   const [selectedStock, setSelectedStock] = useState(null);
+  const [selectedStockML, setSelectedStockML] = useState(null);
+  const [loadingML, setLoadingML] = useState(false);
   const [inspectQuery, setInspectQuery] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState('');
@@ -214,6 +386,41 @@ export default function App() {
       loadHistoryData();
     }
   }, [activeTab, loadMoversData, loadHistoryData]);
+
+  // Live ML context sync for Deep-Dive inspection
+  useEffect(() => {
+    if (!selectedStock) {
+      setSelectedStockML(null);
+      return;
+    }
+    const sym = (selectedStock.symbol || selectedStock.stock || '').trim().toUpperCase().split('.')[0];
+    if (!sym) return;
+
+    let isMounted = true;
+    setLoadingML(true);
+    fetch(`${apiUrl}/api/ml/context/${sym}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (isMounted) {
+          if (data && data.available && data.data) {
+            setSelectedStockML(data.data);
+          } else {
+            setSelectedStockML(null);
+          }
+          setLoadingML(false);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setSelectedStockML(null);
+          setLoadingML(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedStock, apiUrl]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -429,6 +636,7 @@ export default function App() {
                 const isSell = item.decision === 'SELL';
                 const badgeColor = isBuy ? '#059669' : isSell ? '#DC2626' : '#4B5563';
                 const textColor = isBuy ? '#34D399' : isSell ? '#F87171' : '#D1D5DB';
+                const mlInfo = getMLInfo(item);
 
                 return (
                   <TouchableOpacity
@@ -451,6 +659,38 @@ export default function App() {
                       </View>
                     </View>
 
+                    {/* ML Pipeline Standalone Indicator Banner */}
+                    <View
+                      style={[
+                        styles.signalMLBanner,
+                        {
+                          backgroundColor: mlInfo.available ? mlInfo.bgColor : '#0E131F',
+                          borderColor: mlInfo.available ? mlInfo.color : '#212C3D',
+                        },
+                      ]}
+                    >
+                      <View style={styles.signalMLBannerLeft}>
+                        <Text style={styles.signalMLTitle}>🤖 ML Alpha</Text>
+                        <View style={[styles.mlBadgePill, { borderColor: mlInfo.color }]}>
+                          <Text style={[styles.mlBadgePillText, { color: mlInfo.textColor }]}>
+                            {mlInfo.available ? mlInfo.label : 'Non-S&P 500'}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.signalMLBannerRight}>
+                        {mlInfo.available ? (
+                          <Text style={styles.signalMLMetaText}>
+                            {mlInfo.rank ? `#${mlInfo.rank}/${mlInfo.universeSize} • ` : ''}
+                            <Text style={{ color: (mlInfo.predictedReturn ?? 0) >= 0 ? '#34D399' : '#F87171', fontWeight: '700' }}>
+                              {mlInfo.predictedReturnFormatted}
+                            </Text>
+                          </Text>
+                        ) : (
+                          <Text style={styles.signalMLMetaTextMuted}>Composite Quant Only</Text>
+                        )}
+                      </View>
+                    </View>
+
                     <View style={styles.signalStatsRow}>
                       <View style={styles.statCol}>
                         <Text style={styles.statLabel}>Confidence</Text>
@@ -461,6 +701,12 @@ export default function App() {
                       <View style={styles.statCol}>
                         <Text style={styles.statLabel}>Quant Score</Text>
                         <Text style={styles.statVal}>{item.quant_score ? `${item.quant_score}/100` : 'N/A'}</Text>
+                      </View>
+                      <View style={styles.statCol}>
+                        <Text style={styles.statLabel}>ML Score</Text>
+                        <Text style={[styles.statVal, mlInfo.available && { color: mlInfo.color }]}>
+                          {mlInfo.available ? `${Math.round(mlInfo.score)}/100` : 'N/A'}
+                        </Text>
                       </View>
                       <View style={styles.statCol}>
                         <Text style={styles.statLabel}>Entry Price</Text>
@@ -628,6 +874,171 @@ export default function App() {
                     <Text style={styles.companyBannerDate}>🕒 {selectedStock.timestamp || 'Latest'}</Text>
                   </View>
                 </View>
+
+                {/* Standalone ML Alpha Pipeline Card */}
+                {(() => {
+                  const mlInfo = getMLInfo(selectedStock, selectedStockML);
+                  return (
+                    <View style={styles.mlCard}>
+                      <View style={styles.mlCardHeader}>
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                          <Text style={styles.mlCardTitle}>🤖 Standalone ML Alpha Indicator</Text>
+                          <Text style={styles.mlCardSubtitle}>Point-in-Time XGBoost 20-Session Alpha Model</Text>
+                        </View>
+                        <View style={[styles.mlBadgePill, { backgroundColor: mlInfo.bgColor, borderColor: mlInfo.color }]}>
+                          <Text style={[styles.mlBadgePillText, { color: mlInfo.textColor }]}>
+                            {mlInfo.badge}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {mlInfo.available ? (
+                        <>
+                          {/* S&P 500 Top-10 Model Basket Callout */}
+                          {mlInfo.inTop10 && (
+                            <View style={styles.mlTop10Banner}>
+                              <Text style={styles.mlTop10Text}>🏆 S&P 500 Top-10 Model Portfolio High-Conviction Basket</Text>
+                            </View>
+                          )}
+
+                          {/* Primary Score Display & Stance */}
+                          <View style={styles.mlScoreDisplayRow}>
+                            <View>
+                              <Text style={styles.mlScoreLarge}>{mlInfo.scoreFormatted}</Text>
+                              <Text style={styles.mlScorePercentileText}>
+                                Percentile: {mlInfo.score}% {mlInfo.rank ? `• Rank #${mlInfo.rank} of ${mlInfo.universeSize}` : ''}
+                              </Text>
+                            </View>
+                            <View style={styles.mlStanceTag}>
+                              <Text style={styles.mlTierText}>{mlInfo.tier}</Text>
+                              <Text style={[styles.mlStanceBadge, { color: mlInfo.color }]}>
+                                Stance: {mlInfo.stance}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {/* Visual Quintile Meter Bar */}
+                          <View style={styles.mlScoreBarTrack}>
+                            <View
+                              style={[
+                                styles.mlScoreBarFill,
+                                {
+                                  width: `${Math.min(100, Math.max(0, mlInfo.score))}%`,
+                                  backgroundColor: mlInfo.color,
+                                },
+                              ]}
+                            />
+                          </View>
+                          <View style={styles.mlScoreBarLegend}>
+                            <Text style={styles.mlLegendText}>0% Underperform</Text>
+                            <Text style={styles.mlLegendText}>50% Neutral</Text>
+                            <Text style={styles.mlLegendText}>100% Outperform</Text>
+                          </View>
+
+                          {/* 4-Stat Metric Grid */}
+                          <View style={styles.mlMetricsGrid}>
+                            <View style={styles.mlMetricCol}>
+                              <Text style={styles.mlMetricLabel}>20d Predicted Alpha</Text>
+                              <Text style={[styles.mlMetricVal, { color: (mlInfo.predictedReturn ?? 0) >= 0 ? '#34D399' : '#F87171' }]}>
+                                {mlInfo.predictedReturnFormatted}
+                              </Text>
+                              <Text style={styles.mlMetricSub}>Excess vs S&P 500</Text>
+                            </View>
+                            <View style={styles.mlMetricCol}>
+                              <Text style={styles.mlMetricLabel}>S&P 500 Rank</Text>
+                              <Text style={styles.mlMetricVal}>
+                                {mlInfo.rank ? `#${mlInfo.rank}` : 'N/A'}
+                              </Text>
+                              <Text style={styles.mlMetricSub}>of {mlInfo.universeSize} universe</Text>
+                            </View>
+                            <View style={styles.mlMetricCol}>
+                              <Text style={styles.mlMetricLabel}>Technicals Rank</Text>
+                              <Text style={styles.mlMetricVal}>
+                                {mlInfo.rankTechnicals ? `#${mlInfo.rankTechnicals}` : 'N/A'}
+                              </Text>
+                              <Text style={styles.mlMetricSub}>1m momentum/trend</Text>
+                            </View>
+                            <View style={styles.mlMetricCol}>
+                              <Text style={styles.mlMetricLabel}>Fundamentals Rank</Text>
+                              <Text style={styles.mlMetricVal}>
+                                {mlInfo.rankFundamentals ? `#${mlInfo.rankFundamentals}` : 'N/A'}
+                              </Text>
+                              <Text style={styles.mlMetricSub}>1m PIT fundamentals</Text>
+                            </View>
+                          </View>
+
+                          {/* LLM Consensus vs ML Model Disposition Callout */}
+                          {(mlInfo.dispositionReason || mlInfo.disposition) && (
+                            <View style={styles.mlAssessmentBox}>
+                              <View style={styles.mlAssessmentHeader}>
+                                <Text style={styles.mlAssessmentTitle}>🤖 6-Agent Consensus vs. ML Disposition</Text>
+                                <View
+                                  style={[
+                                    styles.mlDispositionPill,
+                                    {
+                                      backgroundColor:
+                                        mlInfo.disposition === 'AGREE'
+                                          ? '#064E3B'
+                                          : mlInfo.disposition === 'DISAGREE'
+                                          ? '#7F1D1D'
+                                          : '#1E293B',
+                                      borderColor:
+                                        mlInfo.disposition === 'AGREE'
+                                          ? '#10B981'
+                                          : mlInfo.disposition === 'DISAGREE'
+                                          ? '#EF4444'
+                                          : '#64748B',
+                                    },
+                                  ]}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.mlDispositionText,
+                                      {
+                                        color:
+                                          mlInfo.disposition === 'AGREE'
+                                            ? '#34D399'
+                                            : mlInfo.disposition === 'DISAGREE'
+                                            ? '#FCA5A5'
+                                            : '#CBD5E1',
+                                      },
+                                    ]}
+                                  >
+                                    {mlInfo.disposition}
+                                  </Text>
+                                </View>
+                              </View>
+                              {mlInfo.dispositionReason ? (
+                                <Text style={styles.mlAssessmentReason}>{mlInfo.dispositionReason}</Text>
+                              ) : null}
+                              {mlInfo.forecastOutlook && (
+                                <Text style={styles.mlForecastText}>
+                                  • 20-Day Outlook: <Text style={{ color: '#60A5FA', fontWeight: '700' }}>{mlInfo.forecastOutlook}</Text>
+                                  {mlInfo.forecastConfidence ? ` (${mlInfo.forecastConfidence}% conf)` : ''}
+                                  {mlInfo.forecastRationale ? ` — ${mlInfo.forecastRationale}` : ''}
+                                </Text>
+                              )}
+                            </View>
+                          )}
+
+                          {/* Model Transparency Info */}
+                          <View style={styles.mlMetaRow}>
+                            <Text style={styles.mlMetaText}>
+                              Model: {mlInfo.modelName} • As-Of: {mlInfo.scoreDate || 'Fresh'} • Horizon: 20 Trading Days
+                            </Text>
+                          </View>
+                        </>
+                      ) : (
+                        <View style={styles.mlUnavailableBox}>
+                          <Text style={styles.mlUnavailableTitle}>⚪ Outside S&P 500 Universe</Text>
+                          <Text style={styles.mlUnavailableText}>
+                            {selectedStock.symbol || selectedStock.stock} is outside the S&P 500 large-cap universe. The point-in-time XGBoost ML model evaluates the US S&P 500 universe (483 constituents). The 6-agent system utilizes the deterministic 5-pillar quantitative model for this setup.
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })()}
 
                 {/* 5-Pillar Score Cards */}
                 <Text style={styles.subHeading}>🧮 5-Pillar Quantitative Scores</Text>
@@ -835,6 +1246,20 @@ export default function App() {
                     </View>
                     <Text style={styles.historyDec}>{rec.decision}</Text>
                   </View>
+                  {(() => {
+                    const hml = getMLInfo(rec);
+                    return (
+                      <View style={styles.historyMLRow}>
+                        <Text style={styles.historyMLLabel}>🤖 ML Alpha:</Text>
+                        <Text style={[styles.historyMLVal, { color: hml.color }]}>
+                          {hml.available ? `${hml.scoreFormatted} (${hml.label})` : 'Non-S&P 500'}
+                        </Text>
+                        {hml.available && hml.rank ? (
+                          <Text style={styles.historyMLRank}>• Rank #{hml.rank}/{hml.universeSize}</Text>
+                        ) : null}
+                      </View>
+                    );
+                  })()}
                   <Text style={styles.historyReason} numberOfLines={2}>{rec.reason}</Text>
                   <Text style={styles.cardTimestamp}>🕒 Analyzed: {rec.timestamp}</Text>
                 </View>
@@ -1176,6 +1601,51 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  // ML Banner in Signal Cards
+  signalMLBanner: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  signalMLBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  signalMLTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#94A3B8',
+  },
+  mlBadgePill: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  mlBadgePillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  signalMLBannerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  signalMLMetaText: {
+    fontSize: 11,
+    color: '#94A3B8',
+    fontWeight: '600',
+  },
+  signalMLMetaTextMuted: {
+    fontSize: 10,
+    color: '#64748B',
+  },
   signalStatsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1397,6 +1867,190 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#64748B',
   },
+  // Dedicated ML Card in Deep Dive
+  mlCard: {
+    backgroundColor: '#0E131F',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#1E293B',
+    padding: 12,
+    marginBottom: 12,
+  },
+  mlCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+  },
+  mlCardTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#F8FAFC',
+  },
+  mlCardSubtitle: {
+    fontSize: 10,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  mlTop10Banner: {
+    backgroundColor: '#064E3B',
+    borderWidth: 1,
+    borderColor: '#059669',
+    borderRadius: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    marginBottom: 10,
+    alignItems: 'center',
+  },
+  mlTop10Text: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#6EE7B7',
+  },
+  mlScoreDisplayRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    marginBottom: 8,
+  },
+  mlScoreLarge: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: '#F8FAFC',
+  },
+  mlScorePercentileText: {
+    fontSize: 11,
+    color: '#94A3B8',
+    marginTop: 2,
+  },
+  mlStanceTag: {
+    alignItems: 'flex-end',
+  },
+  mlTierText: {
+    fontSize: 11,
+    color: '#CBD5E1',
+    fontWeight: '600',
+  },
+  mlStanceBadge: {
+    fontSize: 11,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  mlScoreBarTrack: {
+    height: 8,
+    backgroundColor: '#1E293B',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  mlScoreBarFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  mlScoreBarLegend: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  mlLegendText: {
+    fontSize: 9,
+    color: '#64748B',
+  },
+  mlMetricsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 10,
+  },
+  mlMetricCol: {
+    flex: 1,
+    minWidth: '45%',
+    backgroundColor: '#151B26',
+    borderRadius: 6,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#212C3D',
+  },
+  mlMetricLabel: {
+    fontSize: 10,
+    color: '#64748B',
+  },
+  mlMetricVal: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#F1F5F9',
+    marginTop: 2,
+  },
+  mlMetricSub: {
+    fontSize: 9,
+    color: '#94A3B8',
+    marginTop: 2,
+  },
+  mlAssessmentBox: {
+    backgroundColor: '#151B26',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#212C3D',
+    padding: 10,
+    marginBottom: 10,
+  },
+  mlAssessmentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  mlAssessmentTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#E2E8F0',
+    flex: 1,
+  },
+  mlDispositionPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  mlDispositionText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  mlAssessmentReason: {
+    fontSize: 11,
+    color: '#94A3B8',
+    lineHeight: 16,
+    marginBottom: 4,
+  },
+  mlForecastText: {
+    fontSize: 11,
+    color: '#CBD5E1',
+    lineHeight: 16,
+    marginTop: 4,
+  },
+  mlMetaRow: {
+    borderTopWidth: 1,
+    borderTopColor: '#1F2937',
+    paddingTop: 6,
+  },
+  mlMetaText: {
+    fontSize: 10,
+    color: '#64748B',
+  },
+  mlUnavailableBox: {
+    paddingVertical: 8,
+  },
+  mlUnavailableTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#94A3B8',
+    marginBottom: 4,
+  },
+  mlUnavailableText: {
+    fontSize: 11,
+    color: '#64748B',
+    lineHeight: 16,
+  },
   subHeading: {
     fontSize: 13,
     fontWeight: '700',
@@ -1581,6 +2235,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#64748B',
     marginVertical: 4,
+  },
+  historyMLRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginVertical: 4,
+  },
+  historyMLLabel: {
+    fontSize: 11,
+    color: '#64748B',
+  },
+  historyMLVal: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  historyMLRank: {
+    fontSize: 10,
+    color: '#64748B',
   },
   settingsCard: {
     backgroundColor: '#151B26',

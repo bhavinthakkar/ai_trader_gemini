@@ -105,6 +105,33 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(job_resp.status_code, 200)
         self.assertEqual(job_resp.json()["model"], "ling")
 
+    def test_ml_context_available(self):
+        resp = self.client.get("/api/ml/context/ON")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["available"])
+        self.assertEqual(data["symbol"], "ON")
+        self.assertIsNotNone(data["data"])
+        self.assertGreater(data["data"]["score_0_100"], 80.0)
+        self.assertEqual(data["data"]["signal"], "STRONG OUTPERFORM")
+
+    def test_ml_context_unavailable(self):
+        resp = self.client.get("/api/ml/context/CRUS")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertFalse(data["available"])
+        self.assertEqual(data["symbol"], "CRUS")
+        self.assertIsNone(data["data"])
+
+    def test_ml_leaderboard(self):
+        resp = self.client.get("/api/ml/leaderboard?limit=5")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertGreater(data["count"], 0)
+        self.assertGreater(data["universe_size"], 0)
+        self.assertLessEqual(len(data["top_picks"]), 5)
+        self.assertLessEqual(len(data["bottom_picks"]), 5)
+
 
 if __name__ == "__main__":
     unittest.main()

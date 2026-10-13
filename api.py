@@ -38,6 +38,7 @@ from db import (
 )
 from dashboard import collect_dashboard_data
 from ticker_resolver import resolve_symbol, get_currency_for_symbol
+from ml_signal_service import get_ml_context, get_all_ml_scores
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -325,6 +326,50 @@ def get_job_status(job_id: str):
     if job_id not in RUNNING_JOBS:
         raise HTTPException(status_code=404, detail="Job ID not found")
     return RUNNING_JOBS[job_id]
+
+
+# ==========================================
+# Standalone Machine Learning Alpha Pipeline
+# ==========================================
+
+@app.get("/api/ml/context/{symbol}", tags=["Machine Learning"])
+def fetch_ml_context(symbol: str):
+    """Returns standalone point-in-time ML pipeline alpha prediction for a given symbol."""
+    clean_sym = symbol.strip().upper().split(".")[0]
+    ctx = get_ml_context(clean_sym)
+    if not ctx:
+        return {
+            "available": False,
+            "symbol": clean_sym,
+            "message": f"No fresh ML point-in-time score available for '{clean_sym}' (Stock may not be an S&P 500 component).",
+            "data": None,
+        }
+    return {
+        "available": True,
+        "symbol": clean_sym,
+        "data": ctx,
+    }
+
+
+@app.get("/api/ml/leaderboard", tags=["Machine Learning"])
+def fetch_ml_leaderboard(
+    limit: int = Query(default=10, ge=1, le=50, description="Number of top and bottom picks")
+):
+    """Returns top and bottom S&P 500 ML model picks from the standalone XGBoost pipeline."""
+    scores = get_all_ml_scores()
+    if not scores:
+        return {
+            "count": 0,
+            "universe_size": 0,
+            "top_picks": [],
+            "bottom_picks": [],
+        }
+    return {
+        "count": len(scores),
+        "universe_size": len(scores),
+        "top_picks": scores[:limit],
+        "bottom_picks": scores[-limit:],
+    }
 
 
 # ==========================================
