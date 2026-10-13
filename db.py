@@ -103,7 +103,13 @@ def init_db(db_path=DB_PATH):
             "financial_quality_score": "REAL",
             "is_value_trap": "INTEGER",
             "value_trap_reasons": "TEXT",
-            "company_name": "TEXT"
+            "company_name": "TEXT",
+            "ml_score": "REAL",
+            "ml_predicted_return": "REAL",
+            "ml_rank": "INTEGER",
+            "ml_universe_size": "INTEGER",
+            "ml_signal_label": "TEXT",
+            "ml_disposition": "TEXT"
         }
 
         cursor.execute("PRAGMA table_info(signals);")
@@ -270,6 +276,21 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
             is_value_trap = 1 if item.get("is_value_trap") else 0
             value_trap_reasons = _ensure_str(item.get("value_trap_reasons", []))
 
+            # Standalone ML pipeline fields
+            ml_ctx = item.get("ml_signal") or {}
+            ml_score = _to_float(item.get("ml_score_0_100") or ml_ctx.get("score_0_100"))
+            ml_predicted_return = _to_float(ml_ctx.get("predicted_20d_excess_return"))
+            ml_rank = int(ml_ctx.get("rank")) if ml_ctx.get("rank") is not None else None
+            ml_universe_size = int(ml_ctx.get("universe_size")) if ml_ctx.get("universe_size") is not None else None
+            ml_signal_label = _ensure_str(ml_ctx.get("signal") or (item.get("ml_signal_label") if item.get("ml_signal_label") else ""), "")
+            if not ml_signal_label and ml_score is not None:
+                try:
+                    from ml_signal_service import classify_ml_signal
+                    ml_signal_label = classify_ml_signal(ml_score)["signal"]
+                except Exception:
+                    pass
+            ml_disposition = _ensure_str(item.get("ml_signal_assessment", {}).get("disposition") if isinstance(item.get("ml_signal_assessment"), dict) else "", "")
+
             # Backward-compatible text summaries
             reason = _ensure_str(item.get("reason") or bull_case)
             inst_data = _ensure_str(item.get("institutional_data", ""))
@@ -298,8 +319,9 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                     expected_move_stop_ratio, volatility_regime, days_to_next_event, next_event_type, next_event_date,
                     sell_type, short_reward_risk_ratio, structural_short_stop_price, structural_short_target_price,
                     short_stop_distance, short_stop_distance_pct, short_expected_move_stop_ratio,
-                    pillar_status, pillar_input_tracking, financial_quality_score, is_value_trap, value_trap_reasons
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    pillar_status, pillar_input_tracking, financial_quality_score, is_value_trap, value_trap_reasons,
+                    ml_score, ml_predicted_return, ml_rank, ml_universe_size, ml_signal_label, ml_disposition
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 timestamp, stock, decision, confidence, reason, inst_data, macro_data, news,
                 bank_coverage, risk_info, pe_peg, model_used, raw_json,
@@ -317,7 +339,8 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                 expected_move_stop_ratio, volatility_regime, days_to_next_event, next_event_type, next_event_date,
                 sell_type, short_reward_risk_ratio, structural_short_stop_price, structural_short_target_price,
                 short_stop_distance, short_stop_distance_pct, short_expected_move_stop_ratio,
-                pillar_status, pillar_input_tracking, financial_quality_score, is_value_trap, value_trap_reasons
+                pillar_status, pillar_input_tracking, financial_quality_score, is_value_trap, value_trap_reasons,
+                ml_score, ml_predicted_return, ml_rank, ml_universe_size, ml_signal_label, ml_disposition
             ))
         conn.commit()
     print(f"[DB] Successfully saved {len(results)} analysis records to database.")
@@ -360,16 +383,60 @@ def get_latest_signals(db_path=DB_PATH, max_age_days: int | None = 7, order_by: 
                 {order_clause};
             """)
         rows = cursor.fetchall()
-        signals = [dict(r) for r in rows]
+        return [_enrich_signal_dict(dict(r)) for r in rows]
+
+
+def _enrich_signal_dict(s: dict) -> dict:
+    """Enriches a signal dict with company name and point-in-time ML indicator fields."""
+    if not s:
+        return s
+    sym = s.get("symbol", "")
+    if not s.get("company_name"):
         try:
             from ticker_resolver import resolve_symbol
-            for s in signals:
-                if not s.get("company_name"):
-                    info = resolve_symbol(s.get("symbol", ""))
-                    s["company_name"] = info.get("company_name") or s.get("symbol")
+            info = resolve_symbol(sym)
+            s["company_name"] = info.get("company_name") or sym
         except Exception:
             pass
-        return signals
+    # Enrich ML indicator if missing
+    ml_score = s.get("ml_score")
+    if ml_score is None:
+        raw_j = s.get("raw_json")
+        if raw_j:
+            try:
+                parsed_payload = json.loads(raw_j) if isinstance(raw_j, str) else raw_j
+                ml_sig = parsed_payload.get("ml_signal")
+                if isinstance(ml_sig, dict):
+                    s["ml_score"] = _to_float(ml_sig.get("score_0_100"))
+                    s["ml_predicted_return"] = _to_float(ml_sig.get("predicted_20d_excess_return"))
+                    s["ml_rank"] = ml_sig.get("rank")
+                    s["ml_universe_size"] = ml_sig.get("universe_size")
+                    s["ml_signal_label"] = ml_sig.get("signal")
+                if parsed_payload.get("ml_signal_assessment"):
+                    s["ml_disposition"] = parsed_payload.get("ml_signal_assessment", {}).get("disposition")
+            except Exception:
+                pass
+        if s.get("ml_score") is None:
+            try:
+                from ml_signal_service import get_ml_context
+                ctx = get_ml_context(sym)
+                if ctx:
+                    s["ml_score"] = ctx.get("score_0_100")
+                    s["ml_predicted_return"] = ctx.get("predicted_20d_excess_return")
+                    s["ml_rank"] = ctx.get("rank")
+                    s["ml_universe_size"] = ctx.get("universe_size")
+                    s["ml_signal_label"] = ctx.get("signal")
+            except Exception:
+                pass
+    if s.get("ml_score") is not None and not s.get("ml_signal_label"):
+        try:
+            from ml_signal_service import classify_ml_signal
+            cls = classify_ml_signal(s["ml_score"])
+            s["ml_signal_label"] = cls["signal"]
+            s["ml_badge"] = cls["badge"]
+        except Exception:
+            pass
+    return s
 
 
 def get_signal_history(symbol: str = None, limit: int = 100, db_path=DB_PATH) -> list:
@@ -393,16 +460,7 @@ def get_signal_history(symbol: str = None, limit: int = 100, db_path=DB_PATH) ->
                 LIMIT ?;
             """, (limit,))
         rows = cursor.fetchall()
-        records = [dict(r) for r in rows]
-        try:
-            from ticker_resolver import resolve_symbol
-            for r in records:
-                if not r.get("company_name"):
-                    info = resolve_symbol(r.get("symbol", ""))
-                    r["company_name"] = info.get("company_name") or r.get("symbol")
-        except Exception:
-            pass
-        return records
+        return [_enrich_signal_dict(dict(r)) for r in rows]
 
 
 def get_summary_stats(db_path=DB_PATH, max_age_days: int | None = 7) -> dict:

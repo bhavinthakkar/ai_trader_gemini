@@ -114,7 +114,7 @@ class TestSellCriteriaSymmetry(unittest.TestCase):
         )
         self.assertEqual(out["decision"], "HOLD")
         self.assertEqual(out["no_trade_reason"], "RR_TOO_LOW")
-        self.assertTrue(any("short reward:risk ratio" in r and "< 1.5" in r for r in out["key_risks"]))
+        self.assertTrue(any("short reward:risk ratio" in r and "< 1.2" in r for r in out["key_risks"]))
 
     def test_short_vetoed_during_earnings_blackout(self):
         """A short is vetoed when earnings report is within 3 days due to infinite upside gap risk."""
@@ -179,7 +179,7 @@ class TestSellCriteriaSymmetry(unittest.TestCase):
         m_data = dict(self.base_m_data)
         gloomberb = {
             "options": {
-                "implied_volatility_pct": 75.0,  # Extreme crisis IV
+                "implied_volatility_pct": 140.0,  # Extreme crisis IV
             }
         }
 

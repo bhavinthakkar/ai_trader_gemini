@@ -267,7 +267,7 @@ Output MUST be a valid JSON object matching the requested schema.
 - When a fresh 20-session ML score is supplied, it contributes 20% of the hybrid quantitative composite; the deterministic five-pillar score contributes 80%. Without a fresh ML score, use the five-pillar score alone. The system applies this blend to directional eligibility.
 - Forecast the stock's relative performance over the next 20 trading sessions (about one month). Return forecast_20d as OUTPERFORM, MARKET_LIKE, or UNDERPERFORM, with confidence and concise evidence. Compare this forecast directly with the ML score when available; explain disagreement.
 - decision is an actionable trade recommendation, while forecast_20d is the relative performance outlook. HOLD means the setup does not pass trade criteria; it does not mean the forecast must be MARKET_LIKE.
-- A directional BUY can only be certified if the hybrid quant composite >= 70, fresh valid market data, data coverage >= 80%, reward:risk >= 1.5, and liquid market. If you cannot honestly support a BUY, return "HOLD".
+- A directional BUY can only be certified if the hybrid quant composite >= 70, fresh valid market data, data coverage >= 80%, reward:risk >= 1.2, and liquid market. If you cannot honestly support a BUY, return "HOLD".
 - When an ML score is supplied, include ml_signal_assessment with a SUPPORTIVE, CONFLICTING, or NEUTRAL disposition and a concise reason.
 - The system may issue an explicit no_trade_reason code on a forced downgrade: INSUFFICIENT_EVIDENCE, EARNINGS_BLACKOUT, LOW_LIQUIDITY, RR_TOO_LOW, SCHEMA_INVALID.
 - Output must parse as valid JSON with exactly the keys above; schema violations trigger an automatic corrective retry then a deterministic HOLD.

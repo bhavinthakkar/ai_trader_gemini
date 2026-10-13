@@ -132,16 +132,16 @@ class QuantitativeExpectedMoveTests(unittest.TestCase):
 class VolatilityRegimeEvaluationTests(unittest.TestCase):
     def test_extreme_iv_ceiling(self):
         res = QuantitativeScoringService.evaluate_volatility_regime(
-            atr=2.0, price=100.0, implied_volatility=72.0
+            atr=2.0, price=100.0, implied_volatility=135.0
         )
         self.assertEqual(res["vol_regime"], "EXTREME")
         self.assertTrue(res["is_extreme"])
         self.assertTrue(any("crisis ceiling" in r for r in res["reasons"]))
 
     def test_extreme_iv_hv_spread(self):
-        # IV = 50%, HV = 20% -> ratio = 2.5x (>2.0x is extreme tail-risk expansion)
+        # IV = 70%, HV = 20% -> ratio = 3.5x (>3.0x is extreme tail-risk expansion)
         res = QuantitativeScoringService.evaluate_volatility_regime(
-            atr=2.0, price=100.0, implied_volatility=50.0, historical_volatility=20.0
+            atr=2.0, price=100.0, implied_volatility=70.0, historical_volatility=20.0
         )
         self.assertEqual(res["vol_regime"], "EXTREME")
         self.assertTrue(res["is_extreme"])
@@ -210,11 +210,11 @@ class MainBuyGateEnforcementTests(unittest.TestCase):
         self.assertTrue(any("EX_DIVIDEND" in r for r in out["key_risks"]))
 
     def test_buy_gated_when_extreme_iv_volatility_regime(self):
-        # Extreme IV = 75%
+        # Extreme IV = 140%
         gloomberb = {
             "options": {
-                "implied_volatility": "75.0%",
-                "implied_volatility_pct": 75.0,
+                "implied_volatility": "140.0%",
+                "implied_volatility_pct": 140.0,
             }
         }
         out = run(gloomberb_payload=gloomberb)

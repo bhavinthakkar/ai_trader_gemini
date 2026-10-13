@@ -15,6 +15,7 @@ from db import (
 )
 from dashboard import collect_dashboard_data, format_volume
 from ticker_resolver import resolve_symbol, is_european_symbol, get_currency_for_symbol
+from ml_signal_service import classify_ml_signal, get_ml_context, get_all_ml_scores
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -60,6 +61,48 @@ st.markdown("""
         background-color: #27272a;
         color: #a1a1aa;
         border: 1px solid #3f3f46;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 0.85rem;
+        display: inline-block;
+    }
+
+    /* Standalone ML Alpha Badges */
+    .badge-ml-bull {
+        background-color: #052e16;
+        color: #4ade80;
+        border: 1px solid #166534;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 0.85rem;
+        display: inline-block;
+    }
+    .badge-ml-neutral {
+        background-color: #1e293b;
+        color: #94a3b8;
+        border: 1px solid #334155;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 0.85rem;
+        display: inline-block;
+    }
+    .badge-ml-bear {
+        background-color: #450a0a;
+        color: #f87171;
+        border: 1px solid #991b1b;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 0.85rem;
+        display: inline-block;
+    }
+    .badge-ml-top10 {
+        background-color: #422006;
+        color: #fde047;
+        border: 1px solid #ca8a04;
         padding: 4px 12px;
         border-radius: 20px;
         font-weight: 600;
@@ -286,9 +329,10 @@ with col6:
 st.markdown("---")
 
 # Main Content Tabs
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📊 Latest Signals",
     "🔍 Stock Deep-Dive",
+    "🤖 ML Alpha Pipeline",
     "🔥 Most Traded Stocks",
     "📜 Signal History Log",
     "🎯 Model Outcome Tracking",
@@ -312,7 +356,7 @@ with tab1:
         st.info("No signal data found in database. Run `python main.py` in your terminal to populate analysis reports!")
     else:
         # Filters
-        filter_col1, filter_col2 = st.columns([2, 2])
+        filter_col1, filter_col2, filter_col3 = st.columns([1.5, 1.5, 1.5])
         with filter_col1:
             decision_filter = st.multiselect(
                 "Filter by Decision:",
@@ -320,20 +364,74 @@ with tab1:
                 default=["BUY", "SELL", "HOLD"]
             )
         with filter_col2:
+            ml_filter = st.selectbox(
+                "Filter by Pure ML Stance:",
+                options=["All Stances", "Bullish (Outperform >= 60)", "Neutral (40-60)", "Bearish (Underperform < 40)"],
+                index=0
+            )
+        with filter_col3:
             search_symbol = st.text_input("Search Symbol:", "").strip().upper()
+
+        def _matches_ml_filter(s, flt):
+            if flt == "All Stances":
+                return True
+            sc = s.get("ml_score")
+            if sc is None:
+                return False
+            if flt == "Bullish (Outperform >= 60)":
+                return sc >= 60.0
+            if flt == "Neutral (40-60)":
+                return 40.0 <= sc < 60.0
+            if flt == "Bearish (Underperform < 40)":
+                return sc < 40.0
+            return True
 
         filtered_signals = [
             s for s in latest_signals
-            if s["decision"] in decision_filter and (not search_symbol or search_symbol in s["symbol"])
+            if s["decision"] in decision_filter
+            and _matches_ml_filter(s, ml_filter)
+            and (not search_symbol or search_symbol in s["symbol"] or search_symbol in s.get("company_name", "").upper())
         ]
 
         if filtered_signals:
             df_display = pd.DataFrame(filtered_signals)
 
-            cols_to_use = ["symbol", "decision", "confidence"]
+            def format_ml_signal_display(row):
+                score = row.get("ml_score")
+                ret = row.get("ml_predicted_return")
+                if score is None or pd.isna(score):
+                    return "—"
+                ret_str = f" ({ret * 100:+.1f}%)" if ret is not None and not pd.isna(ret) else ""
+                if score >= 80:
+                    return f"🟢 Strong Outperform{ret_str}"
+                elif score >= 60:
+                    return f"🟢 Outperform{ret_str}"
+                elif score >= 40:
+                    return f"⚪ Neutral{ret_str}"
+                elif score >= 20:
+                    return f"🔴 Underperform{ret_str}"
+                else:
+                    return f"🔴 Strong Underperform{ret_str}"
+
+            def format_ml_score_display(row):
+                score = row.get("ml_score")
+                rank = row.get("ml_rank")
+                usize = row.get("ml_universe_size") or 483
+                if score is None or pd.isna(score):
+                    return "—"
+                if rank is not None and not pd.isna(rank):
+                    return f"{score:.1f} (#{int(rank)}/{int(usize)})"
+                return f"{score:.1f}/100"
+
+            df_display["ml_indicator_col"] = df_display.apply(format_ml_signal_display, axis=1)
+            df_display["ml_score_col"] = df_display.apply(format_ml_score_display, axis=1)
+
+            cols_to_use = ["symbol", "decision", "ml_indicator_col", "ml_score_col", "confidence"]
             col_renames = {
                 "symbol": "Ticker",
                 "decision": "Decision",
+                "ml_indicator_col": "🤖 ML Signal",
+                "ml_score_col": "🤖 ML Score (Rank)",
                 "confidence": "Confidence"
             }
 
@@ -435,7 +533,7 @@ with tab2:
         stock_data = next((s for s in latest_signals if s["symbol"] == selected_stock), None) if latest_signals else None
 
         if stock_data:
-            c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
+            c1, c2, c3, c4, c5 = st.columns([1.2, 1, 1, 1.2, 1])
             with c1:
                 dec = stock_data["decision"]
                 badge_class = "badge-buy" if dec == "BUY" else ("badge-sell" if dec == "SELL" else "badge-hold")
@@ -459,10 +557,94 @@ with tab2:
                 st.progress(min(max(float(conf or 0.0), 0.0), 1.0))
             with c3:
                 q_score = stock_data.get("quant_score")
-                st.metric("Deterministic Quant Score", f"{q_score}/100" if q_score is not None else "N/A")
+                st.metric("Deterministic Quant", f"{q_score}/100" if q_score is not None else "N/A")
             with c4:
+                ml_sc = stock_data.get("ml_score")
+                ml_pred = stock_data.get("ml_predicted_return")
+                ml_rk = stock_data.get("ml_rank")
+                ml_usize = stock_data.get("ml_universe_size") or 483
+                if ml_sc is not None:
+                    delta_str = f"{ml_pred * 100:+.1f}% 20d" if ml_pred is not None else None
+                    st.metric(
+                        "🤖 Standalone ML Score",
+                        f"{ml_sc:.1f}/100",
+                        delta=delta_str,
+                        help=f"Rank #{ml_rk} of {ml_usize} in S&P 500"
+                    )
+                else:
+                    st.metric("🤖 Standalone ML Score", "N/A", help="Non-S&P 500 or unranked")
+            with c5:
                 entry_p = stock_data.get("entry_price")
                 st.metric("Entry Price", f"{curr_sym}{entry_p:.2f}" if entry_p else "N/A")
+
+            # =====================================================================
+            # 🤖 Standalone ML Pipeline Indicator (Point-in-Time XGBoost Model)
+            # =====================================================================
+            st.markdown("#### 🤖 Standalone ML Pipeline Alpha Indicator (XGBoost 20-Session Model)")
+            ml_ctx = None
+            if stock_data:
+                raw_j = stock_data.get("raw_json")
+                if raw_j:
+                    try:
+                        parsed_pj = json.loads(raw_j) if isinstance(raw_j, str) else raw_j
+                        ml_ctx = parsed_pj.get("ml_signal")
+                    except Exception:
+                        pass
+            if not ml_ctx:
+                ml_ctx = get_ml_context(selected_stock)
+
+            if ml_ctx:
+                score_val = float(ml_ctx.get("score_0_100", 0.0))
+                cls = classify_ml_signal(score_val)
+                ml_badge = ml_ctx.get("badge") or cls["badge"]
+                ml_tier = ml_ctx.get("tier") or cls["tier"]
+                ml_pred_pct = ml_ctx.get("predicted_20d_excess_return", 0.0) * 100.0
+                in_top10 = ml_ctx.get("in_top_10_portfolio", False)
+
+                if in_top10:
+                    st.success(f"⭐ **TOP 10 HIGH-CONVICTION ML BASKET** — `{selected_stock}` ranks #{ml_ctx.get('rank')} in the model's highest-conviction long portfolio for the next 20 sessions.")
+
+                ml_k1, ml_k2, ml_k3, ml_k4, ml_k5 = st.columns(5)
+                ml_k1.metric("Pure ML Stance", ml_ctx.get("signal") or cls["signal"])
+                ml_k2.metric("ML Alpha Score", f"{score_val:.1f}/100")
+                ml_k3.metric("S&P 500 Rank", f"#{ml_ctx.get('rank')} of {ml_ctx.get('universe_size', 483)}")
+                ml_k4.metric("Pred 20d Excess Return", f"{ml_pred_pct:+.2f}%")
+                ml_k5.metric("Alpha Tier", ml_tier.split(" (")[0])
+
+                # Visual Score Gauge Bar
+                st.progress(min(max(score_val / 100.0, 0.0), 1.0))
+                st.caption("Score Scale: 0–20 Strong Underperform | 20–40 Underperform | 40–60 Neutral | 60–80 Outperform | 80–100 Strong Outperform")
+
+                # Sub-model ranking and metadata
+                sub_cols = st.columns(4)
+                fund_rk = ml_ctx.get("rank_fundamentals")
+                tech_rk = ml_ctx.get("rank_technical")
+                sub_cols[0].caption(f"**Fundamentals Sub-Model:** `#{fund_rk}`" if fund_rk else "**Fundamentals Sub-Model:** Unranked")
+                sub_cols[1].caption(f"**Technical Sub-Model:** `#{tech_rk}`" if tech_rk else "**Technical Sub-Model:** Unranked")
+                sub_cols[2].caption(f"**Model:** `{ml_ctx.get('model_name', 'xgb_pit_core_rank_1m')}`")
+                sub_cols[3].caption(f"**Score Date:** `{ml_ctx.get('score_date')}` ({ml_ctx.get('age_days', 0)}d old)")
+
+                # Multi-Agent vs ML Disposition
+                raw_assessment = {}
+                if stock_data and stock_data.get("raw_json"):
+                    try:
+                        raw_assessment = json.loads(stock_data["raw_json"]).get("ml_signal_assessment", {})
+                    except Exception:
+                        pass
+                if not raw_assessment and stock_data and isinstance(stock_data.get("ml_signal_assessment"), dict):
+                    raw_assessment = stock_data["ml_signal_assessment"]
+
+                if raw_assessment:
+                    disp = raw_assessment.get("disposition", "NEUTRAL")
+                    reason = raw_assessment.get("reason", "")
+                    if disp == "CONFLICTING":
+                        st.warning(f"⚠️ **ML Signal vs Multi-Agent Setup (CONFLICTING):** {reason}")
+                    elif disp == "SUPPORTIVE":
+                        st.success(f"✅ **ML Signal vs Multi-Agent Setup (SUPPORTIVE):** {reason}")
+                    else:
+                        st.info(f"ℹ️ **ML Signal vs Multi-Agent Setup (NEUTRAL):** {reason}")
+            else:
+                st.info(f"ℹ️ No point-in-time S&P 500 ML model score available for `{selected_stock}`. The ML alpha pipeline currently evaluates the US S&P 500 universe (~483 components).")
 
             # 5-Pillar Quantitative Scores Display with Visible Missingness
             if any(stock_data.get(k) is not None for k in ["trend_score", "sector_score", "alpha_score", "val_history_score", "peer_val_score"]):
@@ -606,6 +788,110 @@ with tab2:
                 st.json(stock_data.get("raw_json") or json.dumps(stock_data))
 
 with tab3:
+    st.subheader("🤖 Point-in-Time 20-Session ML Alpha Pipeline (XGBoost)")
+    st.caption("Standalone point-in-time machine learning pipeline trained to predict 20-session forward excess return vs the S&P 500 benchmark. Operates purely on market data and point-in-time fundamentals without qualitative LLM reasoning or trade risk gates.")
+
+    all_ml = get_all_ml_scores()
+    if not all_ml:
+        st.info("No active ML scores found in `stock_ml/data/xgb_current_scores_1m.csv`.")
+    else:
+        top_10 = [x for x in all_ml if x.get("in_top_10_portfolio") or x["rank"] <= 10][:10]
+        bottom_10 = all_ml[-10:]
+
+        # Pipeline KPI Overview
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("ML Universe Size", f"{len(all_ml)} Stocks")
+        k2.metric("Top Model Alpha Pick", f"{all_ml[0]['ticker']} (#{all_ml[0]['rank']})", delta=f"{all_ml[0]['predicted_20d_excess_return']*100:+.1f}% 20d")
+        k3.metric("Bottom Model Pick", f"{all_ml[-1]['ticker']} (#{all_ml[-1]['rank']})", delta=f"{all_ml[-1]['predicted_20d_excess_return']*100:+.1f}% 20d")
+        k4.metric("Forecast Horizon", f"{all_ml[0].get('age_days', 0)}d old | 20 Sessions")
+
+        st.markdown("---")
+
+        # Top 10 Long Conviction Portfolio
+        st.markdown("#### 🏆 S&P 500 Top-10 High-Conviction ML Long Basket")
+        st.caption("The 10 highest-ranked S&P 500 stocks selected by the Point-in-Time XGBoost alpha model.")
+        top_rows = []
+        for s in top_10:
+            top_rows.append({
+                "Rank": f"#{s['rank']}",
+                "Ticker": s["ticker"],
+                "Sector": s["sector"],
+                "ML Score": f"{s['score_0_100']:.1f}/100",
+                "Predicted 20d Return": f"{s['predicted_20d_excess_return']*100:+.2f}%",
+                "Pure ML Stance": s["badge"],
+                "Fundamental Rank": f"#{s['rank_fundamentals']}" if s.get("rank_fundamentals") else "—",
+                "Technical Rank": f"#{s['rank_technical']}" if s.get("rank_technical") else "—",
+            })
+        st.dataframe(pd.DataFrame(top_rows), width="stretch", hide_index=True)
+
+        st.markdown("---")
+
+        # Bottom 10 Short Basket
+        st.markdown("#### 🔻 Bottom-10 ML Underperform Basket (Short Candidates)")
+        st.caption("The 10 lowest-ranked stocks predicted to underperform the S&P 500 benchmark over the next 20 sessions.")
+        bot_rows = []
+        for s in bottom_10:
+            bot_rows.append({
+                "Rank": f"#{s['rank']}",
+                "Ticker": s["ticker"],
+                "Sector": s["sector"],
+                "ML Score": f"{s['score_0_100']:.1f}/100",
+                "Predicted 20d Return": f"{s['predicted_20d_excess_return']*100:+.2f}%",
+                "Pure ML Stance": s["badge"],
+                "Fundamental Rank": f"#{s['rank_fundamentals']}" if s.get("rank_fundamentals") else "—",
+                "Technical Rank": f"#{s['rank_technical']}" if s.get("rank_technical") else "—",
+            })
+        st.dataframe(pd.DataFrame(bot_rows), width="stretch", hide_index=True)
+
+        st.markdown("---")
+
+        # Full Interactive ML Universe Screener
+        st.markdown("#### 🔎 S&P 500 ML Universe Screener")
+        ml_s_col1, ml_s_col2, ml_s_col3 = st.columns([1.5, 1.5, 1.5])
+        with ml_s_col1:
+            all_sectors = sorted(list({x["sector"] for x in all_ml if x.get("sector")}))
+            sec_filter = st.selectbox("Filter by Sector:", options=["All Sectors"] + all_sectors, key="ml_sec_flt")
+        with ml_s_col2:
+            tier_filter = st.selectbox(
+                "Filter by Quintile:",
+                options=["All Quintiles", "Strong Outperform (80-100)", "Outperform (60-80)", "Neutral (40-60)", "Underperform (20-40)", "Strong Underperform (0-20)"],
+                key="ml_tier_flt"
+            )
+        with ml_s_col3:
+            search_ml_sym = st.text_input("Search Ticker:", "", key="ml_screener_search").strip().upper()
+
+        filtered_ml = all_ml
+        if sec_filter != "All Sectors":
+            filtered_ml = [x for x in filtered_ml if x.get("sector") == sec_filter]
+        if tier_filter == "Strong Outperform (80-100)":
+            filtered_ml = [x for x in filtered_ml if x["score_0_100"] >= 80.0]
+        elif tier_filter == "Outperform (60-80)":
+            filtered_ml = [x for x in filtered_ml if 60.0 <= x["score_0_100"] < 80.0]
+        elif tier_filter == "Neutral (40-60)":
+            filtered_ml = [x for x in filtered_ml if 40.0 <= x["score_0_100"] < 60.0]
+        elif tier_filter == "Underperform (20-40)":
+            filtered_ml = [x for x in filtered_ml if 20.0 <= x["score_0_100"] < 40.0]
+        elif tier_filter == "Strong Underperform (0-20)":
+            filtered_ml = [x for x in filtered_ml if x["score_0_100"] < 20.0]
+        if search_ml_sym:
+            filtered_ml = [x for x in filtered_ml if search_ml_sym in x["ticker"]]
+
+        screener_rows = []
+        for s in filtered_ml:
+            screener_rows.append({
+                "Rank": f"#{s['rank']}",
+                "Ticker": s["ticker"],
+                "Sector": s["sector"],
+                "ML Score": f"{s['score_0_100']:.1f}/100",
+                "Predicted 20d Excess Return": f"{s['predicted_20d_excess_return']*100:+.2f}%",
+                "Pure ML Stance": s["badge"],
+                "Top 10 Basket": "⭐ YES" if s.get("in_top_10_portfolio") else "—",
+                "Fundamental Rank": f"#{s['rank_fundamentals']}" if s.get("rank_fundamentals") else "—",
+                "Technical Rank": f"#{s['rank_technical']}" if s.get("rank_technical") else "—",
+            })
+        st.dataframe(pd.DataFrame(screener_rows), width="stretch", hide_index=True)
+
+with tab4:
     st.subheader("🔥 Most Traded Stocks Today (Price, Range, Volume & Catalysts)")
     st.caption("Real-time high-volume market movers and the news catalysts driving heavy trading activity (model-free).")
 
@@ -725,11 +1011,14 @@ with tab3:
             curr_sym = s.get("currency_symbol", "€" if is_eu else "$")
             chg = s.get("change_pct", 0.0)
             sign = "+" if chg >= 0 else ""
+            ml_ctx = get_ml_context(s["symbol"])
+            ml_disp = f"{ml_ctx['score_0_100']:.1f} (#{ml_ctx['rank']})" if ml_ctx else "—"
             table_rows.append({
                 "Ticker": s["symbol"],
                 "Company": s["name"],
                 "Price": f"{curr_sym}{s['price']:.2f}",
                 "Change": f"{sign}{chg:.2f}% ({sign}{curr_sym}{abs(s['change']):.2f})",
+                "🤖 ML Score": ml_disp,
                 "Day Low": f"{curr_sym}{s['day_low']:.2f}",
                 "Day High": f"{curr_sym}{s['day_high']:.2f}",
                 "Volume": format_volume(s["volume"]),
@@ -748,12 +1037,17 @@ with tab3:
             curr_sym = s.get("currency_symbol", "€" if is_eu else "$")
             chg_sign = "+" if s.get("change_pct", 0.0) >= 0 else ""
             badge = "🟢" if s.get("change_pct", 0.0) >= 0 else "🔴"
+            ml_ctx = get_ml_context(s["symbol"])
             with st.expander(f"{badge} **{s['symbol']}** ({s['name']}) — {curr_sym}{s['price']:.2f} ({chg_sign}{s['change_pct']:.2f}%) | Vol: {format_volume(s['volume'])} ({s['rvol']:.1f}x 20d avg)"):
-                m_c1, m_c2, m_c3, m_c4 = st.columns(4)
+                m_c1, m_c2, m_c3, m_c4, m_c5 = st.columns(5)
                 m_c1.metric("Day Low / High", f"{curr_sym}{s['day_low']:.2f} - {curr_sym}{s['day_high']:.2f}")
                 m_c2.metric("Market Cap", s["market_cap_str"])
                 m_c3.metric("RVOL (20d avg)", f"{s['rvol']:.1f}x")
                 m_c4.metric("RSI14 / ATR", f"{s.get('rsi14', 'N/A')} / {curr_sym}{s.get('atr', 'N/A')}")
+                if ml_ctx:
+                    m_c5.metric("🤖 Pure ML Score", f"{ml_ctx['score_0_100']:.1f}/100", delta=f"{ml_ctx['predicted_20d_excess_return']*100:+.1f}% 20d")
+                else:
+                    m_c5.metric("🤖 Pure ML Score", "N/A")
 
                 st.markdown(f"**⚡ Catalyst Tag:** `{s['catalyst_type']}`")
                 st.info(f"**Reason for High Volume:** {s['reason_summary']}")
@@ -768,7 +1062,7 @@ with tab3:
 
 
 
-with tab4:
+with tab5:
     st.subheader("Historical Signal Analysis Log")
     history_records = get_signal_history(limit=200)
 
@@ -788,7 +1082,7 @@ with tab4:
         })
         st.dataframe(df_hist, width="stretch", hide_index=True)
 
-with tab5:
+with tab6:
     st.subheader("🎯 Model Ground-Truth Outcome Tracking & Evaluation")
     st.caption("Tracks new 20-session forecasts over forward 20 trading bars. Older signals retain their original recorded horizon.")
 
@@ -827,7 +1121,7 @@ with tab5:
     else:
         st.info("No trade outcomes evaluated yet. New 20-session signals are evaluated after 20 forward trading bars; older signals use their recorded horizon.")
 
-with tab6:
+with tab7:
     st.subheader("📁 Portfolio Risk Review (Investment-Committee Memo)")
     st.caption("Stored portfolio risk memos generated via `python main.py portfolio <model>`.")
 

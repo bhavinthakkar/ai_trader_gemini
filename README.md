@@ -145,7 +145,7 @@ Market risk is governed by explicit structural boundaries rather than news headl
 
 * **Option-Implied Expected Move**: Computed via nearest ATM straddle ($0.85 \times (\text{Call} + \text{Put})$) or Black-Scholes formula ($S \times \sigma \times \sqrt{\text{DTE}/365}$).
 * **Expected Move vs. Stop Distance Comparison**: Setup risk check (`stop_inside_expected_move`). When the expected move exceeds the stop loss distance, the trade stop sits inside normal 1-SD options market noise, creating a high probability of a noise stop-out and triggering an automatic downgrade.
-* **Multi-Source Volatility Regimes**: Analyzes ATR% of price, Implied Volatility (IV), Historical Volatility (HV), and the IV/HV spread to classify regimes into `CALM`, `NORMAL`, `ELEVATED`, or `EXTREME` (IV $> 65\%$ or IV/HV $> 2.0\text{x}$ vetoes directional trades).
+* **Multi-Source Volatility Regimes**: Analyzes ATR% of price, Implied Volatility (IV), Historical Volatility (HV), and the IV/HV spread to classify regimes into `CALM`, `NORMAL`, `ELEVATED`, or `EXTREME` (IV $> 130\%$ or IV/HV $> 3.0\text{x}$ vetoes directional trades).
 * **Scheduled Company Event Blackouts**: Tracks binary event risks beyond earnings, including ex-dividend dates ($\le 2$ days blocks fresh shorts due to dividend liabilities and recall risk) and corporate conferences/splits ($\le 2$ days blocks fresh directional entries).
 
 ---
@@ -154,7 +154,7 @@ Market risk is governed by explicit structural boundaries rather than news headl
 
 Decision criteria are fully symmetric across long and short operations, with a 20-trading-session forecast horizon. The relative forecast and actionable trade decision are separate: a model can forecast outperformance while returning HOLD when execution risks fail the trade gates.
 
-* **Symmetric Eligibility Checks**: Both BUY and SHORT must clear deterministic composite bars ($\ge 70$ for BUY, $\le 35$ for SHORT), data coverage ($\ge 80\%$), channel-anchored reward:risk ($\ge 1.5$), tradeable liquidity ($\ge 0.5\text{x}$ RVOL, $\ge \$1\text{M}$ 20d volume), and volatility regime safety.
+* **Symmetric Eligibility Checks**: Both BUY and SHORT must clear deterministic composite bars ($\ge 60$ for BUY, $\le 35$ for SHORT), data coverage ($\ge 80\%$), channel-anchored reward:risk ($\ge 1.2$), tradeable liquidity ($\ge 0.5\text{x}$ RVOL, $\ge \$1\text{M}$ 20d volume), and volatility regime safety.
 * **Long Holding Exit (`LONG_EXIT`)**:
   - Evaluated when an existing holding is flagged for exit or trimming.
   - Allowed when stop loss is breached, swing target is reached, fundamental thesis breaks (composite $< 50$ or trend $< 40$), extension catalyst triggers, or pre-event de-risking occurs.

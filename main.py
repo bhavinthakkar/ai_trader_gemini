@@ -36,6 +36,8 @@ from ticker_resolver import resolve_symbol
 from ml_signal_service import format_ml_context, get_ml_context
 
 WATCHLIST = ["000660.KS"]
+MIN_REWARD_RISK_RATIO = float(os.getenv("MIN_REWARD_RISK_RATIO", "1.2"))
+BUY_COMPOSITE_FLOOR = float(os.getenv("BUY_COMPOSITE_FLOOR", "60.0"))
 
 load_dotenv()
 
@@ -601,7 +603,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         # A certified catalyst dip buys a discount the composite cannot score, because the composite
         # reads the selloff itself as weak trend/alpha. That path carries its own, stricter floor
         # plus the independent valuation-pillar, RSI, RVOL and collapse checks in the certificate.
-        buy_composite_floor = DIP_MIN_COMPOSITE if catalyst_path else 70.0
+        buy_composite_floor = DIP_MIN_COMPOSITE if catalyst_path else BUY_COMPOSITE_FLOOR
         try:
             composite_ok = det_composite is not None and float(det_composite) >= buy_composite_floor
         except (TypeError, ValueError):
@@ -623,15 +625,15 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
             and deterministic_scores.get("composite_quantitative_score") is not None
         )
 
-        # Reward:risk must exist and clear the 1.5 minimum (rr is None only if stop/target degenerate).
-        rr_ok = rr is not None and rr >= 1.5
+        # Reward:risk must exist and clear the minimum bar (rr is None only if stop/target degenerate).
+        rr_ok = rr is not None and rr >= MIN_REWARD_RISK_RATIO
 
         gate_reasons = []
         if not composite_ok:
             if det_composite is None:
                 gate_reasons.append("deterministic composite could not be computed from market data")
             else:
-                gate_reasons.append(f"deterministic composite {float(det_composite):.1f}/100 < 70")
+                gate_reasons.append(f"deterministic composite {float(det_composite):.1f}/100 < {buy_composite_floor:.0f}")
         if not market_data_ok:
             gate_reasons.append("invalid or stale market data (price, ATR, stop, target must all be positive)")
         if not coverage_ok:
@@ -643,7 +645,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
             if rr is None:
                 gate_reasons.append("reward:risk ratio unavailable from setup geometry")
             else:
-                gate_reasons.append(f"reward:risk ratio {rr:.2f} < 1.5")
+                gate_reasons.append(f"reward:risk ratio {rr:.2f} < {MIN_REWARD_RISK_RATIO}")
 
         if is_value_trap:
             gate_reasons.append(f"value-trap risk ({'; '.join(value_trap_reasons or ['low valuation multiple masks balance-sheet solvency or cash-burn risk'])})")
@@ -678,10 +680,10 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
                 f"do not initiate a fresh position into a scheduled company event."
             )
             _append_risk(note)
-        elif vol_factor < 0.85 or vol_regime_info.get("is_extreme"):
+        elif vol_factor < 0.80 or vol_regime_info.get("is_extreme"):
             decision = "HOLD"
             gates_applied = True
-            no_trade_reason = "VOLATILITY_REGIME" if vol_regime_info.get("is_extreme") and vol_factor >= 0.85 else "INSUFFICIENT_EVIDENCE"
+            no_trade_reason = "VOLATILITY_REGIME" if vol_regime_info.get("is_extreme") and vol_factor >= 0.80 else "INSUFFICIENT_EVIDENCE"
             reasons_str = "; ".join(vol_regime_info.get("reasons", [])) if vol_regime_info.get("reasons") else f"ATR {atr_pct}% of price, vol factor {vol_factor:.2f}"
             note = (
                 f"BUY downgraded to HOLD: extreme volatility ({reasons_str}); "
@@ -774,7 +776,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
                 and deterministic_scores.get("composite_quantitative_score") is not None
             )
 
-            short_rr_ok = short_rr is not None and short_rr >= 1.5
+            short_rr_ok = short_rr is not None and short_rr >= MIN_REWARD_RISK_RATIO
 
             gate_reasons = []
             if not composite_ok:
@@ -796,7 +798,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
                 if short_rr is None:
                     gate_reasons.append("short reward:risk ratio unavailable from setup geometry")
                 else:
-                    gate_reasons.append(f"short reward:risk ratio {short_rr:.2f} < 1.5")
+                    gate_reasons.append(f"short reward:risk ratio {short_rr:.2f} < {MIN_REWARD_RISK_RATIO}")
 
             if gate_reasons:
                 decision = "HOLD"
@@ -834,10 +836,10 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
                     f"do not initiate a fresh short position into a scheduled company event."
                 )
                 _append_risk(note)
-            elif vol_factor < 0.85 or vol_regime_info.get("is_extreme"):
+            elif vol_factor < 0.80 or vol_regime_info.get("is_extreme"):
                 decision = "HOLD"
                 gates_applied = True
-                no_trade_reason = "VOLATILITY_REGIME" if vol_regime_info.get("is_extreme") and vol_factor >= 0.85 else "INSUFFICIENT_EVIDENCE"
+                no_trade_reason = "VOLATILITY_REGIME" if vol_regime_info.get("is_extreme") and vol_factor >= 0.80 else "INSUFFICIENT_EVIDENCE"
                 reasons_str = "; ".join(vol_regime_info.get("reasons", [])) if vol_regime_info.get("reasons") else f"ATR {atr_pct}% of price, vol factor {vol_factor:.2f}"
                 note = (
                     f"SELL (SHORT) downgraded to HOLD: extreme volatility ({reasons_str}); "

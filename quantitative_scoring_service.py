@@ -1,4 +1,8 @@
+import os
 from typing import Dict, Any, Optional, List
+
+IV_CRISIS_CEILING = float(os.getenv("IV_CRISIS_CEILING", "130.0"))
+IV_HV_SPREAD_CEILING = float(os.getenv("IV_HV_SPREAD_CEILING", "3.0"))
 
 class QuantitativeScoringService:
     """
@@ -42,8 +46,8 @@ class QuantitativeScoringService:
         ATR% (daily, as % of price):
           <= 1.5%  -> 1.00  (calm)
           <= 2.5%  -> 0.95  (normal)
-          <= 4.0%  -> 0.85  (elevated)
-          >  4.0%  -> 0.70  (extreme -- mechanically pushed out of BUY range)
+          <= 4.0%  -> 0.90  (elevated)
+          >  4.0%  -> 0.85  (softened from 0.70 to avoid crushing high-beta names)
         """
         if atr is None or not price or price <= 0:
             return 1.0
@@ -57,8 +61,8 @@ class QuantitativeScoringService:
         elif atr_pct <= 2.5:
             return 0.95
         elif atr_pct <= 4.0:
-            return 0.85
-        return 0.70
+            return 0.90
+        return 0.85
 
     @staticmethod
     def compute_reward_risk(entry_price, stop_loss, target_price) -> Dict:
@@ -410,9 +414,9 @@ class QuantitativeScoringService:
 
         iv_hv_ratio = round(iv_pct / hv_pct, 2) if (iv_pct is not None and hv_pct is not None and hv_pct > 0.0) else None
 
-        extreme_atr = vol_factor < 0.85
-        extreme_iv = iv_pct is not None and iv_pct > 65.0
-        extreme_iv_hv_spread = iv_hv_ratio is not None and iv_hv_ratio > 2.0
+        extreme_atr = vol_factor < 0.80
+        extreme_iv = iv_pct is not None and iv_pct > IV_CRISIS_CEILING
+        extreme_iv_hv_spread = iv_hv_ratio is not None and iv_hv_ratio > IV_HV_SPREAD_CEILING
 
         is_extreme = extreme_atr or extreme_iv or extreme_iv_hv_spread
 
@@ -420,7 +424,7 @@ class QuantitativeScoringService:
         if extreme_atr:
             reasons.append(f"ATR {atr_pct}% of price (vol factor {vol_factor:.2f}) exceeds normal threshold")
         if extreme_iv:
-            reasons.append(f"implied volatility {iv_pct:.1f}% exceeds 65% crisis ceiling")
+            reasons.append(f"implied volatility {iv_pct:.1f}% exceeds {IV_CRISIS_CEILING:.0f}% crisis ceiling")
         if extreme_iv_hv_spread:
             reasons.append(f"IV/HV ratio {iv_hv_ratio:.2f}x (IV {iv_pct:.1f}% vs HV {hv_pct:.1f}%) signals severe tail-risk expansion")
 
@@ -1102,7 +1106,7 @@ class QuantitativeScoringService:
             composite = round(raw_composite * vol_factor, 2)
             raw_composite_out = round(raw_composite, 2)
 
-            if composite >= 70.0:
+            if composite >= 60.0:
                 signal = "Strong Bullish Quant Signal (BUY candidate if fundamental RAG confirms)"
             elif composite >= 45.0:
                 signal = "Neutral / Mixed Quant Signal (HOLD candidate; BUY requires exceptional fundamental catalyst)"

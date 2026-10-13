@@ -526,8 +526,9 @@ def query_llm(
                 return response.text
             except Exception as e:
                 last_error = e
-                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                    print(f"[llm_service] Quota/rate limit reached for {m}. Trying fallback model...")
+                err_str = str(e)
+                if any(k in err_str for k in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "404", "NOT_FOUND", "500"]):
+                    print(f"[llm_service] Issue with {m} ({e}). Trying fallback model...")
                     continue
                 raise e
 
