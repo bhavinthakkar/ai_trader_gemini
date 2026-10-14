@@ -1,0 +1,424 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 1460" width="1240" height="1460">
+
+    <defs>
+        <style>
+            .font-title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-weight: 700; }
+            .font-mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace; }
+            .font-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-weight: 400; }
+            .font-bold { font-weight: 600; }
+            .shadow { filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.05)) drop-shadow(0 1px 3px rgba(0, 0, 0, 0.1)); }
+            .card { rx: 8px; ry: 8px; }
+        </style>
+        <linearGradient id="grad-header" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#0F172A" />
+            <stop offset="50%" stop-color="#1E293B" />
+            <stop offset="100%" stop-color="#334155" />
+        </linearGradient>
+        <linearGradient id="grad-quant" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#EEF2FF" />
+            <stop offset="100%" stop-color="#E0E7FF" />
+        </linearGradient>
+        <linearGradient id="grad-ml" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#ECFDF5" />
+            <stop offset="100%" stop-color="#D1FAE5" />
+        </linearGradient>
+        <linearGradient id="grad-rag" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#FAF5FF" />
+            <stop offset="100%" stop-color="#F3E8FF" />
+        </linearGradient>
+        <linearGradient id="grad-blend" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#FFFBEB" />
+            <stop offset="100%" stop-color="#FEF3C7" />
+        </linearGradient>
+        <linearGradient id="grad-gates" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#FFF7ED" />
+            <stop offset="100%" stop-color="#FFEDD5" />
+        </linearGradient>
+        <linearGradient id="grad-buy" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#ECFDF5" />
+            <stop offset="100%" stop-color="#A7F3D0" />
+        </linearGradient>
+        <linearGradient id="grad-veto" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#FEF2F2" />
+            <stop offset="100%" stop-color="#FECACA" />
+        </linearGradient>
+        <linearGradient id="grad-sell" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#F5F3FF" />
+            <stop offset="100%" stop-color="#DDD6FE" />
+        </linearGradient>
+        
+        <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#64748B" />
+        </marker>
+        <marker id="arrow-indigo" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#4F46E5" />
+        </marker>
+        <marker id="arrow-emerald" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#059669" />
+        </marker>
+        <marker id="arrow-amber" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#D97706" />
+        </marker>
+        <marker id="arrow-rose" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#DC2626" />
+        </marker>
+        <marker id="arrow-purple" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#7C3AED" />
+        </marker>
+    </defs>
+    
+<rect width="1240" height="1460" fill="#F8FAFC" />
+
+    <g class="shadow" transform="translate(30, 20)">
+        <rect width="1180" height="75" rx="10" fill="url(#grad-header)" />
+        <text x="590" y="32" text-anchor="middle" fill="#FFFFFF" class="font-title" font-size="20">⚡ ai_trader_gemini: Quantitative Scoring &amp; Compliance Decision Architecture</text>
+        <text x="590" y="56" text-anchor="middle" fill="#94A3B8" class="font-body" font-size="12">Deterministic 5-Pillar Quant + Quality/Vol Guard + 20% ML Hybrid (stock_ml) + Compliance Safety Gates</text>
+    </g>
+    
+
+    <!-- Column 1 Header -->
+    <g transform="translate(30, 110)">
+        <rect width="365" height="30" rx="6" fill="#4338CA" />
+        <text x="182" y="20" text-anchor="middle" fill="#FFFFFF" class="font-title" font-size="12">TRACK A: DETERMINISTIC QUANTITATIVE ENGINE</text>
+    </g>
+    <!-- Column 2 Header -->
+    <g transform="translate(425, 110)">
+        <rect width="365" height="30" rx="6" fill="#047857" />
+        <text x="182" y="20" text-anchor="middle" fill="#FFFFFF" class="font-title" font-size="12">TRACK B: POINT-IN-TIME STOCK ML (stock_ml)</text>
+    </g>
+    <!-- Column 3 Header -->
+    <g transform="translate(820, 110)">
+        <rect width="390" height="30" rx="6" fill="#6D28D9" />
+        <text x="195" y="20" text-anchor="middle" fill="#FFFFFF" class="font-title" font-size="12">TRACK C: QUALITATIVE RAG &amp; LLM ADVISOR</text>
+    </g>
+    
+
+    <g class="shadow" transform="translate(30, 150)">
+        <rect width="365" height="85" rx="8" fill="#FFFFFF" stroke="#C7D2FE" stroke-width="1.5" />
+        <rect width="365" height="24" rx="8" fill="#EEF2FF" />
+        <text x="15" y="17" fill="#3730A3" class="font-title" font-size="11">Market &amp; Technical Data Feeds</text>
+        <text x="15" y="42" fill="#334155" class="font-body" font-size="11">• Daily OHLCV Price Bars, EMA20, EMA50, EMA200</text>
+        <text x="15" y="58" fill="#334155" class="font-body" font-size="11">• RSI-14, 5-Day Velocity, ATR(14), RVOL(20d)</text>
+        <text x="15" y="74" fill="#334155" class="font-body" font-size="11">• SPDR Sector ETFs (XLK, XLC, etc.) &amp; SPY Benchmark</text>
+    </g>
+    
+
+    <g class="shadow" transform="translate(30, 255)">
+        <rect width="365" height="175" rx="8" fill="#FFFFFF" stroke="#818CF8" stroke-width="1.5" />
+        <rect width="365" height="24" rx="8" fill="#EEF2FF" />
+        <text x="15" y="17" fill="#312E81" class="font-title" font-size="11">Stage A: Deterministic 5-Pillar Scores (0–100)</text>
+        
+        <rect x="15" y="32" width="335" height="22" rx="4" fill="#F8FAFC" stroke="#E2E8F0" />
+        <text x="22" y="47" fill="#1E293B" class="font-bold" font-size="11">1. Historical Trend (25%)</text>
+        <text x="180" y="47" fill="#64748B" class="font-body" font-size="10">EMA alignment &amp; RSI velocity</text>
+
+        <rect x="15" y="58" width="335" height="22" rx="4" fill="#F8FAFC" stroke="#E2E8F0" />
+        <text x="22" y="73" fill="#1E293B" class="font-bold" font-size="11">2. Sector Relative (20%)</text>
+        <text x="180" y="73" fill="#64748B" class="font-body" font-size="10">5d/20d/60d vs Sector ETF</text>
+
+        <rect x="15" y="84" width="335" height="22" rx="4" fill="#F8FAFC" stroke="#E2E8F0" />
+        <text x="22" y="99" fill="#1E293B" class="font-bold" font-size="11">3. Market Alpha (20%)</text>
+        <text x="180" y="99" fill="#64748B" class="font-body" font-size="10">Trailing 5d return vs SPY benchmark</text>
+
+        <rect x="15" y="110" width="335" height="22" rx="4" fill="#F8FAFC" stroke="#E2E8F0" />
+        <text x="22" y="125" fill="#1E293B" class="font-bold" font-size="11">4. Valuation History (15%)</text>
+        <text x="180" y="125" fill="#64748B" class="font-body" font-size="10">P/E &amp; EV/EBITDA vs 3Y/5Y medians</text>
+
+        <rect x="15" y="136" width="335" height="22" rx="4" fill="#F8FAFC" stroke="#E2E8F0" />
+        <text x="22" y="151" fill="#1E293B" class="font-bold" font-size="11">5. Peer Valuation (20%)</text>
+        <text x="180" y="151" fill="#64748B" class="font-body" font-size="10">Multiples vs direct industry peers</text>
+
+        <text x="182" y="169" text-anchor="middle" fill="#4F46E5" class="font-body" font-size="9.5">Dynamic Re-weighting: W_A = Σ w_i across measured pillars</text>
+    </g>
+    
+
+    <g class="shadow" transform="translate(30, 450)">
+        <rect width="365" height="115" rx="8" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1.5" />
+        <rect width="365" height="24" rx="8" fill="#ECFDF5" />
+        <text x="15" y="17" fill="#065F46" class="font-title" font-size="11">Stage B: Financial Quality &amp; Value-Trap Guard</text>
+        <text x="15" y="42" fill="#334155" class="font-body" font-size="11">• Balance Sheet Solvency: Net Debt/EBITDA, OCF Margin</text>
+        <text x="15" y="58" fill="#DC2626" class="font-bold" font-size="11">• Value-Trap Penalty (-15 pts):</text>
+        <text x="180" y="58" fill="#475569" class="font-body" font-size="11">Cheap multiple + high leverage</text>
+        <text x="15" y="74" fill="#DC2626" class="font-body" font-size="10.5">  Directional BUYs mechanically vetoed to HOLD</text>
+        <text x="15" y="94" fill="#059669" class="font-bold" font-size="11">• Compounder Bonus (+3 pts):</text>
+        <text x="180" y="94" fill="#475569" class="font-body" font-size="11">Pristine Quality Score ≥ 80</text>
+        <text x="15" y="108" fill="#64748B" class="font-body" font-size="10">Formula: Composite_adj = Raw_Composite + Bonus - Penalty</text>
+    </g>
+    
+
+    <g class="shadow" transform="translate(30, 585)">
+        <rect width="365" height="100" rx="8" fill="#FFFFFF" stroke="#C7D2FE" stroke-width="1.5" />
+        <rect width="365" height="24" rx="8" fill="#EEF2FF" />
+        <text x="15" y="17" fill="#312E81" class="font-title" font-size="11">Stage C: ATR% Volatility Factor Dampener</text>
+        <text x="15" y="42" fill="#334155" class="font-body" font-size="11">• ATR% = (ATR14 / Price) × 100</text>
+        <text x="15" y="58" fill="#334155" class="font-body" font-size="10.5">• Calm (≤1.5%): 1.00  |  Normal (≤2.5%): 0.95</text>
+        <text x="15" y="72" fill="#334155" class="font-body" font-size="10.5">• Elevated (≤4.0%): 0.90  |  Extreme (&gt;4.0%): 0.85</text>
+        <text x="15" y="90" fill="#4338CA" class="font-bold" font-size="11">Deterministic Quant = Composite_adj × vol_factor</text>
+    </g>
+    
+
+    <g class="shadow" transform="translate(85, 705)">
+        <rect width="255" height="38" rx="19" fill="#4338CA" />
+        <text x="127" y="24" text-anchor="middle" fill="#FFFFFF" class="font-title" font-size="12">Deterministic Quant Score (0–100)</text>
+    </g>
+    
+
+    <path d="M 212 235 L 212 255" stroke="#818CF8" stroke-width="2" marker-end="url(#arrow-indigo)" />
+    <path d="M 212 430 L 212 450" stroke="#818CF8" stroke-width="2" marker-end="url(#arrow-indigo)" />
+    <path d="M 212 565 L 212 585" stroke="#818CF8" stroke-width="2" marker-end="url(#arrow-indigo)" />
+    <path d="M 212 685 L 212 705" stroke="#4338CA" stroke-width="2" marker-end="url(#arrow-indigo)" />
+    
+
+    <g class="shadow" transform="translate(425, 150)">
+        <rect width="365" height="110" rx="8" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1.5" />
+        <rect width="365" height="24" rx="8" fill="#ECFDF5" />
+        <text x="15" y="17" fill="#065F46" class="font-title" font-size="11">Focused 25-Stock Universe &amp; Features</text>
+        <text x="15" y="42" fill="#334155" class="font-body" font-size="11">• Top 5 Performing ETFs: SMH, SOXX, XLK, SPMO, QQQ</text>
+        <text x="15" y="58" fill="#334155" class="font-body" font-size="11">• 25 Market Leaders: NVDA, AAPL, MSFT, AVGO, TSLA...</text>
+        <text x="15" y="74" fill="#334155" class="font-body" font-size="11">• 16-Factor Momentum, Realized Vol, &amp; Relative Panel</text>
+        <text x="15" y="90" fill="#334155" class="font-body" font-size="11">• Walk-Forward Tested (2022–2026): 60.59% CAGR, 1.36 Sh</text>
+    </g>
+    
+
+    <g class="shadow" transform="translate(425, 280)">
+        <rect width="365" height="120" rx="8" fill="#FFFFFF" stroke="#34D399" stroke-width="1.5" />
+        <rect width="365" height="24" rx="8" fill="#ECFDF5" />
+        <text x="15" y="17" fill="#065F46" class="font-title" font-size="11">Pairwise XGBRanker (LambdaMART)</text>
+        <text x="15" y="42" fill="#334155" class="font-body" font-size="11">• Objective: rank:ndcg (Cross-sectional group rank)</text>
+        <text x="15" y="58" fill="#334155" class="font-body" font-size="11">• Target: 20-Trading-Session Forward Excess Return</text>
+        <text x="15" y="74" fill="#334155" class="font-body" font-size="11">• Out-of-Fold Purged &amp; Embargoed Cross-Validation</text>
+        <text x="15" y="90" fill="#334155" class="font-body" font-size="11">• Outputs: predicted_20d_excess_return &amp; ml_rank</text>
+        <text x="15" y="106" fill="#047857" class="font-bold" font-size="11">• Percentile Normalized to Score: 0.0 to 100.0</text>
+    </g>
+    
+
+    <g class="shadow" transform="translate(425, 420)">
+        <rect width="365" height="120" rx="8" fill="#FFFFFF" stroke="#A7F3D0" stroke-width="1.5" />
+        <rect width="365" height="24" rx="8" fill="#ECFDF5" />
+        <text x="15" y="17" fill="#065F46" class="font-title" font-size="11">ML Export Resolution &amp; Freshness</text>
+        <text x="15" y="42" fill="#334155" class="font-body" font-size="11">1. Priority: data/xgb_focused_current_scores.csv</text>
+        <text x="15" y="58" fill="#334155" class="font-body" font-size="11">2. Fallback: data/xgb_current_scores_1m.csv (S&amp;P 500)</text>
+        <text x="15" y="74" fill="#334155" class="font-body" font-size="11">3. Freshness Gate: Scores &gt; 7 days old are discarded</text>
+        <text x="15" y="90" fill="#334155" class="font-body" font-size="11">4. Out-of-Scope Fallback: in_scope=False, score=50.0</text>
+        <text x="15" y="106" fill="#047857" class="font-bold" font-size="10.5">ml_weight automatically set to 0.0% for out-of-scope</text>
+    </g>
+    
+
+    <g class="shadow" transform="translate(485, 705)">
+        <rect width="245" height="38" rx="19" fill="#047857" />
+        <text x="122" y="24" text-anchor="middle" fill="#FFFFFF" class="font-title" font-size="12">ML 20-Session Score (0–100)</text>
+    </g>
+    
+
+    <path d="M 607 260 L 607 280" stroke="#34D399" stroke-width="2" marker-end="url(#arrow-emerald)" />
+    <path d="M 607 400 L 607 420" stroke="#34D399" stroke-width="2" marker-end="url(#arrow-emerald)" />
+    <path d="M 607 540 L 607 705" stroke="#047857" stroke-width="2" marker-end="url(#arrow-emerald)" />
+    
+
+    <g class="shadow" transform="translate(820, 150)">
+        <rect width="390" height="110" rx="8" fill="#FFFFFF" stroke="#DDD6FE" stroke-width="1.5" />
+        <rect width="390" height="24" rx="8" fill="#F5F3FF" />
+        <text x="15" y="17" fill="#5B21B6" class="font-title" font-size="11">16-Channel Institutional &amp; RAG Feeds</text>
+        <text x="15" y="42" fill="#334155" class="font-body" font-size="11">• SEC EDGAR 10-K, 10-Q, 8-K Direct Filings &amp; Form 4</text>
+        <text x="15" y="58" fill="#334155" class="font-body" font-size="11">• Official Company IR &amp; Earnings Call Transcripts</text>
+        <text x="15" y="74" fill="#334155" class="font-body" font-size="11">• FastEmbed 384-dim Hybrid Multiplicative Ranking</text>
+        <text x="15" y="90" fill="#334155" class="font-body" font-size="11">• Dual-Horizon: 24h/7d Catalysts vs Multi-Year Fundamentals</text>
+    </g>
+    
+
+    <g class="shadow" transform="translate(820, 280)">
+        <rect width="390" height="120" rx="8" fill="#FFFFFF" stroke="#C4B5FD" stroke-width="1.5" />
+        <rect width="390" height="24" rx="8" fill="#F5F3FF" />
+        <text x="15" y="17" fill="#5B21B6" class="font-title" font-size="11">Multi-Agent Specialized Analysts</text>
+        <text x="15" y="42" fill="#334155" class="font-body" font-size="11">• Market Agent: Technical patterns, volume &amp; RSI</text>
+        <text x="15" y="58" fill="#334155" class="font-body" font-size="11">• News Agent: Catalyst scoring &amp; headline verification</text>
+        <text x="15" y="74" fill="#334155" class="font-body" font-size="11">• Analyst Agent: Guidance shifts &amp; earnings revisions</text>
+        <text x="15" y="90" fill="#334155" class="font-body" font-size="11">• Institutional Agent: 13F whale flow &amp; insider buys</text>
+        <text x="15" y="106" fill="#334155" class="font-body" font-size="11">• Macro &amp; Risk Agents: Treasury yield curve &amp; blackouts</text>
+    </g>
+    
+
+    <g class="shadow" transform="translate(820, 420)">
+        <rect width="390" height="150" rx="8" fill="#FFFFFF" stroke="#8B5CF6" stroke-width="2" />
+        <rect width="390" height="24" rx="8" fill="#EDE9FE" />
+        <text x="15" y="17" fill="#4C1D95" class="font-title" font-size="11">LLM Master Trader (Moonshot Kimi-K3 / Nemotron-3)</text>
+        <text x="15" y="42" fill="#334155" class="font-body" font-size="11">• Synthesizes multi-agent evidence and macro narrative</text>
+        <text x="15" y="58" fill="#6D28D9" class="font-bold" font-size="11">• Proposes Candidate Action: [BUY / HOLD / SELL]</text>
+        <text x="15" y="74" fill="#334155" class="font-body" font-size="11">• Proposes Entry Price, Stop Loss, and Target Price</text>
+        <text x="15" y="90" fill="#334155" class="font-body" font-size="11">• Generates forecast_20d: OUTPERFORM / UNDERPERFORM</text>
+        <rect x="15" y="100" width="360" height="40" rx="4" fill="#FEF2F2" stroke="#FCA5A5" />
+        <text x="22" y="116" fill="#991B1B" class="font-bold" font-size="10.5">⚠️ ADVISORY ONLY — NOT FINAL TRADER</text>
+        <text x="22" y="130" fill="#B91C1C" class="font-body" font-size="10">Candidate proposal is routed into Compliance Gates for validation.</text>
+    </g>
+    
+
+    <g class="shadow" transform="translate(875, 705)">
+        <rect width="280" height="38" rx="19" fill="#6D28D9" />
+        <text x="140" y="24" text-anchor="middle" fill="#FFFFFF" class="font-title" font-size="12">Candidate Setup Proposal (Advisory)</text>
+    </g>
+    
+
+    <path d="M 1015 260 L 1015 280" stroke="#C4B5FD" stroke-width="2" marker-end="url(#arrow-purple)" />
+    <path d="M 1015 400 L 1015 420" stroke="#8B5CF6" stroke-width="2" marker-end="url(#arrow-purple)" />
+    <path d="M 1015 570 L 1015 705" stroke="#6D28D9" stroke-width="2" marker-end="url(#arrow-purple)" />
+    
+
+    <g class="shadow" transform="translate(30, 775)">
+        <rect width="760" height="120" rx="10" fill="url(#grad-blend)" stroke="#F59E0B" stroke-width="2" />
+        <rect width="760" height="26" rx="10" fill="#FEF3C7" />
+        <text x="380" y="18" text-anchor="middle" fill="#92400E" class="font-title" font-size="12">STAGE D: ML HYBRID BLENDING &amp; SCOPE RESOLUTION</text>
+
+        <rect x="20" y="38" width="345" height="70" rx="6" fill="#FFFFFF" stroke="#FBBF24" />
+        <text x="30" y="54" fill="#B45309" class="font-bold" font-size="11">IN-SCOPE (Focused 25 ETF Leaders):</text>
+        <text x="30" y="72" fill="#1E293B" class="font-title" font-size="11.5">Composite = 0.80 × Quant + 0.20 × ML</text>
+        <text x="30" y="92" fill="#475569" class="font-body" font-size="10.5">• High-conviction alpha boost for modeled leaders</text>
+
+        <rect x="395" y="38" width="345" height="70" rx="6" fill="#FFFFFF" stroke="#FBBF24" />
+        <text x="405" y="54" fill="#B45309" class="font-bold" font-size="11">OUT-OF-SCOPE (Unmodeled Tickers):</text>
+        <text x="405" y="72" fill="#1E293B" class="font-title" font-size="11.5">Composite = 1.00 × Quant (ML wt = 0%)</text>
+        <text x="405" y="92" fill="#475569" class="font-body" font-size="10.5">• Graceful degradation; ML score set to neutral 50.0</text>
+    </g>
+    
+
+    <path d="M 212 743 L 212 775" stroke="#4338CA" stroke-width="2" marker-end="url(#arrow-indigo)" />
+    <path d="M 607 743 L 607 775" stroke="#047857" stroke-width="2" marker-end="url(#arrow-emerald)" />
+    
+
+    <g class="shadow" transform="translate(230, 915)">
+        <rect width="360" height="42" rx="21" fill="#D97706" />
+        <text x="180" y="26" text-anchor="middle" fill="#FFFFFF" class="font-title" font-size="13">DECISION COMPOSITE SCORE (0.0 – 100.0)</text>
+    </g>
+    
+<path d="M 410 895 L 410 915" stroke="#D97706" stroke-width="2" marker-end="url(#arrow-amber)" />
+
+    <g class="shadow" transform="translate(30, 985)">
+        <rect width="1180" height="235" rx="10" fill="url(#grad-gates)" stroke="#EA580C" stroke-width="2" />
+        <rect width="1180" height="28" rx="10" fill="#FFEDD5" />
+        <text x="590" y="19" text-anchor="middle" fill="#9A3412" class="font-title" font-size="12.5">DETERMINISTIC COMPLIANCE SAFETY GATES (normalize_master_trader_json)</text>
+
+        <!-- Gate 1 -->
+        <g transform="translate(15, 38)">
+            <rect width="215" height="180" rx="6" fill="#FFFFFF" stroke="#FDBA74" />
+            <rect width="215" height="24" rx="6" fill="#FFF7ED" />
+            <text x="10" y="16" fill="#C2410C" class="font-title" font-size="11">Gate 1: BUY Floor</text>
+            <text x="10" y="42" fill="#1E293B" class="font-bold" font-size="11">Composite ≥ 60.0</text>
+            <text x="10" y="58" fill="#475569" class="font-body" font-size="10.5">(≥ 52.0 for Dip-Buys)</text>
+            <text x="10" y="80" fill="#DC2626" class="font-bold" font-size="10.5">Veto Action:</text>
+            <text x="10" y="96" fill="#B91C1C" class="font-body" font-size="10">If Composite &lt; 60,</text>
+            <text x="10" y="110" fill="#B91C1C" class="font-body" font-size="10">candidate BUY is</text>
+            <text x="10" y="124" fill="#B91C1C" class="font-bold" font-size="10">OVERRIDDEN → HOLD</text>
+            <text x="10" y="146" fill="#64748B" class="font-body" font-size="9.5">Reason: "BUY downgraded:</text>
+            <text x="10" y="160" fill="#64748B" class="font-body" font-size="9.5">composite 54.2 &lt; 60"</text>
+        </g>
+
+        <!-- Gate 2 -->
+        <g transform="translate(245, 38)">
+            <rect width="215" height="180" rx="6" fill="#FFFFFF" stroke="#FDBA74" />
+            <rect width="245" height="24" rx="6" fill="#FFF7ED" />
+            <text x="10" y="16" fill="#C2410C" class="font-title" font-size="11">Gate 2: Reward-to-Risk</text>
+            <text x="10" y="42" fill="#1E293B" class="font-bold" font-size="11">RR Ratio ≥ 1.20</text>
+            <text x="10" y="58" fill="#475569" class="font-body" font-size="10.5">(Target-Entry)/(Entry-Stop)</text>
+            <text x="10" y="80" fill="#DC2626" class="font-bold" font-size="10.5">Veto Action:</text>
+            <text x="10" y="96" fill="#B91C1C" class="font-body" font-size="10">If RR &lt; 1.20,</text>
+            <text x="10" y="110" fill="#B91C1C" class="font-body" font-size="10">asymmetric setup fails;</text>
+            <text x="10" y="124" fill="#B91C1C" class="font-bold" font-size="10">OVERRIDDEN → HOLD</text>
+            <text x="10" y="146" fill="#64748B" class="font-body" font-size="9.5">Prevents poor payoff</text>
+            <text x="10" y="160" fill="#64748B" class="font-body" font-size="9.5">entries even if score is 95</text>
+        </g>
+
+        <!-- Gate 3 -->
+        <g transform="translate(475, 38)">
+            <rect width="225" height="180" rx="6" fill="#FFFFFF" stroke="#FDBA74" />
+            <rect width="225" height="24" rx="6" fill="#FFF7ED" />
+            <text x="10" y="16" fill="#C2410C" class="font-title" font-size="11">Gate 3: Volatility &amp; Events</text>
+            <text x="10" y="42" fill="#1E293B" class="font-bold" font-size="10.5">1. Option Expected Move</text>
+            <text x="10" y="56" fill="#475569" class="font-body" font-size="10">Stop must be outside 1-SD move</text>
+            <text x="10" y="74" fill="#1E293B" class="font-bold" font-size="10.5">2. Earnings Blackout</text>
+            <text x="10" y="88" fill="#475569" class="font-body" font-size="10">Earnings &gt; 3 trading days away</text>
+            <text x="10" y="106" fill="#1E293B" class="font-bold" font-size="10.5">3. Liquidity Safety</text>
+            <text x="10" y="120" fill="#475569" class="font-body" font-size="10">RVOL ≥ 0.5x, 20d $Vol ≥ $1M</text>
+            <text x="10" y="146" fill="#B91C1C" class="font-bold" font-size="10">Any violation → VETO</text>
+            <text x="10" y="160" fill="#64748B" class="font-body" font-size="9.5">Guards against gap risk</text>
+        </g>
+
+        <!-- Gate 4 -->
+        <g transform="translate(715, 38)">
+            <rect width="220" height="180" rx="6" fill="#FFFFFF" stroke="#FDBA74" />
+            <rect width="220" height="24" rx="6" fill="#FFF7ED" />
+            <text x="10" y="16" fill="#C2410C" class="font-title" font-size="11">Gate 4: SELL &amp; Exit Symmetry</text>
+            <text x="10" y="42" fill="#1E293B" class="font-bold" font-size="10.5">1. Short Entry Breakdown</text>
+            <text x="10" y="56" fill="#475569" class="font-body" font-size="10">Requires Composite ≤ 45.0</text>
+            <text x="10" y="74" fill="#1E293B" class="font-bold" font-size="10.5">2. Holding Thesis Guard</text>
+            <text x="10" y="88" fill="#475569" class="font-body" font-size="10">If held &amp; Composite ≥ 70,</text>
+            <text x="10" y="102" fill="#059669" class="font-bold" font-size="10">early exits prevented → HOLD</text>
+            <text x="10" y="120" fill="#1E293B" class="font-bold" font-size="10.5">3. Ex-Dividend Blackout</text>
+            <text x="10" y="134" fill="#475569" class="font-body" font-size="10">≤ 2 days blocks short trades</text>
+            <text x="10" y="156" fill="#64748B" class="font-body" font-size="9.5">Protects dividend borrowing</text>
+        </g>
+
+        <!-- Gate 5 -->
+        <g transform="translate(950, 38)">
+            <rect width="215" height="180" rx="6" fill="#FFFFFF" stroke="#FDBA74" />
+            <rect width="215" height="24" rx="6" fill="#FFF7ED" />
+            <text x="10" y="16" fill="#C2410C" class="font-title" font-size="11">Gate 5: Gated Confidence</text>
+            <text x="10" y="38" fill="#1E293B" class="font-bold" font-size="10">Mechanistic Calculation:</text>
+            <text x="10" y="54" fill="#475569" class="font-body" font-size="10">• Decisiveness:</text>
+            <text x="18" y="68" fill="#1E293B" class="font-body" font-size="9.5">|Composite - 50| / 50</text>
+            <text x="10" y="86" fill="#475569" class="font-body" font-size="10">• Pillar Agreement:</text>
+            <text x="18" y="100" fill="#1E293B" class="font-body" font-size="9.5">Dispersion (Std Dev)</text>
+            <text x="10" y="118" fill="#475569" class="font-body" font-size="10">• Data Completeness:</text>
+            <text x="18" y="132" fill="#1E293B" class="font-body" font-size="9.5">% inputs available &amp; fresh</text>
+            <rect x="10" y="145" width="195" height="24" rx="4" fill="#FFF7ED" stroke="#FDBA74" />
+            <text x="107" y="161" text-anchor="middle" fill="#C2410C" class="font-bold" font-size="9.5">NOT INVENTED BY LLM</text>
+        </g>
+    </g>
+    
+
+    <path d="M 410 957 L 410 985" stroke="#D97706" stroke-width="2.5" marker-end="url(#arrow-amber)" />
+    <path d="M 1015 743 L 1015 985" stroke="#6D28D9" stroke-width="2.5" marker-end="url(#arrow-purple)" />
+    
+
+    <g class="shadow" transform="translate(30, 1260)">
+        <rect width="365" height="160" rx="10" fill="url(#grad-buy)" stroke="#059669" stroke-width="2.5" />
+        <rect width="365" height="28" rx="10" fill="#059669" />
+        <text x="182" y="19" text-anchor="middle" fill="#FFFFFF" class="font-title" font-size="13">CERTIFIED BUY SIGNAL</text>
+        <text x="15" y="48" fill="#065F46" class="font-bold" font-size="11.5">✓ LLM Proposed BUY + All 5 Gates Passed</text>
+        <text x="15" y="66" fill="#1E293B" class="font-body" font-size="11">• Composite ≥ 60.0 &amp; Reward-to-Risk ≥ 1.20</text>
+        <text x="15" y="82" fill="#1E293B" class="font-body" font-size="11">• Stop loss safely outside option noise threshold</text>
+        <text x="15" y="98" fill="#1E293B" class="font-body" font-size="11">• Earnings cleared (&gt; 3 trading sessions)</text>
+        <text x="15" y="116" fill="#047857" class="font-bold" font-size="11">• Mechanistic Sizing &amp; Target Established</text>
+        <text x="15" y="134" fill="#334155" class="font-body" font-size="10.5">• Persisted to trader.db &amp; Streamlit / Mobile UI</text>
+    </g>
+    
+
+    <g class="shadow" transform="translate(425, 1260)">
+        <rect width="365" height="160" rx="10" fill="url(#grad-veto)" stroke="#DC2626" stroke-width="2.5" />
+        <rect width="365" height="28" rx="10" fill="#DC2626" />
+        <text x="182" y="19" text-anchor="middle" fill="#FFFFFF" class="font-title" font-size="13">ALGORITHMIC VETO → FORCE HOLD</text>
+        <text x="15" y="48" fill="#991B1B" class="font-bold" font-size="11.5">✗ Triggered when ANY Gate Fails</text>
+        <text x="15" y="66" fill="#1E293B" class="font-body" font-size="11">• Overrides glowing LLM thesis for capital protection</text>
+        <text x="15" y="82" fill="#1E293B" class="font-body" font-size="11">• Value-Trap penalty or Composite &lt; 60.0</text>
+        <text x="15" y="98" fill="#1E293B" class="font-body" font-size="11">• Stop sits inside 1-SD option expected move</text>
+        <text x="15" y="116" fill="#991B1B" class="font-bold" font-size="11">• Failure Reason Saved in no_trade_reason</text>
+        <text x="15" y="134" fill="#334155" class="font-body" font-size="10.5">• Audit trail retained in database signal JSON</text>
+    </g>
+    
+
+    <g class="shadow" transform="translate(820, 1260)">
+        <rect width="390" height="160" rx="10" fill="url(#grad-sell)" stroke="#7C3AED" stroke-width="2.5" />
+        <rect width="390" height="28" rx="10" fill="#7C3AED" />
+        <text x="195" y="19" text-anchor="middle" fill="#FFFFFF" class="font-title" font-size="13">CERTIFIED SELL / SHORT / LONG_EXIT</text>
+        <text x="15" y="48" fill="#5B21B6" class="font-bold" font-size="11.5">✓ Symmetric Risk Criteria Confirmed</text>
+        <text x="15" y="66" fill="#1E293B" class="font-body" font-size="11">• Short: Confirmed breakdown (Composite ≤ 45.0)</text>
+        <text x="15" y="82" fill="#1E293B" class="font-body" font-size="11">• Short: Overhead channel stop &amp; support target</text>
+        <text x="15" y="98" fill="#1E293B" class="font-body" font-size="11">• Long Exit: Target reached or stop breach</text>
+        <text x="15" y="116" fill="#5B21B6" class="font-bold" font-size="11">• Fundamental Thesis Breakdown (Trend &lt; 40)</text>
+        <text x="15" y="134" fill="#334155" class="font-body" font-size="10.5">• Execution signal published to trader.db</text>
+    </g>
+    
+
+    <path d="M 212 1220 L 212 1260" stroke="#059669" stroke-width="2.5" marker-end="url(#arrow-emerald)" />
+    <path d="M 607 1220 L 607 1260" stroke="#DC2626" stroke-width="2.5" marker-end="url(#arrow-rose)" />
+    <path d="M 1015 1220 L 1015 1260" stroke="#7C3AED" stroke-width="2.5" marker-end="url(#arrow-purple)" />
+    
+</svg>
