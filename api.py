@@ -337,15 +337,18 @@ def fetch_ml_context(symbol: str):
     """Returns standalone point-in-time ML pipeline alpha prediction for a given symbol."""
     clean_sym = symbol.strip().upper().split(".")[0]
     ctx = get_ml_context(clean_sym)
-    if not ctx:
+    if not ctx or not ctx.get("in_scope", True):
         return {
             "available": False,
+            "in_scope": False,
             "symbol": clean_sym,
-            "message": f"No fresh ML point-in-time score available for '{clean_sym}' (Stock may not be an S&P 500 component).",
+            "message": f"'{clean_sym}' is outside the focused 25-stock ETF leaders ML model universe.",
             "data": None,
+            "out_of_scope_context": ctx,
         }
     return {
         "available": True,
+        "in_scope": True,
         "symbol": clean_sym,
         "data": ctx,
     }

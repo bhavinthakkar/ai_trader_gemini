@@ -219,7 +219,8 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     deterministic_scores = m_data.get("deterministic_5pillar_scores", {})
     det_quant = deterministic_scores.get("composite_quantitative_score")
     ml_context = m_data.get("ml_context")
-    ml_score = _to_float(ml_context.get("score_0_100"), None) if isinstance(ml_context, dict) else None
+    is_in_scope = bool(ml_context.get("in_scope", True)) if isinstance(ml_context, dict) else False
+    ml_score = _to_float(ml_context.get("score_0_100"), None) if (isinstance(ml_context, dict) and is_in_scope) else None
     ml_weight = 0.20 if det_quant is not None and ml_score is not None else 0.0
     if det_quant is not None and ml_score is not None:
         decision_composite = round((1.0 - ml_weight) * float(det_quant) + ml_weight * ml_score, 2)
@@ -1315,7 +1316,7 @@ def main():
                 if res_obj:
                     validated, errors = validate_signal_json(
                         res_obj,
-                        require_ml_assessment=bool(ml_context),
+                        require_ml_assessment=bool(ml_context and ml_context.get("in_scope", True)),
                         required_horizon_sessions=20,
                         require_forecast_20d=True,
                     )
@@ -1354,7 +1355,7 @@ def main():
                         if retry_obj:
                             validated, errors = validate_signal_json(
                                 retry_obj,
-                                require_ml_assessment=bool(ml_context),
+                                require_ml_assessment=bool(ml_context and ml_context.get("in_scope", True)),
                                 required_horizon_sessions=20,
                                 require_forecast_20d=True,
                             )
