@@ -1,6 +1,16 @@
 import os
 from typing import Dict, Any, Optional, List
 
+from quant.trade_geometry import (
+    TradeDirection,
+    ExecutionCostModel,
+    RewardRiskResult,
+    validate_price_ordering,
+    compute_validated_reward_risk,
+    derive_deterministic_channel_geometry,
+    PriceOrderingStatus,
+)
+
 IV_CRISIS_CEILING = float(os.getenv("IV_CRISIS_CEILING", "130.0"))
 IV_HV_SPREAD_CEILING = float(os.getenv("IV_HV_SPREAD_CEILING", "3.0"))
 
@@ -65,47 +75,111 @@ class QuantitativeScoringService:
         return 0.85
 
     @staticmethod
-    def compute_reward_risk(entry_price, stop_loss, target_price) -> Dict:
+    def apply_volatility_dampener(adjusted_score: float, vol_factor: float) -> float:
         """
-        Computes the setup reward:risk ratio and breakeven win rate for a long trade.
+        Applies a centred volatility dampening transformation around the neutral midpoint (50.0):
+            Q_final = 50.0 + (Q_adjusted - 50.0) * vol_factor
 
-        reward_risk_ratio = (target - entry) / (entry - stop)
-        breakeven_win_rate = 1 / (1 + reward_risk_ratio)   -- the minimum win rate
-        needed for the trade to be profitable on average.
+        Unlike naive multiplication (Q * f_vol) which pushes neutral (50) scores into
+        artificial sell territory (50 * 0.85 = 42.5) and amplifies bearish conviction,
+        the centred formula contracts conviction symmetrically toward 50.0 for both long
+        and short signals while leaving neutral scores strictly invariant.
+        """
+        if adjusted_score is None:
+            return 50.0
+        if not (0.0 <= adjusted_score <= 100.0):
+            raise ValueError(f"Score must be between 0 and 100, got {adjusted_score}")
+        if not (0.0 <= vol_factor <= 1.0):
+            raise ValueError(f"Volatility factor must be between 0 and 1, got {vol_factor}")
+        score = 50.0 + (adjusted_score - 50.0) * vol_factor
+        return max(0.0, min(100.0, score))
 
-        Returns a dict with both values (None when the geometry is unavailable
-        or degenerate, e.g. stop >= entry). Always horizon-consistent: compute it
-        against the trade's own swing target and stop.
+    @staticmethod
+    def compute_reward_risk(
+        entry_price,
+        stop_loss,
+        target_price,
+        execution_costs: Optional[ExecutionCostModel] = None,
+        min_rr_threshold: float = 1.20,
+        composite_score: Optional[float] = None,
+        win_probability: Optional[float] = None,
+        min_edge_pct: float = 0.02,
+        max_stop_distance_pct: float = 0.30,
+    ) -> Dict:
+        """
+        Computes the setup reward:risk ratio, breakeven win rate, and cost-adjusted metrics for a long trade (Step 5.2).
+
+        Formula:
+          RR_long = (Target - Entry) / (Entry - Stop)
+          BE_gross = 1 / (1 + RR_long)
+
+        Rejects invalid price ordering (requires 0 < stop < entry < target) and zero or negative risk denominators.
         """
         entry = QuantitativeScoringService._clean_float(entry_price, 0.0)
         stop = QuantitativeScoringService._clean_float(stop_loss, None)
         target = QuantitativeScoringService._clean_float(target_price, None)
 
         if entry <= 0.0 or stop is None or target is None:
-            return {"reward_risk_ratio": None, "breakeven_win_rate": None}
+            return {"reward_risk_ratio": None, "breakeven_win_rate": None, "is_valid": False}
 
-        downside = entry - stop
-        upside = target - entry
-        if downside <= 0.0:
-            return {"reward_risk_ratio": None, "breakeven_win_rate": None}
+        res = compute_validated_reward_risk(
+            direction=TradeDirection.LONG,
+            entry_price=entry,
+            stop_loss=stop,
+            target_price=target,
+            execution_costs=execution_costs,
+            min_rr_threshold=min_rr_threshold,
+            composite_score=composite_score,
+            win_probability=win_probability,
+            min_edge_pct=min_edge_pct,
+            max_stop_distance_pct=max_stop_distance_pct,
+        )
 
-        rr = round(upside / downside, 2)
-        breakeven = round(1.0 / (1.0 + rr), 3) if rr > 0.0 else None
-        return {"reward_risk_ratio": rr, "breakeven_win_rate": breakeven}
+        return {
+            "reward_risk_ratio": res.gross_reward_risk_ratio,
+            "breakeven_win_rate": res.breakeven_win_rate_gross,
+            "gross_reward_risk_ratio": res.gross_reward_risk_ratio,
+            "net_reward_risk_ratio": res.net_reward_risk_ratio,
+            "breakeven_win_rate_gross": res.breakeven_win_rate_gross,
+            "breakeven_win_rate_net": res.breakeven_win_rate_net,
+            "effective_entry": res.effective_entry,
+            "effective_stop": res.effective_stop,
+            "effective_target": res.effective_target,
+            "gross_reward": res.gross_reward,
+            "gross_risk": res.gross_risk,
+            "net_reward": res.net_reward,
+            "net_risk": res.net_risk,
+            "cost_drag_bps": res.cost_drag_bps,
+            "cost_breakdown": res.cost_breakdown,
+            "estimated_win_probability": res.estimated_win_probability,
+            "expected_value_r": res.expected_value_r,
+            "has_statistical_edge": res.has_statistical_edge,
+            "meets_minimum_rr": res.meets_minimum_rr,
+            "trade_justified": res.trade_justified,
+            "is_valid": res.is_valid,
+            "rejection_reason": res.rejection_reason,
+            "status": res.status.value,
+        }
 
     @staticmethod
-    def compute_channel_reward_risk(entry_price, atr, high_20d, low_20d, suggested_stop_loss=None, suggested_target_price=None) -> Dict:
+    def compute_channel_reward_risk(
+        entry_price,
+        atr,
+        high_20d,
+        low_20d,
+        suggested_stop_loss=None,
+        suggested_target_price=None,
+        execution_costs: Optional[ExecutionCostModel] = None,
+        min_rr_threshold: float = 1.20,
+        composite_score: Optional[float] = None,
+        win_probability: Optional[float] = None,
+    ) -> Dict:
         """
-        Computes a channel-anchored reward:risk so the ratio actually varies with
-        where price sits inside its 20-day trading range, instead of collapsing to
-        the fixed 2.5/1.5 symmetric-ATR ratio.
+        Computes channel-anchored reward:risk from validated prices, sanitizing LLM/candidate inputs (Step 5.2).
 
         Conservative geometry (never overstates reward):
-          structural_stop   = min(price - 1.5*ATR, low_20d  - 0.5*ATR)  -- larger honest downside
+          structural_stop   = min(price - 1.5*ATR, low_20d  - 0.5*ATR)  -- honest downside
           structural_target = min(price + 2.5*ATR, high_20d + 0.5*ATR)  -- capped at real resistance
-
-        Returns a dict with structural_stop, structural_target, reward_risk_ratio,
-        breakeven_win_rate, distance_to_resistance_atr, distance_to_support_atr.
         """
         entry = QuantitativeScoringService._clean_float(entry_price, 0.0)
         atr_v = QuantitativeScoringService._clean_float(atr, None)
@@ -120,34 +194,31 @@ class QuantitativeScoringService:
             "reward_risk_ratio": None,
             "breakeven_win_rate": None,
             "distance_to_resistance_atr": None,
-            "distance_to_support_atr": None
+            "distance_to_support_atr": None,
+            "is_valid": False,
         }
         if entry <= 0.0:
             return empty
 
-        # Conservative stop: the lower bound (bigger downside = never overstated RR).
-        stop_candidates = []
-        if vol_stop is not None:
-            stop_candidates.append(vol_stop)
-        if low is not None and atr_v is not None:
-            stop_candidates.append(low - 0.5 * atr_v)
-        elif low is not None:
-            stop_candidates.append(low)
-        valid_stops = [s for s in stop_candidates if s < entry]
-        structural_stop = min(valid_stops) if valid_stops else None
+        entry_val, structural_stop, structural_target, meta = derive_deterministic_channel_geometry(
+            direction=TradeDirection.LONG,
+            current_price=entry,
+            atr=atr_v or (0.02 * entry),
+            high_20d=high,
+            low_20d=low,
+            suggested_stop_loss=vol_stop,
+            suggested_target_price=vol_tgt,
+        )
 
-        # Conservative target: the higher bound of the capped value (min of candidates)
-        tgt_candidates = []
-        if vol_tgt is not None:
-            tgt_candidates.append(vol_tgt)
-        if high is not None and atr_v is not None:
-            tgt_candidates.append(high + 0.5 * atr_v)
-        elif high is not None:
-            tgt_candidates.append(high)
-        valid_tgts = [t for t in tgt_candidates if t > entry]
-        structural_target = min(valid_tgts) if valid_tgts else None
-
-        rr_info = QuantitativeScoringService.compute_reward_risk(entry, structural_stop, structural_target)
+        rr_info = QuantitativeScoringService.compute_reward_risk(
+            entry_val,
+            structural_stop,
+            structural_target,
+            execution_costs=execution_costs,
+            min_rr_threshold=min_rr_threshold,
+            composite_score=composite_score,
+            win_probability=win_probability,
+        )
 
         dist_res, dist_sup = None, None
         if atr_v is not None and atr_v > 0:
@@ -156,45 +227,99 @@ class QuantitativeScoringService:
             if low is not None:
                 dist_sup = round((entry - low) / atr_v, 2)
 
-        return {
+        result = dict(rr_info)
+        result.update({
             "structural_stop": structural_stop,
             "structural_target": structural_target,
-            "reward_risk_ratio": rr_info.get("reward_risk_ratio"),
-            "breakeven_win_rate": rr_info.get("breakeven_win_rate"),
             "distance_to_resistance_atr": dist_res,
-            "distance_to_support_atr": dist_sup
-        }
+            "distance_to_support_atr": dist_sup,
+            "sanitization_metadata": meta,
+        })
+        return result
 
     @staticmethod
-    def compute_short_reward_risk(entry_price, stop_loss, target_price) -> Dict:
+    def compute_short_reward_risk(
+        entry_price,
+        stop_loss,
+        target_price,
+        execution_costs: Optional[ExecutionCostModel] = None,
+        min_rr_threshold: float = 1.20,
+        composite_score: Optional[float] = None,
+        win_probability: Optional[float] = None,
+        min_edge_pct: float = 0.02,
+        max_stop_distance_pct: float = 0.30,
+    ) -> Dict:
         """
-        Computes the setup reward:risk ratio and breakeven win rate for a short trade.
+        Computes the setup reward:risk ratio, breakeven win rate, and cost-adjusted metrics for a short trade (Step 5.2).
 
-        reward_risk_ratio = (entry - target) / (stop - entry)
-        breakeven_win_rate = 1 / (1 + reward_risk_ratio)
+        Formula:
+          RR_short = (Entry - Target) / (Stop - Entry)
+          BE_gross = 1 / (1 + RR_short)
 
-        For a short trade: target < entry < stop.
+        Rejects invalid price ordering (requires 0 < target < entry < stop) and zero or negative risk denominators.
         """
         entry = QuantitativeScoringService._clean_float(entry_price, 0.0)
         stop = QuantitativeScoringService._clean_float(stop_loss, None)
         target = QuantitativeScoringService._clean_float(target_price, None)
 
         if entry <= 0.0 or stop is None or target is None:
-            return {"reward_risk_ratio": None, "breakeven_win_rate": None}
+            return {"reward_risk_ratio": None, "breakeven_win_rate": None, "is_valid": False}
 
-        risk = stop - entry
-        reward = entry - target
-        if risk <= 0.0 or reward <= 0.0:
-            return {"reward_risk_ratio": None, "breakeven_win_rate": None}
+        res = compute_validated_reward_risk(
+            direction=TradeDirection.SHORT,
+            entry_price=entry,
+            stop_loss=stop,
+            target_price=target,
+            execution_costs=execution_costs,
+            min_rr_threshold=min_rr_threshold,
+            composite_score=composite_score,
+            win_probability=win_probability,
+            min_edge_pct=min_edge_pct,
+            max_stop_distance_pct=max_stop_distance_pct,
+        )
 
-        rr = round(reward / risk, 2)
-        breakeven = round(1.0 / (1.0 + rr), 3) if rr > 0.0 else None
-        return {"reward_risk_ratio": rr, "breakeven_win_rate": breakeven}
+        return {
+            "reward_risk_ratio": res.gross_reward_risk_ratio,
+            "breakeven_win_rate": res.breakeven_win_rate_gross,
+            "gross_reward_risk_ratio": res.gross_reward_risk_ratio,
+            "net_reward_risk_ratio": res.net_reward_risk_ratio,
+            "breakeven_win_rate_gross": res.breakeven_win_rate_gross,
+            "breakeven_win_rate_net": res.breakeven_win_rate_net,
+            "effective_entry": res.effective_entry,
+            "effective_stop": res.effective_stop,
+            "effective_target": res.effective_target,
+            "gross_reward": res.gross_reward,
+            "gross_risk": res.gross_risk,
+            "net_reward": res.net_reward,
+            "net_risk": res.net_risk,
+            "cost_drag_bps": res.cost_drag_bps,
+            "cost_breakdown": res.cost_breakdown,
+            "estimated_win_probability": res.estimated_win_probability,
+            "expected_value_r": res.expected_value_r,
+            "has_statistical_edge": res.has_statistical_edge,
+            "meets_minimum_rr": res.meets_minimum_rr,
+            "trade_justified": res.trade_justified,
+            "is_valid": res.is_valid,
+            "rejection_reason": res.rejection_reason,
+            "status": res.status.value,
+        }
 
     @staticmethod
-    def compute_channel_short_reward_risk(entry_price, atr, high_20d, low_20d, suggested_stop_loss=None, suggested_target_price=None) -> Dict:
+    def compute_channel_short_reward_risk(
+        entry_price,
+        atr,
+        high_20d,
+        low_20d,
+        suggested_stop_loss=None,
+        suggested_target_price=None,
+        execution_costs: Optional[ExecutionCostModel] = None,
+        min_rr_threshold: float = 1.20,
+        composite_score: Optional[float] = None,
+        win_probability: Optional[float] = None,
+    ) -> Dict:
         """
-        Computes channel-anchored reward:risk for a short trade.
+        Computes channel-anchored short reward:risk from validated prices, sanitizing LLM/candidate inputs (Step 5.2).
+
         Conservative geometry (never overstates reward):
           structural_stop   = max(price + 1.5*ATR, high_20d + 0.5*ATR)  -- honest upside risk
           structural_target = max(price - 2.5*ATR, low_20d  - 0.5*ATR)  -- capped at real support
@@ -212,38 +337,31 @@ class QuantitativeScoringService:
             "reward_risk_ratio": None,
             "breakeven_win_rate": None,
             "distance_to_resistance_atr": None,
-            "distance_to_support_atr": None
+            "distance_to_support_atr": None,
+            "is_valid": False,
         }
         if entry <= 0.0:
             return empty
 
-        # Conservative stop for short: higher bound (larger upside risk = never understated risk)
-        stop_candidates = []
-        if vol_stop is not None and vol_stop > entry:
-            stop_candidates.append(vol_stop)
-        elif atr_v is not None and atr_v > 0:
-            stop_candidates.append(entry + 1.5 * atr_v)
-        if high is not None and atr_v is not None:
-            stop_candidates.append(high + 0.5 * atr_v)
-        elif high is not None and high > entry:
-            stop_candidates.append(high)
-        valid_stops = [s for s in stop_candidates if s > entry]
-        structural_stop = max(valid_stops) if valid_stops else (entry + 1.5 * atr_v if atr_v else None)
+        entry_val, structural_stop, structural_target, meta = derive_deterministic_channel_geometry(
+            direction=TradeDirection.SHORT,
+            current_price=entry,
+            atr=atr_v or (0.02 * entry),
+            high_20d=high,
+            low_20d=low,
+            suggested_stop_loss=vol_stop,
+            suggested_target_price=vol_tgt,
+        )
 
-        # Conservative target for short: higher floor (closest support, conservative drop)
-        tgt_candidates = []
-        if vol_tgt is not None and vol_tgt < entry:
-            tgt_candidates.append(vol_tgt)
-        elif atr_v is not None and atr_v > 0:
-            tgt_candidates.append(entry - 2.5 * atr_v)
-        if low is not None and atr_v is not None:
-            tgt_candidates.append(low - 0.5 * atr_v)
-        elif low is not None and low < entry:
-            tgt_candidates.append(low)
-        valid_tgts = [t for t in tgt_candidates if t < entry]
-        structural_target = max(valid_tgts) if valid_tgts else (entry - 2.5 * atr_v if atr_v else None)
-
-        rr_info = QuantitativeScoringService.compute_short_reward_risk(entry, structural_stop, structural_target)
+        rr_info = QuantitativeScoringService.compute_short_reward_risk(
+            entry_val,
+            structural_stop,
+            structural_target,
+            execution_costs=execution_costs,
+            min_rr_threshold=min_rr_threshold,
+            composite_score=composite_score,
+            win_probability=win_probability,
+        )
 
         dist_res, dist_sup = None, None
         if atr_v is not None and atr_v > 0:
@@ -252,14 +370,16 @@ class QuantitativeScoringService:
             if low is not None:
                 dist_sup = round((entry - low) / atr_v, 2)
 
-        return {
+        result = dict(rr_info)
+        result.update({
             "structural_stop": structural_stop,
             "structural_target": structural_target,
-            "reward_risk_ratio": rr_info.get("reward_risk_ratio"),
-            "breakeven_win_rate": rr_info.get("breakeven_win_rate"),
             "distance_to_resistance_atr": dist_res,
-            "distance_to_support_atr": dist_sup
-        }
+            "distance_to_support_atr": dist_sup,
+            "sanitization_metadata": meta,
+        })
+        return result
+
 
     @staticmethod
     def evaluate_short_expected_move_vs_stop(entry_price, short_stop_loss, expected_move) -> Dict:
@@ -1088,7 +1208,7 @@ class QuantitativeScoringService:
         avail_pillars = {k: ev for k, ev in pillar_evals.items() if ev.get("score") is not None}
         avail_weight_sum = sum(weights[k] for k in avail_pillars)
 
-        if avail_weight_sum > 0.0:
+        if len(avail_pillars) >= 3 and avail_weight_sum > 0.0:
             # Re-normalize weights strictly across measured/partial available pillars
             raw_composite = sum(weights[k] * avail_pillars[k]["score"] for k in avail_pillars) / avail_weight_sum
 
@@ -1098,12 +1218,12 @@ class QuantitativeScoringService:
             elif p_fq.get("score") is not None and p_fq.get("score") >= 80.0:
                 raw_composite = min(100.0, raw_composite + 3.0)
 
-            # Volatility dampening
+            # Volatility dampening (Centred transformation around neutral midpoint 50.0)
             vol_factor = QuantitativeScoringService.compute_vol_factor(
                 technical_data.get("atr") if technical_data else None,
                 technical_data.get("current_price") if technical_data else None
             )
-            composite = round(raw_composite * vol_factor, 2)
+            composite = round(QuantitativeScoringService.apply_volatility_dampener(raw_composite, vol_factor), 2)
             raw_composite_out = round(raw_composite, 2)
 
             if composite >= 60.0:
@@ -1116,7 +1236,7 @@ class QuantitativeScoringService:
             raw_composite_out = None
             composite = None
             vol_factor = 1.0
-            signal = "Unavailable Quant Signal (Insufficient pillar data)"
+            signal = "Unavailable Quant Signal (Insufficient pillar data: < 3 available)"
 
         return {
             "composite_quantitative_score": composite,

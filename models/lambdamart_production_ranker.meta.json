@@ -1,0 +1,28 @@
+{
+  "model_type": "LambdaMARTRanker_XGBRanker",
+  "objective": "rank:ndcg",
+  "relevance_method": "rank",
+  "total_train_samples": 1189,
+  "total_decision_dates": 128,
+  "min_decision_date": "2016-01-29",
+  "max_decision_date": "2026-08-31",
+  "latest_label_maturity": "2026-09-29",
+  "feature_importances": {
+    "feature_15": 0.0909,
+    "feature_1": 0.0882,
+    "feature_4": 0.0815,
+    "feature_7": 0.0815,
+    "feature_5": 0.0792,
+    "feature_12": 0.0777,
+    "feature_16": 0.0751,
+    "feature_10": 0.0705,
+    "feature_2": 0.0644,
+    "feature_11": 0.064,
+    "feature_9": 0.0612,
+    "feature_3": 0.0601,
+    "feature_8": 0.0588,
+    "feature_6": 0.0469,
+    "feature_14": 0.0,
+    "feature_13": 0.0
+  }
+}

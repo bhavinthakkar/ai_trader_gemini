@@ -342,7 +342,8 @@ def fetch_ml_context(symbol: str):
             "available": False,
             "in_scope": False,
             "symbol": clean_sym,
-            "message": f"'{clean_sym}' is outside the focused 25-stock ETF leaders ML model universe.",
+            "model_status": ctx.get("model_status", "OUT_OF_SCOPE") if ctx else "UNAVAILABLE",
+            "message": ctx.get("message") if ctx else f"'{clean_sym}' is outside the active ML model universe.",
             "data": None,
             "out_of_scope_context": ctx,
         }

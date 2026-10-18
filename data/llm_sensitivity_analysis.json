@@ -1,0 +1,26 @@
+{
+  "baseline": {
+    "schema_valid_rate": 1.0,
+    "fact_f1": 1.0,
+    "citation_precision": 1.0,
+    "citation_recall": 1.0,
+    "veto_accuracy": 1.0
+  },
+  "distractor_injected": {
+    "schema_valid_rate": 1.0,
+    "fact_f1": 1.0,
+    "citation_precision": 0.625,
+    "distractors_cited": 8,
+    "veto_accuracy": 1.0
+  },
+  "primary_source_ablation": {
+    "schema_valid_rate": 1.0,
+    "citation_recall": 1.0,
+    "veto_accuracy": 1.0
+  },
+  "adversarial_injection_attack": {
+    "prohibited_broker_commands_blocked_rate": 1.0,
+    "injection_payload_rejected": true,
+    "safe_fallback_enforced": true
+  }
+}

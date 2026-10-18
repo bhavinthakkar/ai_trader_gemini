@@ -34,10 +34,23 @@ from catalyst_service import (
 from signal_schema import validate_signal_json
 from ticker_resolver import resolve_symbol
 from ml_signal_service import format_ml_context, get_ml_context
+from policy_config import TradingPolicy, load_policy_config
+from decision_precedence import (
+    InternalActionType,
+    DecisionStage,
+    PositionState,
+    evaluate_decision_precedence,
+)
+from signal_strength import (
+    DispersionMetric,
+    CombinationMethod,
+    calculate_signal_strength,
+)
 
+_POLICY = load_policy_config()
 WATCHLIST = ["000660.KS"]
-MIN_REWARD_RISK_RATIO = float(os.getenv("MIN_REWARD_RISK_RATIO", "1.2"))
-BUY_COMPOSITE_FLOOR = float(os.getenv("BUY_COMPOSITE_FLOOR", "60.0"))
+MIN_REWARD_RISK_RATIO = float(os.getenv("MIN_REWARD_RISK_RATIO", str(_POLICY.trade_quality.reward_risk_minimum)))
+BUY_COMPOSITE_FLOOR = float(os.getenv("BUY_COMPOSITE_FLOOR", str(_POLICY.scores.buy_minimum)))
 
 load_dotenv()
 
@@ -118,52 +131,33 @@ def days_from_earnings_date(date_str, today=None) -> int:
         return None
 
 
-def gated_confidence(composite, pillar_scores: dict, data_completeness: float = 0.87) -> float:
+def gated_confidence(composite, pillar_scores: dict, data_completeness: float = 0.87, decision: str = "BUY") -> float:
     """
-    Mechanistic decision confidence (0..1) derived from deterministic signal quality:
-    - distance of the composite from neutral 50: the more decisive the score, the higher the base.
-    - agreement among the 5 pillars: heavy dispersion (pillars contradict) drags confidence down.
-    - data completeness: missing data trims confidence.
-
-    Returns a float rounded to 2 decimals. Fully deterministic -- the model's own
-    stated confidence is recorded separately as model_confidence.
+    Formalized Signal Strength and Decision Quality Index (0..1) (Step 5.5):
+    - Score Decisiveness D = |S - 50.0| / 50.0 in [0.0, 1.0]
+    - Pillar Agreement A from normalized cross-pillar dispersion
+    - Data Completeness C from valid, fresh inputs
+    Returns a float rounded to 2 decimals. Explicitly designated as Signal Strength
+    (not the empirical probability that a trade will be profitable).
     """
-    def _f(v, default=None):
-        if v is None:
-            return default
-        try:
-            return float(v)
-        except (TypeError, ValueError):
-            return default
-
-    comp = _f(composite, 50.0)
-    keys = ["trend", "sector", "alpha", "valuation_history", "peer_valuation"]
-    valid_values = []
-    for k in keys:
-        val = _f((pillar_scores or {}).get(k), None)
-        if val is not None:
-            valid_values.append(val)
-
-    distance = max(0.0, min(1.0, abs(comp - 50.0) / 50.0))
-    if valid_values:
-        mean_p = sum(valid_values) / len(valid_values)
-        dispersion = sum(abs(v - mean_p) for v in valid_values) / (len(valid_values) * 50.0)
-        agreement = 1.0 - max(0.0, min(1.0, dispersion))
-    else:
-        agreement = 0.5
-
-    try:
-        completeness = max(0.0, min(1.0, float(data_completeness)))
-    except (TypeError, ValueError):
-        completeness = 0.87
-
-    edge_strength = 0.7 * distance + 0.3 * (agreement - 0.5)
-    base = 0.5 + 0.5 * edge_strength
-    conf = base * (0.5 + 0.5 * completeness)
-    return round(max(0.0, min(1.0, conf)), 2)
+    res = calculate_signal_strength(
+        composite_score=composite,
+        pillar_scores=pillar_scores,
+        data_completeness=data_completeness,
+        decision=decision,
+    )
+    return res.signal_strength
 
 
-def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, macro_data: dict = None, gloomberb_payload: dict = None) -> dict:
+def normalize_master_trader_json(
+    data: dict,
+    symbol: str,
+    m_data: dict = None,
+    macro_data: dict = None,
+    gloomberb_payload: dict = None,
+    policy: TradingPolicy = None,
+) -> dict:
+    active_policy = policy or load_policy_config()
     if not isinstance(data, dict):
         data = {}
     if not isinstance(m_data, dict):
@@ -219,10 +213,23 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     deterministic_scores = m_data.get("deterministic_5pillar_scores", {})
     det_quant = deterministic_scores.get("composite_quantitative_score")
     ml_context = m_data.get("ml_context")
-    is_in_scope = bool(ml_context.get("in_scope", True)) if isinstance(ml_context, dict) else False
+    model_status = ml_context.get("model_status") if isinstance(ml_context, dict) else None
+    is_in_scope = (
+        model_status == "IN_SCOPE"
+        or (
+            bool(ml_context.get("in_scope", False))
+            and model_status not in ("OUT_OF_SCOPE", "STALE_SCORE", "SCHEMA_MISMATCH", "FILE_NOT_FOUND", "LOOKAHEAD_VIOLATION")
+        )
+    ) if isinstance(ml_context, dict) else False
+
     ml_score = _to_float(ml_context.get("score_0_100"), None) if (isinstance(ml_context, dict) and is_in_scope) else None
-    ml_weight = 0.20 if det_quant is not None and ml_score is not None else 0.0
-    if det_quant is not None and ml_score is not None:
+    if is_in_scope and ml_score is not None and det_quant is not None:
+        configured_weight = _to_float(ml_context.get("ml_weight"), 0.20)
+        ml_weight = configured_weight if (configured_weight is not None and configured_weight > 0.0) else 0.20
+    else:
+        ml_weight = 0.0
+
+    if det_quant is not None and ml_score is not None and ml_weight > 0.0:
         decision_composite = round((1.0 - ml_weight) * float(det_quant) + ml_weight * ml_score, 2)
     else:
         decision_composite = _to_float(det_quant, None)
@@ -470,6 +477,26 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     elif fq_info.get("flags"):
         _append_risk(f"Financial quality notice: {'; '.join(fq_info.get('flags'))}.")
 
+    # Step 4.2: Evidence Risk Flags & Deterministic Veto Triggers
+    raw_risk_flags = data.get("risk_flags") or []
+    evidence_veto_reasons = []
+    if isinstance(raw_risk_flags, list):
+        for rf in raw_risk_flags:
+            if isinstance(rf, dict):
+                r_name = rf.get("risk_name") or rf.get("flag_id", "Risk")
+                r_sev = str(rf.get("severity", "LOW")).upper()
+                r_veto = bool(rf.get("veto_trigger", False))
+                r_cat = rf.get("category", "RISK")
+                r_docs = rf.get("supporting_document_ids", [])
+                doc_str = f" [Doc: {', '.join(r_docs)}]" if r_docs else ""
+
+                if r_veto or r_sev == "CRITICAL":
+                    note = f"Critical Evidence Risk Flag: [{r_cat}] {r_name} (Severity: {r_sev}){doc_str}"
+                    _append_risk(note)
+                    evidence_veto_reasons.append(note)
+                elif r_sev == "HIGH":
+                    _append_risk(f"High-Severity Evidence Risk: [{r_cat}] {r_name}{doc_str}.")
+
     # NO_TRADE reason codes: set whenever a deterministic gate vetoes a directional call.
     # None means the decision is the model's own signal, not a forced downgrade.
     no_trade_reason = None
@@ -490,10 +517,9 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
                 "Directional decision downgraded to HOLD: no valid buy/hold/sell probabilities were provided."
             )
 
-    # Deterministic liquidity bar (BUY-only): a long needs tradeable turnover. RVOL below 0.5x
-    # or 20d avg dollar volume below $1M means entries/exits are unreliable -- veto the BUY.
-    LIQUIDITY_MIN_RVOL_20D = 0.5
-    LIQUIDITY_MIN_AVG_DOLLAR_VOL_20D = 1_000_000.0
+    # Deterministic liquidity bar (BUY-only): a long needs tradeable turnover.
+    LIQUIDITY_MIN_RVOL_20D = active_policy.trade_quality.min_rvol_20d
+    LIQUIDITY_MIN_AVG_DOLLAR_VOL_20D = active_policy.trade_quality.min_avg_dollar_volume
     rvol_20d_val = _to_float(m_data.get("rvol_20d"), None)
     avg_dollar_vol_20d_val = _to_float(m_data.get("avg_dollar_vol_20d"), None)
     liquidity_ok = (
@@ -602,9 +628,9 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         if det_composite is None:
             det_composite = deterministic_scores.get("raw_composite")
         # A certified catalyst dip buys a discount the composite cannot score, because the composite
-        # reads the selloff itself as weak trend/alpha. That path carries its own, stricter floor
-        # plus the independent valuation-pillar, RSI, RVOL and collapse checks in the certificate.
-        buy_composite_floor = DIP_MIN_COMPOSITE if catalyst_path else BUY_COMPOSITE_FLOOR
+        # reads the selloff itself as weak trend/alpha. That path carries its own, distinct floor
+        # resolved deterministically via the policy precedence hierarchy.
+        buy_composite_floor, rule_name = active_policy.resolve_buy_score_floor(catalyst_path)
         try:
             composite_ok = det_composite is not None and float(det_composite) >= buy_composite_floor
         except (TypeError, ValueError):
@@ -619,15 +645,16 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
             and (m_data.get("rsi14") is not None or m_data.get("rvol_20d") is not None)
         )
 
-        # Adequate data coverage: reported completeness >= 80% AND a deterministic composite was
+        # Adequate data coverage: reported completeness >= policy bar AND a deterministic composite was
         # actually computed (the model cannot certify a BUY on zero deterministic pillars).
         coverage_ok = (
-            data_completeness >= 0.80
+            data_completeness >= active_policy.trade_quality.min_data_completeness
             and deterministic_scores.get("composite_quantitative_score") is not None
         )
 
         # Reward:risk must exist and clear the minimum bar (rr is None only if stop/target degenerate).
-        rr_ok = rr is not None and rr >= MIN_REWARD_RISK_RATIO
+        rr_threshold = active_policy.trade_quality.reward_risk_minimum
+        rr_ok = rr is not None and rr >= rr_threshold
 
         gate_reasons = []
         if not composite_ok:
@@ -641,20 +668,25 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
             if not deterministic_scores.get("composite_quantitative_score"):
                 gate_reasons.append("data coverage inadequate: no deterministic composite could be computed from market data")
             else:
-                gate_reasons.append(f"data coverage {data_completeness * 100:.0f}% < 80% bar")
+                gate_reasons.append(f"data coverage {data_completeness * 100:.0f}% < {active_policy.trade_quality.min_data_completeness * 100:.0f}% bar")
         if not rr_ok:
             if rr is None:
                 gate_reasons.append("reward:risk ratio unavailable from setup geometry")
             else:
-                gate_reasons.append(f"reward:risk ratio {rr:.2f} < {MIN_REWARD_RISK_RATIO}")
+                gate_reasons.append(f"reward:risk ratio {rr:.2f} < {rr_threshold:.2f}")
 
         if is_value_trap:
             gate_reasons.append(f"value-trap risk ({'; '.join(value_trap_reasons or ['low valuation multiple masks balance-sheet solvency or cash-burn risk'])})")
 
+        if evidence_veto_reasons:
+            gate_reasons.append(f"deterministic evidence veto ({'; '.join(evidence_veto_reasons)})")
+
         if gate_reasons:
             decision = "HOLD"
             gates_applied = True
-            if is_value_trap:
+            if evidence_veto_reasons:
+                no_trade_reason = "EVIDENCE_VETO"
+            elif is_value_trap:
                 no_trade_reason = "VALUE_TRAP"
             elif any("reward:risk" in r for r in gate_reasons):
                 no_trade_reason = "RR_TOO_LOW"
@@ -663,7 +695,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
             _append_risk(
                 "BUY downgraded to HOLD (deterministic BUY eligibility): " + "; ".join(gate_reasons) + "."
             )
-        elif days_to_earnings is not None and days_to_earnings <= 3:
+        elif days_to_earnings is not None and days_to_earnings <= active_policy.events.earnings_blackout_sessions:
             decision = "HOLD"
             gates_applied = True
             no_trade_reason = "EARNINGS_BLACKOUT"
@@ -681,10 +713,10 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
                 f"do not initiate a fresh position into a scheduled company event."
             )
             _append_risk(note)
-        elif vol_factor < 0.80 or vol_regime_info.get("is_extreme"):
+        elif vol_factor < active_policy.volatility.min_vol_factor or (active_policy.volatility.reject_extreme_regime and vol_regime_info.get("is_extreme")):
             decision = "HOLD"
             gates_applied = True
-            no_trade_reason = "VOLATILITY_REGIME" if vol_regime_info.get("is_extreme") and vol_factor >= 0.80 else "INSUFFICIENT_EVIDENCE"
+            no_trade_reason = "VOLATILITY_REGIME" if vol_regime_info.get("is_extreme") and vol_factor >= active_policy.volatility.min_vol_factor else "INSUFFICIENT_EVIDENCE"
             reasons_str = "; ".join(vol_regime_info.get("reasons", [])) if vol_regime_info.get("reasons") else f"ATR {atr_pct}% of price, vol factor {vol_factor:.2f}"
             note = (
                 f"BUY downgraded to HOLD: extreme volatility ({reasons_str}); "
@@ -724,6 +756,14 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
                 f"${_to_float(m_data.get('current_price'), 0.0):.2f} (analyst RR {analyst_rr:.2f})."
             )
             _append_risk(note)
+        elif evidence_veto_reasons:
+            decision = "HOLD"
+            gates_applied = True
+            no_trade_reason = "EVIDENCE_VETO"
+            note = (
+                f"BUY downgraded to HOLD by deterministic evidence veto: {'; '.join(evidence_veto_reasons)}."
+            )
+            _append_risk(note)
 
     elif decision == "SELL":
         det_composite = decision_composite
@@ -746,20 +786,25 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
 
             if not (stop_hit or target_hit or thesis_broken or extension_exit or event_derisking):
                 # Holding thesis is fully intact -- prevent premature liquidation of a winning holding
-                if det_composite is not None and float(det_composite) >= 70.0:
+                has_critical_evidence = bool(evidence_veto_reasons)
+                if active_policy.is_holding_thesis_intact(is_explicit_holding, det_composite, has_critical_risk=has_critical_evidence):
                     decision = "HOLD"
                     gates_applied = True
                     no_trade_reason = "HOLDING_THESIS_INTACT"
                     _append_risk(
                         f"SELL (LONG_EXIT) downgraded to HOLD: holding thesis is intact "
-                        f"(deterministic composite {float(det_composite):.1f} >= 70.0, "
+                        f"(deterministic composite {float(det_composite):.1f} >= {active_policy.scores.holding_thesis_minimum:.1f}, "
                         f"price ${price_v:.2f} above stop ${stop_v:.2f}, target ${target_v:.2f} not reached). "
                         f"Maintain position."
                     )
         else:
             # SHORT-TERM BEARISH DIRECTIONAL TRADE (SHORT SALE)
             # Symmetric deterministic eligibility gates to BUY:
-            short_composite_ceiling = EXTENSION_MAX_COMPOSITE if (catalyst_path and catalyst_direction == EXTENSION_SELL) else SHORT_MAX_COMPOSITE
+            short_composite_ceiling = (
+                EXTENSION_MAX_COMPOSITE
+                if (catalyst_path and catalyst_direction == EXTENSION_SELL)
+                else min(active_policy.scores.short_maximum, SHORT_MAX_COMPOSITE)
+            )
             try:
                 composite_ok = det_composite is not None and float(det_composite) <= short_composite_ceiling
             except (TypeError, ValueError):
@@ -773,11 +818,12 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
             )
 
             coverage_ok = (
-                data_completeness >= 0.80
+                data_completeness >= active_policy.trade_quality.min_data_completeness
                 and deterministic_scores.get("composite_quantitative_score") is not None
             )
 
-            short_rr_ok = short_rr is not None and short_rr >= MIN_REWARD_RISK_RATIO
+            short_rr_threshold = active_policy.trade_quality.reward_risk_minimum
+            short_rr_ok = short_rr is not None and short_rr >= short_rr_threshold
 
             gate_reasons = []
             if not composite_ok:
@@ -786,7 +832,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
                 else:
                     gate_reasons.append(
                         f"deterministic composite {float(det_composite):.1f}/100 > {short_composite_ceiling:.0f} ceiling "
-                        f"(requires structural breakdown <= {SHORT_MAX_COMPOSITE:.0f} or certified extension <= {EXTENSION_MAX_COMPOSITE:.0f})"
+                        f"(requires structural breakdown <= {short_composite_ceiling:.0f} or certified extension <= {EXTENSION_MAX_COMPOSITE:.0f})"
                     )
             if not market_data_ok:
                 gate_reasons.append("invalid or stale market data for short setup (valid price, ATR, short stop > entry, target < entry required)")
@@ -794,12 +840,12 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
                 if not deterministic_scores.get("composite_quantitative_score"):
                     gate_reasons.append("data coverage inadequate: no deterministic composite could be computed from market data")
                 else:
-                    gate_reasons.append(f"data coverage {data_completeness * 100:.0f}% < 80% bar")
+                    gate_reasons.append(f"data coverage {data_completeness * 100:.0f}% < {active_policy.trade_quality.min_data_completeness * 100:.0f}% bar")
             if not short_rr_ok:
                 if short_rr is None:
                     gate_reasons.append("short reward:risk ratio unavailable from setup geometry")
                 else:
-                    gate_reasons.append(f"short reward:risk ratio {short_rr:.2f} < {MIN_REWARD_RISK_RATIO}")
+                    gate_reasons.append(f"short reward:risk ratio {short_rr:.2f} < {short_rr_threshold:.2f}")
 
             if gate_reasons:
                 decision = "HOLD"
@@ -893,6 +939,20 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
     if decision == "HOLD":
         confidence = round(min(confidence, 0.60), 2)
 
+    # Map resolved decision to 5 internal action types (Step 5.4)
+    if decision == "BUY":
+        if sell_type == "COVER_SHORT":
+            internal_action = InternalActionType.COVER_SHORT.value
+        else:
+            internal_action = InternalActionType.BUY.value
+    elif decision == "SELL":
+        if sell_type == "LONG_EXIT":
+            internal_action = InternalActionType.SELL_TO_CLOSE.value
+        else:
+            internal_action = InternalActionType.OPEN_SHORT.value
+    else:
+        internal_action = InternalActionType.HOLD.value
+
     # Market snapshot metrics for database and outcome tracking
     entry_price = m_data.get("current_price")
     stop_loss_price = m_data.get("suggested_stop_loss")
@@ -923,6 +983,8 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         "decision": decision,
         "decision_origin": decision_origin,
         "confidence": confidence,
+        "signal_strength": confidence,
+        "is_calibrated_probability": False,
         "model_confidence": model_confidence,
         "buy_score": buy_score,
         "hold_score": hold_score,
@@ -991,6 +1053,7 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         "days_to_next_event": days_to_next_event,
         "next_event_type": next_event_type,
         "next_event_date": next_event_date,
+        "internal_action": internal_action,
         "sell_type": sell_type if (original_decision == "SELL" or decision == "SELL") else None,
         "short_reward_risk_ratio": short_rr,
         "structural_short_stop_price": structural_short_stop,
@@ -998,6 +1061,15 @@ def normalize_master_trader_json(data: dict, symbol: str, m_data: dict = None, m
         "short_stop_distance": short_stop_distance,
         "short_stop_distance_pct": short_stop_distance_pct,
         "short_expected_move_stop_ratio": short_em_stop_ratio,
+        # Step 4.2: Evidence & qualitative risk analysis schema outputs
+        "catalysts": data.get("catalysts", []),
+        "risk_flags": data.get("risk_flags", []),
+        "contradictions": data.get("contradictions", []),
+        "supporting_document_ids": data.get("supporting_document_ids", []),
+        "summary": data.get("summary", ""),
+        "advisory_action": data.get("advisory_action"),
+        "analysis_status": data.get("analysis_status"),
+        "as_of": data.get("as_of"),
         # Backward compatibility for SQLite DB string storage
         "reason": "; ".join(bull_case),
         "risk_assessment": "; ".join(key_risks),
@@ -1313,12 +1385,19 @@ def main():
                     res_obj = parsed[0]
 
                 schema_failed = False
+                retrieved_doc_ids = {
+                    r.get("document_id") for r in context.get("evidence_records", [])
+                    if isinstance(r, dict) and r.get("document_id")
+                } or None
+
                 if res_obj:
                     validated, errors = validate_signal_json(
                         res_obj,
                         require_ml_assessment=bool(ml_context and ml_context.get("in_scope", True)),
                         required_horizon_sessions=20,
                         require_forecast_20d=True,
+                        expected_ticker=symbol,
+                        valid_document_ids=retrieved_doc_ids,
                     )
 
                     # One constrained corrective retry on strict schema violations.
@@ -1329,13 +1408,14 @@ def main():
                             "=== SCHEMA VALIDATION FAILED -- RESUBMIT ONLY THE FIXED JSON ===\n"
                             "Your previous response failed strict schema validation. Correct EVERY "
                             "violation below and return ONLY a single valid JSON object with the exact "
-                            "same golden keys (decision, primary_driver, buy_score, hold_score, "
+                            "same golden keys (ticker, as_of, analysis_status, advisory_action, "
+                            "catalysts, risk_flags, supporting_document_ids, contradictions, "
+                            "missing_information, summary, decision, primary_driver, buy_score, hold_score, "
                             "sell_score, horizon_days=20, horizon_sessions=20, forecast_20d, "
                             "quant_score, pillar_scores, data_completeness, "
                             "ml_signal_assessment when an ML score was supplied, "
-                            "falsification_bull, falsification_bear, bull_case, bear_case, key_risks, "
-                            "missing_information). buy_score/hold_score/sell_score must each be in "
-                            "[0,1] and sum to ~1.0.\n"
+                            "falsification_bull, falsification_bear, bull_case, bear_case, key_risks). "
+                            "No unrestricted broker commands or unauthorized execution fields are permitted.\n"
                             f"Violations:\n- " + "\n- ".join(errors) + "\n"
                         )
                         retry_content = query_llm(
@@ -1358,6 +1438,8 @@ def main():
                                 require_ml_assessment=bool(ml_context and ml_context.get("in_scope", True)),
                                 required_horizon_sessions=20,
                                 require_forecast_20d=True,
+                                expected_ticker=symbol,
+                                valid_document_ids=retrieved_doc_ids,
                             )
 
                     if not errors:
@@ -1399,6 +1481,9 @@ def main():
                         normalized_obj["no_trade_reason"] = "SCHEMA_INVALID"
                         normalized_obj["decision"] = "HOLD"
                         normalized_obj["decision_origin"] = "SCHEMA_INVALID"
+
+                    # Step 4.1: Attach auditable evidence records to normalized signal
+                    normalized_obj["evidence_records"] = context.get("evidence_records", [])
 
                     all_results.append(normalized_obj)
                     if schema_failed:

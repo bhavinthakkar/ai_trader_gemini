@@ -149,6 +149,33 @@ def init_db(db_path=DB_PATH):
             );
         """)
 
+        # Create Auditable RAG Evidence Record Table (Step 4.1)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS rag_evidence_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_id INTEGER,
+                document_id TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                source_type TEXT NOT NULL,
+                source_url TEXT,
+                publication_timestamp TEXT NOT NULL,
+                available_timestamp TEXT NOT NULL,
+                retrieval_timestamp TEXT NOT NULL,
+                passage_or_excerpt TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                event_horizon TEXT NOT NULL,
+                reliability REAL,
+                importance REAL,
+                hybrid_score REAL,
+                sub_query TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (signal_id) REFERENCES signals (id)
+            );
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_evidence_ticker ON rag_evidence_records(ticker);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_evidence_doc ON rag_evidence_records(document_id);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_evidence_pub_avail ON rag_evidence_records(publication_timestamp, available_timestamp);")
+
         conn.commit()
 
 
@@ -342,8 +369,103 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                 pillar_status, pillar_input_tracking, financial_quality_score, is_value_trap, value_trap_reasons,
                 ml_score, ml_predicted_return, ml_rank, ml_universe_size, ml_signal_label, ml_disposition
             ))
+            signal_id = cursor.lastrowid
+            evidence_records = item.get("evidence_records") or []
+            if evidence_records and signal_id:
+                _save_evidence_records_with_cursor(cursor, evidence_records, signal_id=signal_id)
         conn.commit()
     print(f"[DB] Successfully saved {len(results)} analysis records to database.")
+
+
+def _save_evidence_records_with_cursor(cursor, records: list, signal_id: int | None = None):
+    """Internal helper to insert evidence records using an active cursor."""
+    from evidence_record import EvidenceRecord
+
+    for r in records:
+        if isinstance(r, EvidenceRecord):
+            rec = r
+        elif isinstance(r, dict):
+            rec = EvidenceRecord.from_dict(r)
+        else:
+            continue
+
+        cursor.execute("""
+            INSERT INTO rag_evidence_records (
+                signal_id, document_id, ticker, source_type, source_url,
+                publication_timestamp, available_timestamp, retrieval_timestamp,
+                passage_or_excerpt, event_type, event_horizon,
+                reliability, importance, hybrid_score, sub_query
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            signal_id,
+            rec.document_id,
+            rec.ticker,
+            rec.source_type,
+            rec.source_url,
+            rec.publication_timestamp,
+            rec.available_timestamp,
+            rec.retrieval_timestamp,
+            rec.passage_or_excerpt,
+            rec.event_type,
+            rec.event_horizon,
+            rec.reliability,
+            rec.importance,
+            rec.hybrid_score,
+            rec.sub_query,
+        ))
+
+
+def save_evidence_records(records: list, signal_id: int | None = None, db_path=DB_PATH):
+    """Save a list of EvidenceRecords or dictionaries to SQLite."""
+    if not records:
+        return
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        _save_evidence_records_with_cursor(cursor, records, signal_id=signal_id)
+        conn.commit()
+
+
+def get_evidence_records_for_signal(signal_id: int, db_path=DB_PATH) -> list[dict]:
+    """Retrieve all auditable evidence records associated with a signal ID."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM rag_evidence_records
+            WHERE signal_id = ?
+            ORDER BY hybrid_score DESC, id ASC
+        """, (signal_id,))
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def query_evidence_as_of(
+    ticker: str,
+    as_of_timestamp: str,
+    limit: int = 50,
+    db_path=DB_PATH,
+) -> list[dict]:
+    """
+    Retrieve auditable evidence records for a ticker with strict point-in-time filtering.
+
+    Enforces zero-lookahead:
+        publication_timestamp <= as_of_timestamp AND available_timestamp <= as_of_timestamp
+    """
+    init_db(db_path)
+    from evidence_record import format_iso_timestamp
+    as_of_iso = format_iso_timestamp(as_of_timestamp)
+
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM rag_evidence_records
+            WHERE ticker = ?
+              AND publication_timestamp <= ?
+              AND available_timestamp <= ?
+            ORDER BY publication_timestamp DESC, hybrid_score DESC
+            LIMIT ?
+        """, (str(ticker).strip().upper(), as_of_iso, as_of_iso, limit))
+        return [dict(row) for row in cursor.fetchall()]
 
 
 def get_latest_signals(db_path=DB_PATH, max_age_days: int | None = 7, order_by: str = "date_desc") -> list:

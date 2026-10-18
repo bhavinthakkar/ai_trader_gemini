@@ -35,6 +35,14 @@ LIST_KEYS = (
 OBJECT_KEYS = ("thesis_assumptions", "valuation_assessment", "price_level_map")
 
 
+from llm_evidence_schema import (
+    FORBIDDEN_BROKER_FIELDS,
+    LLMEvidenceAnalysis,
+    validate_llm_evidence_response,
+    evidence_analysis_to_signal_dict,
+)
+
+
 def _to_float(val, default=None):
     if val is None:
         return default
@@ -60,6 +68,8 @@ def validate_signal_json(
     require_ml_assessment=False,
     required_horizon_sessions=None,
     require_forecast_20d=False,
+    expected_ticker=None,
+    valid_document_ids=None,
 ):
     """
     Validate an extracted LLM signal object against the strict schema.
@@ -72,6 +82,31 @@ def validate_signal_json(
     errors = []
     if not isinstance(obj, dict):
         return {}, ["response is not a JSON object"]
+
+    # Step 4.2: Intercept prohibited broker command fields
+    forbidden = [k for k in obj.keys() if str(k).lower() in FORBIDDEN_BROKER_FIELDS]
+    if forbidden:
+        return {}, [f"prohibited broker command fields detected: {forbidden}. Output must not contain broker execution instructions."]
+
+    # Step 4.2: Detect if object is structured under the strict LLMEvidenceAnalysis contract
+    is_evidence_obj = any(k in obj for k in ("as_of", "analysis_status", "catalysts", "risk_flags", "advisory_action"))
+    if is_evidence_obj:
+        model, evidence_errors = validate_llm_evidence_response(
+            obj,
+            expected_ticker=expected_ticker,
+            valid_document_ids=valid_document_ids,
+        )
+        if evidence_errors:
+            return {}, evidence_errors
+        # Convert validated evidence model to signal dictionary for normalize_master_trader_json
+        norm = evidence_analysis_to_signal_dict(model)
+        return norm, []
+
+    # Check expected ticker for traditional signal format
+    if expected_ticker:
+        raw_ticker = obj.get("ticker") or obj.get("stock") or obj.get("symbol")
+        if raw_ticker and str(raw_ticker).strip().upper() != str(expected_ticker).strip().upper():
+            return {}, [f"ticker mismatch: received '{raw_ticker}', expected '{expected_ticker}'"]
 
     norm = dict(obj)
     clean = lambda s: " ".join(str(s).strip().split())

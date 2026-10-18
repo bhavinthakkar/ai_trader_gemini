@@ -106,11 +106,11 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(job_resp.json()["model"], "ling")
 
     def test_ml_context_available(self):
-        resp = self.client.get("/api/ml/context/ON")
+        resp = self.client.get("/api/ml/context/NVDA")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertTrue(data["available"])
-        self.assertEqual(data["symbol"], "ON")
+        self.assertEqual(data["symbol"], "NVDA")
         self.assertIsNotNone(data["data"])
         self.assertGreater(data["data"]["score_0_100"], 80.0)
         self.assertEqual(data["data"]["signal"], "STRONG OUTPERFORM")

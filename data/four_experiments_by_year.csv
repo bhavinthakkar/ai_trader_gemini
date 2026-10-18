@@ -1,0 +1,21 @@
+Year,Experiment,Net Return,SPY Return,Excess Return
+2022,Experiment A (Quant Only),0.203,-0.0699,0.273
+2023,Experiment A (Quant Only),0.3987,0.1106,0.2881
+2024,Experiment A (Quant Only),0.6436,0.2685,0.3751
+2025,Experiment A (Quant Only),0.2176,0.1412,0.0764
+2026,Experiment A (Quant Only),-0.1175,0.0384,-0.1559
+2022,Experiment B (ML Only),0.3461,-0.0699,0.4161
+2023,Experiment B (ML Only),1.5123,0.1106,1.4017
+2024,Experiment B (ML Only),0.4732,0.2685,0.2047
+2025,Experiment B (ML Only),0.4342,0.1412,0.293
+2026,Experiment B (ML Only),-0.1956,0.0384,-0.2341
+2022,Experiment C (Quant 80% + ML 20%),-0.1123,-0.0699,-0.0424
+2023,Experiment C (Quant 80% + ML 20%),1.2147,0.1106,1.1041
+2024,Experiment C (Quant 80% + ML 20%),0.6352,0.2685,0.3667
+2025,Experiment C (Quant 80% + ML 20%),0.1202,0.1412,-0.021
+2026,Experiment C (Quant 80% + ML 20%),-0.2755,0.0384,-0.314
+2022,Experiment D (Training-Validated: Quant 30% + ML 70%),0.3289,-0.0699,0.3988
+2023,Experiment D (Training-Validated: Quant 30% + ML 70%),1.6916,0.1106,1.581
+2024,Experiment D (Training-Validated: Quant 30% + ML 70%),0.8681,0.2685,0.5996
+2025,Experiment D (Training-Validated: Quant 30% + ML 70%),0.2287,0.1412,0.0875
+2026,Experiment D (Training-Validated: Quant 30% + ML 70%),-0.1956,0.0384,-0.2341

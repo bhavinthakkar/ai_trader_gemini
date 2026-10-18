@@ -72,7 +72,7 @@
     <g class="shadow" transform="translate(30, 20)">
         <rect width="1180" height="75" rx="10" fill="url(#grad-header)" />
         <text x="590" y="32" text-anchor="middle" fill="#FFFFFF" class="font-title" font-size="20">⚡ ai_trader_gemini: Quantitative Scoring &amp; Compliance Decision Architecture</text>
-        <text x="590" y="56" text-anchor="middle" fill="#94A3B8" class="font-body" font-size="12">Deterministic 5-Pillar Quant + Quality/Vol Guard + 20% ML Hybrid (stock_ml) + Compliance Safety Gates</text>
+        <text x="590" y="56" text-anchor="middle" fill="#94A3B8" class="font-body" font-size="12">Deterministic 5-Pillar Quant + Point-in-Time LambdaMART ML + Auditable Evidence RAG + Safety Gates</text>
     </g>
     
 
@@ -89,7 +89,7 @@
     <!-- Column 3 Header -->
     <g transform="translate(820, 110)">
         <rect width="390" height="30" rx="6" fill="#6D28D9" />
-        <text x="195" y="20" text-anchor="middle" fill="#FFFFFF" class="font-title" font-size="12">TRACK C: QUALITATIVE RAG &amp; LLM ADVISOR</text>
+        <text x="195" y="20" text-anchor="middle" fill="#FFFFFF" class="font-title" font-size="12">TRACK C: AUDITABLE RAG &amp; EVIDENCE SERVICE</text>
     </g>
     
 
@@ -153,7 +153,7 @@
         <text x="15" y="42" fill="#334155" class="font-body" font-size="11">• ATR% = (ATR14 / Price) × 100</text>
         <text x="15" y="58" fill="#334155" class="font-body" font-size="10.5">• Calm (≤1.5%): 1.00  |  Normal (≤2.5%): 0.95</text>
         <text x="15" y="72" fill="#334155" class="font-body" font-size="10.5">• Elevated (≤4.0%): 0.90  |  Extreme (&gt;4.0%): 0.85</text>
-        <text x="15" y="90" fill="#4338CA" class="font-bold" font-size="11">Deterministic Quant = Composite_adj × vol_factor</text>
+        <text x="15" y="90" fill="#4338CA" class="font-bold" font-size="11">Deterministic Quant = 50 + (Composite_adj - 50) × vol_factor</text>
     </g>
     
 
@@ -198,9 +198,9 @@
         <text x="15" y="17" fill="#065F46" class="font-title" font-size="11">ML Export Resolution &amp; Freshness</text>
         <text x="15" y="42" fill="#334155" class="font-body" font-size="11">1. Priority: data/xgb_focused_current_scores.csv</text>
         <text x="15" y="58" fill="#334155" class="font-body" font-size="11">2. Fallback: data/xgb_current_scores_1m.csv (S&amp;P 500)</text>
-        <text x="15" y="74" fill="#334155" class="font-body" font-size="11">3. Freshness Gate: Scores &gt; 7 days old are discarded</text>
-        <text x="15" y="90" fill="#334155" class="font-body" font-size="11">4. Out-of-Scope Fallback: in_scope=False, score=50.0</text>
-        <text x="15" y="106" fill="#047857" class="font-bold" font-size="10.5">ml_weight automatically set to 0.0% for out-of-scope</text>
+        <text x="15" y="74" fill="#334155" class="font-body" font-size="11">3. Freshness: Session aligned (max allowable staleness)</text>
+        <text x="15" y="90" fill="#334155" class="font-body" font-size="11">4. Out-of-Scope: model_status="OUT_OF_SCOPE", ml_score=None</text>
+        <text x="15" y="106" fill="#047857" class="font-bold" font-size="10.5">ml_weight=0.0% (100% deterministic quant fallback)</text>
     </g>
     
 
@@ -218,43 +218,43 @@
     <g class="shadow" transform="translate(820, 150)">
         <rect width="390" height="110" rx="8" fill="#FFFFFF" stroke="#DDD6FE" stroke-width="1.5" />
         <rect width="390" height="24" rx="8" fill="#F5F3FF" />
-        <text x="15" y="17" fill="#5B21B6" class="font-title" font-size="11">16-Channel Institutional &amp; RAG Feeds</text>
-        <text x="15" y="42" fill="#334155" class="font-body" font-size="11">• SEC EDGAR 10-K, 10-Q, 8-K Direct Filings &amp; Form 4</text>
-        <text x="15" y="58" fill="#334155" class="font-body" font-size="11">• Official Company IR &amp; Earnings Call Transcripts</text>
-        <text x="15" y="74" fill="#334155" class="font-body" font-size="11">• FastEmbed 384-dim Hybrid Multiplicative Ranking</text>
-        <text x="15" y="90" fill="#334155" class="font-body" font-size="11">• Dual-Horizon: 24h/7d Catalysts vs Multi-Year Fundamentals</text>
+        <text x="15" y="17" fill="#5B21B6" class="font-title" font-size="11">10-Field Auditable Evidence RAG Feeds</text>
+        <text x="15" y="42" fill="#334155" class="font-body" font-size="11">• Primary Authority: SEC EDGAR 10-K/Q, Form 4 (1.00)</text>
+        <text x="15" y="58" fill="#334155" class="font-body" font-size="11">• Official Macro: FRED Yields &amp; BLS Releases (1.00)</text>
+        <text x="15" y="74" fill="#334155" class="font-body" font-size="11">• Point-in-Time Zero-Lookahead: pub ≤ avail ≤ as_of</text>
+        <text x="15" y="90" fill="#334155" class="font-body" font-size="11">• Schema: doc_id, timestamps, source_url, event_type/horizon</text>
     </g>
     
 
     <g class="shadow" transform="translate(820, 280)">
         <rect width="390" height="120" rx="8" fill="#FFFFFF" stroke="#C4B5FD" stroke-width="1.5" />
         <rect width="390" height="24" rx="8" fill="#F5F3FF" />
-        <text x="15" y="17" fill="#5B21B6" class="font-title" font-size="11">Multi-Agent Specialized Analysts</text>
-        <text x="15" y="42" fill="#334155" class="font-body" font-size="11">• Market Agent: Technical patterns, volume &amp; RSI</text>
-        <text x="15" y="58" fill="#334155" class="font-body" font-size="11">• News Agent: Catalyst scoring &amp; headline verification</text>
-        <text x="15" y="74" fill="#334155" class="font-body" font-size="11">• Analyst Agent: Guidance shifts &amp; earnings revisions</text>
-        <text x="15" y="90" fill="#334155" class="font-body" font-size="11">• Institutional Agent: 13F whale flow &amp; insider buys</text>
-        <text x="15" y="106" fill="#334155" class="font-body" font-size="11">• Macro &amp; Risk Agents: Treasury yield curve &amp; blackouts</text>
+        <text x="15" y="17" fill="#5B21B6" class="font-title" font-size="11">FastEmbed Multiplicative Hybrid Retrieval</text>
+        <text x="15" y="42" fill="#334155" class="font-body" font-size="11">• Model: BAAI/bge-small-en-v1.5 (384-dim dense vectors)</text>
+        <text x="15" y="58" fill="#334155" class="font-body" font-size="11">• Multi-Query: 6 Analytical Category Sub-Questions</text>
+        <text x="15" y="74" fill="#334155" class="font-body" font-size="11">• Scoring: CosineSim × Reliability × Importance × Recency</text>
+        <text x="15" y="90" fill="#334155" class="font-body" font-size="11">• Filings strictly outrank secondary news/social chatter</text>
+        <text x="15" y="106" fill="#334155" class="font-body" font-size="11">• Persisted to SQLite table: rag_evidence_records</text>
     </g>
     
 
     <g class="shadow" transform="translate(820, 420)">
         <rect width="390" height="150" rx="8" fill="#FFFFFF" stroke="#8B5CF6" stroke-width="2" />
         <rect width="390" height="24" rx="8" fill="#EDE9FE" />
-        <text x="15" y="17" fill="#4C1D95" class="font-title" font-size="11">LLM Master Trader (Moonshot Kimi-K3 / Nemotron-3)</text>
-        <text x="15" y="42" fill="#334155" class="font-body" font-size="11">• Synthesizes multi-agent evidence and macro narrative</text>
-        <text x="15" y="58" fill="#6D28D9" class="font-bold" font-size="11">• Proposes Candidate Action: [BUY / HOLD / SELL]</text>
-        <text x="15" y="74" fill="#334155" class="font-body" font-size="11">• Proposes Entry Price, Stop Loss, and Target Price</text>
-        <text x="15" y="90" fill="#334155" class="font-body" font-size="11">• Generates forecast_20d: OUTPERFORM / UNDERPERFORM</text>
+        <text x="15" y="17" fill="#4C1D95" class="font-title" font-size="11">LLM Evidence &amp; Risk-Analysis Service</text>
+        <text x="15" y="42" fill="#334155" class="font-body" font-size="11">• Synthesizes verified primary sources &amp; macro context</text>
+        <text x="15" y="58" fill="#6D28D9" class="font-bold" font-size="11">• Identifies Catalysts: Earnings, guidance, products</text>
+        <text x="15" y="74" fill="#334155" class="font-body" font-size="11">• Detects Contradictions: Trend vs valuation divergence</text>
+        <text x="15" y="90" fill="#334155" class="font-body" font-size="11">• Generates forecast_20d relative outlook &amp; risk flags</text>
         <rect x="15" y="100" width="360" height="40" rx="4" fill="#FEF2F2" stroke="#FCA5A5" />
-        <text x="22" y="116" fill="#991B1B" class="font-bold" font-size="10.5">⚠️ ADVISORY ONLY — NOT FINAL TRADER</text>
-        <text x="22" y="130" fill="#B91C1C" class="font-body" font-size="10">Candidate proposal is routed into Compliance Gates for validation.</text>
+        <text x="22" y="116" fill="#991B1B" class="font-bold" font-size="10.5">⚠️ EVIDENCE SERVICE ONLY — NOT APPROVAL GATE</text>
+        <text x="22" y="130" fill="#B91C1C" class="font-body" font-size="10">Direction set by Quant/ML; LLM flags risks for deterministic gates.</text>
     </g>
     
 
     <g class="shadow" transform="translate(875, 705)">
         <rect width="280" height="38" rx="19" fill="#6D28D9" />
-        <text x="140" y="24" text-anchor="middle" fill="#FFFFFF" class="font-title" font-size="12">Candidate Setup Proposal (Advisory)</text>
+        <text x="140" y="24" text-anchor="middle" fill="#FFFFFF" class="font-title" font-size="12">LLM Catalysts &amp; Risk Flags (Advisory)</text>
     </g>
     
 
@@ -269,14 +269,14 @@
         <text x="380" y="18" text-anchor="middle" fill="#92400E" class="font-title" font-size="12">STAGE D: ML HYBRID BLENDING &amp; SCOPE RESOLUTION</text>
 
         <rect x="20" y="38" width="345" height="70" rx="6" fill="#FFFFFF" stroke="#FBBF24" />
-        <text x="30" y="54" fill="#B45309" class="font-bold" font-size="11">IN-SCOPE (Focused 25 ETF Leaders):</text>
-        <text x="30" y="72" fill="#1E293B" class="font-title" font-size="11.5">Composite = 0.80 × Quant + 0.20 × ML</text>
-        <text x="30" y="92" fill="#475569" class="font-body" font-size="10.5">• High-conviction alpha boost for modeled leaders</text>
+        <text x="30" y="54" fill="#B45309" class="font-bold" font-size="11">IN-SCOPE (Production Hybrid - Exp D):</text>
+        <text x="30" y="72" fill="#1E293B" class="font-title" font-size="11.5">Composite = 0.30 × Quant + 0.70 × ML</text>
+        <text x="30" y="92" fill="#475569" class="font-body" font-size="10.5">• Validated: +49.85% CAGR, 1.22 Sh, +37.7% Ann. Excess</text>
 
         <rect x="395" y="38" width="345" height="70" rx="6" fill="#FFFFFF" stroke="#FBBF24" />
         <text x="405" y="54" fill="#B45309" class="font-bold" font-size="11">OUT-OF-SCOPE (Unmodeled Tickers):</text>
         <text x="405" y="72" fill="#1E293B" class="font-title" font-size="11.5">Composite = 1.00 × Quant (ML wt = 0%)</text>
-        <text x="405" y="92" fill="#475569" class="font-body" font-size="10.5">• Graceful degradation; ML score set to neutral 50.0</text>
+        <text x="405" y="92" fill="#475569" class="font-body" font-size="10.5">• Graceful degradation; zero ML weight assigned</text>
     </g>
     
 
@@ -382,7 +382,7 @@
         <rect width="365" height="160" rx="10" fill="url(#grad-buy)" stroke="#059669" stroke-width="2.5" />
         <rect width="365" height="28" rx="10" fill="#059669" />
         <text x="182" y="19" text-anchor="middle" fill="#FFFFFF" class="font-title" font-size="13">CERTIFIED BUY SIGNAL</text>
-        <text x="15" y="48" fill="#065F46" class="font-bold" font-size="11.5">✓ LLM Proposed BUY + All 5 Gates Passed</text>
+        <text x="15" y="48" fill="#065F46" class="font-bold" font-size="11.5">✓ Candidate BUY (Quant/ML) + All 5 Gates Passed</text>
         <text x="15" y="66" fill="#1E293B" class="font-body" font-size="11">• Composite ≥ 60.0 &amp; Reward-to-Risk ≥ 1.20</text>
         <text x="15" y="82" fill="#1E293B" class="font-body" font-size="11">• Stop loss safely outside option noise threshold</text>
         <text x="15" y="98" fill="#1E293B" class="font-body" font-size="11">• Earnings cleared (&gt; 3 trading sessions)</text>
@@ -396,11 +396,11 @@
         <rect width="365" height="28" rx="10" fill="#DC2626" />
         <text x="182" y="19" text-anchor="middle" fill="#FFFFFF" class="font-title" font-size="13">ALGORITHMIC VETO → FORCE HOLD</text>
         <text x="15" y="48" fill="#991B1B" class="font-bold" font-size="11.5">✗ Triggered when ANY Gate Fails</text>
-        <text x="15" y="66" fill="#1E293B" class="font-body" font-size="11">• Overrides glowing LLM thesis for capital protection</text>
+        <text x="15" y="66" fill="#1E293B" class="font-body" font-size="11">• Enforces capital protection over sentiment</text>
         <text x="15" y="82" fill="#1E293B" class="font-body" font-size="11">• Value-Trap penalty or Composite &lt; 60.0</text>
         <text x="15" y="98" fill="#1E293B" class="font-body" font-size="11">• Stop sits inside 1-SD option expected move</text>
         <text x="15" y="116" fill="#991B1B" class="font-bold" font-size="11">• Failure Reason Saved in no_trade_reason</text>
-        <text x="15" y="134" fill="#334155" class="font-body" font-size="10.5">• Audit trail retained in database signal JSON</text>
+        <text x="15" y="134" fill="#334155" class="font-body" font-size="10.5">• Auditable evidence records persisted to SQLite</text>
     </g>
     
 

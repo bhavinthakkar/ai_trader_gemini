@@ -3,7 +3,7 @@ import json
 import datetime
 import numpy as np
 from collections.abc import Mapping
-from typing import List, Dict, TypeAlias
+from typing import List, Dict, TypeAlias, Optional, Union, Any
 
 _JSONScalar: TypeAlias = str | int | float | bool | None
 _JSONValue: TypeAlias = _JSONScalar | list["_JSONValue"] | dict[str, "_JSONValue"]
@@ -36,6 +36,21 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Quantitative 5-Pillar Scoring Engine
 from quantitative_scoring_service import QuantitativeScoringService
+
+# Step 4.1 Auditable Evidence Record
+from evidence_record import (
+    EvidenceRecord,
+    SourceType,
+    EventType,
+    EventHorizon,
+    SOURCE_RELIABILITY_WEIGHTS,
+    format_iso_timestamp,
+    generate_document_id,
+    is_point_in_time,
+    infer_source_type,
+    infer_event_type,
+    infer_event_horizon,
+)
 
 
 def compute_recency_score(published_at_str: str, time_horizon: str = "CURRENT") -> float:
@@ -264,7 +279,7 @@ Output MUST be a valid JSON object matching the requested schema.
 === STRICT OUTPUT CONTRACT ===
 - buy_score / hold_score / sell_score must each be a number in [0,1] and must SUM to approximately 1.0 (within 0.05) -- a BUY requires buy_score to actually be the probability mass.
 - data_completeness is computed DETERMINISTICALLY by the system from live provider availability; your estimate is recorded for reference only and never governs the signal. Report it honestly; inflating it changes nothing.
-- When a fresh 20-session ML score is supplied, it contributes 20% of the hybrid quantitative composite; the deterministic five-pillar score contributes 80%. Without a fresh ML score, use the five-pillar score alone. The system applies this blend to directional eligibility.
+- When a fresh 20-session ML score is supplied, it reflects an ordinal cross-sectional relative rank within the active peer group (50 = cohort median, 80 = top quintile). It does not represent an expected return percentage or win probability. Directional eligibility is strictly governed by the deterministic quantitative engine where 50 represents directional neutrality.
 - Forecast the stock's relative performance over the next 20 trading sessions (about one month). Return forecast_20d as OUTPERFORM, MARKET_LIKE, or UNDERPERFORM, with confidence and concise evidence. Compare this forecast directly with the ML score when available; explain disagreement.
 - decision is an actionable trade recommendation, while forecast_20d is the relative performance outlook. HOLD means the setup does not pass trade criteria; it does not mean the forecast must be MARKET_LIKE.
 - A directional BUY can only be certified if the hybrid quant composite >= 70, fresh valid market data, data coverage >= 80%, reward:risk >= 1.2, and liquid market. If you cannot honestly support a BUY, return "HOLD".
@@ -355,7 +370,7 @@ Schema:
 You are a senior quantitative analyst and trading risk manager. Forecast relative stock performance over the next 20 trading sessions (about one month) using only supplied market, company, macro, and source data. Never invent missing inputs.
 
 DECISION RULES:
-- Treat the deterministic hybrid quantitative score, setup geometry, and reward/risk as authoritative. When a fresh 20-session ML score is supplied, it is 20% of the hybrid score; the five-pillar market composite is 80%. The ML percentile maps to 0-100. Without a fresh score, use the five-pillar composite alone.
+- Treat the deterministic quantitative score, setup geometry, and reward/risk as authoritative for directional execution. The 20-session ML score is an ordinal cross-sectional rank (50 = cohort median, not zero excess return). Directional BUY requires deterministic quantitative score >= 50.0 (or hybrid composite >= 70).
 - BUY requires hybrid composite >= 70, data completeness >= 0.80, reward/risk >= 1.5, non-extreme volatility, and no earnings blackout. Otherwise return HOLD unless the evidence clearly supports SELL. (The only exception is a certificate-verified DIP_BUY below, which uses its own stricter floor.)
 - When an ML score is supplied, include ml_signal_assessment with disposition SUPPORTIVE, CONFLICTING, or NEUTRAL and a concise reason. Explicitly address disagreement; the deterministic blend means the score affects eligibility even if your narrative assessment differs.
 - Always provide forecast_20d with relative_outlook OUTPERFORM, MARKET_LIKE, or UNDERPERFORM, a confidence from 0 to 1, and concise rationale. Compare this forecast with the 20-session ML signal when supplied.
@@ -458,10 +473,68 @@ Schema:
             chunk_overlap=50,
             separators=["\n\n", "\n", ". ", " ", ""]
         )
+        self.last_retrieved_evidence_records: List[EvidenceRecord] = []
 
-    def convert_gloomberb_to_documents(self, gloomberb_payload: Dict, technical_data: Dict = None, institutional_data: Dict = None) -> List[Document]:
+    def _create_document(
+        self,
+        page_content: str,
+        ticker: str,
+        source: str,
+        document_type: str,
+        published_at: str,
+        effective_date: str = None,
+        reliability: float = None,
+        importance: float = 0.75,
+        time_horizon: str = "CURRENT",
+        source_url: str = "",
+        as_of_timestamp: str = None,
+    ) -> Optional[Document]:
+        """Create LangChain Document with explicit 10-field auditable evidence metadata.
+
+        Strictly enforces zero-lookahead point-in-time filtering when as_of_timestamp is provided.
         """
-        Converts qualitative textual data feeds strictly into LangChain Documents.
+        pub_ts = format_iso_timestamp(published_at)
+        avail_ts = format_iso_timestamp(effective_date or published_at)
+        if as_of_timestamp and not is_point_in_time(pub_ts, avail_ts, as_of_timestamp):
+            return None
+
+        src_type = infer_source_type(source, document_type)
+        evt_type = infer_event_type(page_content, document_type)
+        evt_horizon = infer_event_horizon(pub_ts, time_horizon)
+
+        if reliability is None:
+            reliability = SOURCE_RELIABILITY_WEIGHTS.get(src_type.value, 0.75)
+
+        doc_id = generate_document_id(ticker, src_type.value, pub_ts, page_content)
+
+        meta = {
+            "document_id": doc_id,
+            "ticker": ticker,
+            "source": source,
+            "source_type": src_type.value,
+            "source_url": source_url or "",
+            "document_type": document_type,
+            "published_at": pub_ts,
+            "publication_timestamp": pub_ts,
+            "effective_date": avail_ts,
+            "available_timestamp": avail_ts,
+            "reliability": float(reliability),
+            "importance": float(importance),
+            "time_horizon": time_horizon,
+            "event_type": evt_type.value,
+            "event_horizon": evt_horizon.value,
+        }
+        return Document(page_content=page_content, metadata=meta)
+
+    def convert_gloomberb_to_documents(
+        self,
+        gloomberb_payload: Dict,
+        technical_data: Dict = None,
+        institutional_data: Dict = None,
+        as_of_timestamp: str = None,
+    ) -> List[Document]:
+        """
+        Converts qualitative textual data feeds strictly into LangChain Documents with 10-field metadata.
         Numerical indicators (RSI, EMA, ATR, Price, P/E, Yields, Options IV) are EXCLUDED from vector embedding
         and passed directly as structured data to the LLM.
         Applies Explicit Source Reliability Hierarchy:
@@ -488,32 +561,44 @@ Schema:
                 horizon = "CURRENT"
 
             text = f"[{src} Catalyst (Published: {pub_date})] {item.get('title', '')}. Details: {item.get('summary', '')}"
-            docs.append(Document(page_content=text, metadata={
-                "ticker": symbol,
-                "source": src,
-                "document_type": "AggregatedNews",
-                "published_at": pub_date,
-                "effective_date": pub_date,
-                "reliability": rel_score,
-                "importance": 0.65,
-                "time_horizon": horizon
-            }))
+            url = item.get("url") or item.get("link") or ""
+            doc = self._create_document(
+                page_content=text,
+                ticker=symbol,
+                source=src,
+                document_type="AggregatedNews",
+                published_at=pub_date,
+                effective_date=pub_date,
+                reliability=rel_score,
+                importance=0.65,
+                time_horizon=horizon,
+                source_url=url,
+                as_of_timestamp=as_of_timestamp,
+            )
+            if doc is not None:
+                docs.append(doc)
 
         # 2. SEC EDGAR Filings (10-K = HISTORICAL, 10-Q / 8-K = CURRENT)
         for filing in gloomberb_payload.get("filings", []):
             form_type = str(filing.get('form', '')).upper()
             horizon = "HISTORICAL" if "10-K" in form_type else "CURRENT"
             text = f"[SEC EDGAR Form {filing.get('form')} ({filing.get('date')})] {filing.get('summary')}"
-            docs.append(Document(page_content=text, metadata={
-                "ticker": symbol,
-                "source": "SEC EDGAR",
-                "document_type": f"Form-{filing.get('form', 'Filing')}",
-                "published_at": filing.get('date', today_str),
-                "effective_date": filing.get('date', today_str),
-                "reliability": 1.00,
-                "importance": 1.00,
-                "time_horizon": horizon
-            }))
+            url = filing.get("url") or filing.get("link") or f"https://www.sec.gov/edgar/browse/?CIK={symbol}"
+            doc = self._create_document(
+                page_content=text,
+                ticker=symbol,
+                source="SEC EDGAR",
+                document_type=f"Form-{filing.get('form', 'Filing')}",
+                published_at=filing.get('date', today_str),
+                effective_date=filing.get('date', today_str),
+                reliability=1.00,
+                importance=1.00,
+                time_horizon=horizon,
+                source_url=url,
+                as_of_timestamp=as_of_timestamp,
+            )
+            if doc is not None:
+                docs.append(doc)
 
         # 3. Form 4 Insider Transactions & 13F Institutional Holdings -> Horizon: HISTORICAL
         insider = gloomberb_payload.get("insider_institutional", {})
@@ -522,31 +607,41 @@ Schema:
             txs = insider.get("insider_transactions", [])
             tx_text = "; ".join(f"{t.get('insider')}: {t.get('transaction')} ({t.get('shares')} shs)" for t in txs) if txs else "Form 4 filings logged."
             insider_text = f"[Form 4 Insiders & 13F Holdings] Institutional Ownership: {inst_pct}. Recent Insider Activity: {tx_text}."
-            docs.append(Document(page_content=insider_text, metadata={
-                "ticker": symbol,
-                "source": "SEC EDGAR (Form 4/13F)",
-                "document_type": "Form-4",
-                "published_at": today_str,
-                "effective_date": today_str,
-                "reliability": 1.00,
-                "importance": 0.85,
-                "time_horizon": "HISTORICAL"
-            }))
+            doc = self._create_document(
+                page_content=insider_text,
+                ticker=symbol,
+                source="SEC EDGAR (Form 4/13F)",
+                document_type="Form-4",
+                published_at=today_str,
+                effective_date=today_str,
+                reliability=1.00,
+                importance=0.85,
+                time_horizon="HISTORICAL",
+                source_url=f"https://www.sec.gov/edgar/browse/?CIK={symbol}",
+                as_of_timestamp=as_of_timestamp,
+            )
+            if doc is not None:
+                docs.append(doc)
 
         # 4. Company Profile & Business Architecture Description -> Horizon: HISTORICAL
         profile = gloomberb_payload.get("profile", {})
         if profile and profile.get("description") != "N/A":
             profile_text = f"[Company Profile & Business Description] Sector: {profile.get('sector')}. Description: {profile.get('description')}"
-            docs.append(Document(page_content=profile_text, metadata={
-                "ticker": symbol,
-                "source": "Gloomberb Profile",
-                "document_type": "CompanyProfile",
-                "published_at": today_str,
-                "effective_date": today_str,
-                "reliability": 0.85,
-                "importance": 0.75,
-                "time_horizon": "HISTORICAL"
-            }))
+            doc = self._create_document(
+                page_content=profile_text,
+                ticker=symbol,
+                source="Gloomberb Profile",
+                document_type="CompanyProfile",
+                published_at=today_str,
+                effective_date=today_str,
+                reliability=0.85,
+                importance=0.75,
+                time_horizon="HISTORICAL",
+                source_url="",
+                as_of_timestamp=as_of_timestamp,
+            )
+            if doc is not None:
+                docs.append(doc)
 
         # 5. Wall Street Analyst Research, Ratings & Price Targets -> Horizon: CURRENT
         analyst = gloomberb_payload.get("analyst_ratings", {})
@@ -557,16 +652,21 @@ Schema:
                 f"Median Target: ${analyst.get('median_target_price')}, High: ${analyst.get('high_target_price')}, Low: ${analyst.get('low_target_price')}. "
                 f"Recent Major Bank Ratings: {actions_text if actions_text else 'Consensus ratings active.'}"
             )
-            docs.append(Document(page_content=analyst_text, metadata={
-                "ticker": symbol,
-                "source": "Gloomberb Analyst Research",
-                "document_type": "AnalystRatings",
-                "published_at": today_str,
-                "effective_date": today_str,
-                "reliability": 0.85,
-                "importance": 0.85,
-                "time_horizon": "CURRENT"
-            }))
+            doc = self._create_document(
+                page_content=analyst_text,
+                ticker=symbol,
+                source="Gloomberb Analyst Research",
+                document_type="AnalystRatings",
+                published_at=today_str,
+                effective_date=today_str,
+                reliability=0.85,
+                importance=0.85,
+                time_horizon="CURRENT",
+                source_url="",
+                as_of_timestamp=as_of_timestamp,
+            )
+            if doc is not None:
+                docs.append(doc)
 
         # 6. Upcoming Earnings Guidance, Estimates & Revision Momentum -> Horizon: CURRENT
         earnings = gloomberb_payload.get("earnings", {})
@@ -580,16 +680,21 @@ Schema:
                 f"Analyst EPS Revisions: Last 7 Days (Up: {rev7.get('up', 0)}, Down: {rev7.get('down', 0)}), "
                 f"Last 30 Days (Up: {rev30.get('up', 0)}, Down: {rev30.get('down', 0)})."
             )
-            docs.append(Document(page_content=earnings_text, metadata={
-                "ticker": symbol,
-                "source": "Gloomberb Earnings Calendar",
-                "document_type": "EarningsGuidance",
-                "published_at": today_str,
-                "effective_date": today_str,
-                "reliability": 0.95,
-                "importance": 0.90,
-                "time_horizon": "CURRENT"
-            }))
+            doc = self._create_document(
+                page_content=earnings_text,
+                ticker=symbol,
+                source="Gloomberb Earnings Calendar",
+                document_type="EarningsGuidance",
+                published_at=today_str,
+                effective_date=today_str,
+                reliability=0.95,
+                importance=0.90,
+                time_horizon="CURRENT",
+                source_url="",
+                as_of_timestamp=as_of_timestamp,
+            )
+            if doc is not None:
+                docs.append(doc)
 
         # 7. Historical Earnings Surprises & Corporate Events -> Horizon: HISTORICAL
         events = gloomberb_payload.get("events", {})
@@ -597,16 +702,21 @@ Schema:
             surprises = events.get("historical_earnings_surprises", [])
             s_text = "; ".join(f"[{s.get('date')}: Actual ${s.get('actual')} vs Est ${s.get('estimate')} ({s.get('surprise_pct')})]" for s in surprises[:4])
             events_text = f"[Historical Earnings Surprises & Execution History] Past Quarters: {s_text}."
-            docs.append(Document(page_content=events_text, metadata={
-                "ticker": symbol,
-                "source": "Gloomberb Corporate Events",
-                "document_type": "EarningsSurprises",
-                "published_at": today_str,
-                "effective_date": today_str,
-                "reliability": 1.00,
-                "importance": 0.85,
-                "time_horizon": "HISTORICAL"
-            }))
+            doc = self._create_document(
+                page_content=events_text,
+                ticker=symbol,
+                source="Gloomberb Corporate Events",
+                document_type="EarningsSurprises",
+                published_at=today_str,
+                effective_date=today_str,
+                reliability=1.00,
+                importance=0.85,
+                time_horizon="HISTORICAL",
+                source_url="",
+                as_of_timestamp=as_of_timestamp,
+            )
+            if doc is not None:
+                docs.append(doc)
 
         # 8. Major Benchmark Market Indices & Market Breadth -> Horizon: CURRENT
         indices = gloomberb_payload.get("market_indices", [])
@@ -615,90 +725,120 @@ Schema:
             idx_str = ", ".join(f"{i.get('name', i.get('symbol'))} {i.get('change_pct')}" for i in indices)
             mover_str = ", ".join(f"{m.get('symbol')} {m.get('change_pct')}" for m in movers[:4]) if movers else "Normal breadth"
             market_text = f"[Major Benchmark Indices & Market Breadth] Index Performance: {idx_str}. Top Active Movers: {mover_str}."
-            docs.append(Document(page_content=market_text, metadata={
-                "ticker": symbol,
-                "source": "Gloomberb Benchmark Indices",
-                "document_type": "MarketBreadth",
-                "published_at": today_str,
-                "effective_date": today_str,
-                "reliability": 0.95,
-                "importance": 0.80,
-                "time_horizon": "CURRENT"
-            }))
+            doc = self._create_document(
+                page_content=market_text,
+                ticker=symbol,
+                source="Gloomberb Benchmark Indices",
+                document_type="MarketBreadth",
+                published_at=today_str,
+                effective_date=today_str,
+                reliability=0.95,
+                importance=0.80,
+                time_horizon="CURRENT",
+                source_url="",
+                as_of_timestamp=as_of_timestamp,
+            )
+            if doc is not None:
+                docs.append(doc)
 
         # 9. Institutional Multi-Source Qualitative Text Documents
         if institutional_data:
             # 5a. Company Investor-Relations (IR) Website Releases -> Horizon: CURRENT
             for ir in institutional_data.get("investor_relations", []):
                 text = f"[Company Investor Relations ({ir.get('source')})] {ir.get('title')}. Summary: {ir.get('summary')}"
-                docs.append(Document(page_content=text, metadata={
-                    "ticker": symbol,
-                    "source": ir.get('source', 'Investor Relations'),
-                    "document_type": ir.get('document_type', 'IRRelease'),
-                    "published_at": ir.get('published_at', today_str),
-                    "effective_date": ir.get('published_at', today_str),
-                    "reliability": ir.get('reliability', 0.95),
-                    "importance": ir.get('importance', 0.90),
-                    "time_horizon": "CURRENT"
-                }))
+                doc = self._create_document(
+                    page_content=text,
+                    ticker=symbol,
+                    source=ir.get('source', 'Investor Relations'),
+                    document_type=ir.get('document_type', 'IRRelease'),
+                    published_at=ir.get('published_at', today_str),
+                    effective_date=ir.get('published_at', today_str),
+                    reliability=ir.get('reliability', 0.95),
+                    importance=ir.get('importance', 0.90),
+                    time_horizon="CURRENT",
+                    source_url=ir.get('url', ''),
+                    as_of_timestamp=as_of_timestamp,
+                )
+                if doc is not None:
+                    docs.append(doc)
 
             # 5b. SEC EDGAR Direct Filings -> Horizon: CURRENT (8-K / 10-Q) or HISTORICAL (10-K)
             for sec in institutional_data.get("sec_edgar_direct", []):
                 form_type = str(sec.get('form', '')).upper()
                 horizon = "HISTORICAL" if "10-K" in form_type else "CURRENT"
                 text = f"[SEC EDGAR Direct Filing Form {sec.get('form')} ({sec.get('date')})] {sec.get('summary')}"
-                docs.append(Document(page_content=text, metadata={
-                    "ticker": symbol,
-                    "source": "SEC EDGAR Direct",
-                    "document_type": sec.get('document_type', f"Form-{sec.get('form')}"),
-                    "published_at": sec.get('published_at', today_str),
-                    "effective_date": sec.get('published_at', today_str),
-                    "reliability": sec.get('reliability', 1.00),
-                    "importance": sec.get('importance', 1.00),
-                    "time_horizon": horizon
-                }))
+                doc = self._create_document(
+                    page_content=text,
+                    ticker=symbol,
+                    source="SEC EDGAR Direct",
+                    document_type=sec.get('document_type', f"Form-{sec.get('form')}"),
+                    published_at=sec.get('published_at', sec.get('date', today_str)),
+                    effective_date=sec.get('published_at', sec.get('date', today_str)),
+                    reliability=sec.get('reliability', 1.00),
+                    importance=sec.get('importance', 1.00),
+                    time_horizon=horizon,
+                    source_url=sec.get('url', f"https://www.sec.gov/edgar/browse/?CIK={symbol}"),
+                    as_of_timestamp=as_of_timestamp,
+                )
+                if doc is not None:
+                    docs.append(doc)
 
             # 5c. Quarterly Earnings Call Transcript Highlights -> Horizon: CURRENT
             for call in institutional_data.get("earnings_calls", []):
                 text = f"[Quarterly Earnings Call Transcript Takeaways] {call.get('summary')}"
-                docs.append(Document(page_content=text, metadata={
-                    "ticker": symbol,
-                    "source": "Earnings Call Feed",
-                    "document_type": call.get('document_type', 'EarningsTranscript'),
-                    "published_at": call.get('published_at', today_str),
-                    "effective_date": call.get('published_at', today_str),
-                    "reliability": call.get('reliability', 0.90),
-                    "importance": call.get('importance', 1.00),
-                    "time_horizon": "CURRENT"
-                }))
+                doc = self._create_document(
+                    page_content=text,
+                    ticker=symbol,
+                    source="Earnings Call Feed",
+                    document_type=call.get('document_type', 'EarningsTranscript'),
+                    published_at=call.get('published_at', today_str),
+                    effective_date=call.get('published_at', today_str),
+                    reliability=call.get('reliability', 0.90),
+                    importance=call.get('importance', 1.00),
+                    time_horizon="CURRENT",
+                    source_url=call.get('url', ''),
+                    as_of_timestamp=as_of_timestamp,
+                )
+                if doc is not None:
+                    docs.append(doc)
 
             # 5d. Official Corporate Press Releases -> Horizon: CURRENT
             for pr in institutional_data.get("official_press_releases", []):
                 text = f"[Official Corporate Press Release ({pr.get('source')})] {pr.get('title')}. Summary: {pr.get('summary')}"
-                docs.append(Document(page_content=text, metadata={
-                    "ticker": symbol,
-                    "source": pr.get('source', 'Press Release'),
-                    "document_type": pr.get('document_type', 'PressRelease'),
-                    "published_at": pr.get('published_at', today_str),
-                    "effective_date": pr.get('published_at', today_str),
-                    "reliability": pr.get('reliability', 0.95),
-                    "importance": pr.get('importance', 0.75),
-                    "time_horizon": "CURRENT"
-                }))
+                doc = self._create_document(
+                    page_content=text,
+                    ticker=symbol,
+                    source=pr.get('source', 'Press Release'),
+                    document_type=pr.get('document_type', 'PressRelease'),
+                    published_at=pr.get('published_at', today_str),
+                    effective_date=pr.get('published_at', today_str),
+                    reliability=pr.get('reliability', 0.95),
+                    importance=pr.get('importance', 0.75),
+                    time_horizon="CURRENT",
+                    source_url=pr.get('url', ''),
+                    as_of_timestamp=as_of_timestamp,
+                )
+                if doc is not None:
+                    docs.append(doc)
 
             # 5e. Reputable Financial Media News Coverage & Institutional Commentary -> Horizon: CURRENT
             for news_item in institutional_data.get("reputable_news", []):
                 text = f"[Reputable Financial News ({news_item.get('source')})] {news_item.get('title')}. Details: {news_item.get('summary')}"
-                docs.append(Document(page_content=text, metadata={
-                    "ticker": symbol,
-                    "source": news_item.get('source', 'Reputable News'),
-                    "document_type": news_item.get('document_type', 'ReputableNews'),
-                    "published_at": news_item.get('published_at', today_str),
-                    "effective_date": news_item.get('published_at', today_str),
-                    "reliability": news_item.get('reliability', 0.70),
-                    "importance": news_item.get('importance', 0.70),
-                    "time_horizon": "CURRENT"
-                }))
+                doc = self._create_document(
+                    page_content=text,
+                    ticker=symbol,
+                    source=news_item.get('source', 'Reputable News'),
+                    document_type=news_item.get('document_type', 'ReputableNews'),
+                    published_at=news_item.get('published_at', today_str),
+                    effective_date=news_item.get('published_at', today_str),
+                    reliability=news_item.get('reliability', 0.70),
+                    importance=news_item.get('importance', 0.70),
+                    time_horizon="CURRENT",
+                    source_url=news_item.get('url', ''),
+                    as_of_timestamp=as_of_timestamp,
+                )
+                if doc is not None:
+                    docs.append(doc)
 
         return docs
 
@@ -742,7 +882,14 @@ Schema:
             }
         }
 
-    def retrieve_knowledge_by_questions(self, gloomberb_payload: Dict, technical_data: Dict = None, institutional_data: Dict = None, max_per_question: int = 2) -> Dict[str, List[str]]:
+    def retrieve_knowledge_by_questions(
+        self,
+        gloomberb_payload: Dict,
+        technical_data: Dict = None,
+        institutional_data: Dict = None,
+        max_per_question: int = 2,
+        as_of_timestamp: str = None,
+    ) -> Dict[str, List[str]]:
         """
         Executes Multi-Query Dual-Horizon Hybrid RAG Retrieval:
         1. Ingests all document chunks with time_horizon metadata ('CURRENT' vs 'HISTORICAL').
@@ -750,15 +897,22 @@ Schema:
         3. Queries vector space across 6 analytical questions partitioned by temporal horizon.
         4. Calculates Multiplicative Hybrid Score (Similarity x Reliability x Importance x Recency) per question.
         5. Returns top unique passages per question category.
+        6. Constructs and retains explicit 10-field EvidenceRecord instances for auditability.
         """
         symbol = gloomberb_payload.get("symbol", "N/A")
         print(f"[Multi-Query Hybrid RAG] Ingesting Gloomberb & Institutional Data for {symbol}...")
 
-        raw_docs = self.convert_gloomberb_to_documents(gloomberb_payload, technical_data, institutional_data)
+        raw_docs = self.convert_gloomberb_to_documents(
+            gloomberb_payload,
+            technical_data,
+            institutional_data,
+            as_of_timestamp=as_of_timestamp,
+        )
         doc_chunks = self.text_splitter.split_documents(raw_docs)
         chunk_texts = [d.page_content for d in doc_chunks]
 
         if not chunk_texts:
+            self.last_retrieved_evidence_records = []
             return {"General": ["No document chunks available."]}
 
         print(f"[Multi-Query Hybrid RAG] Generating FastEmbed dense vectors for {len(chunk_texts)} document chunks...")
@@ -769,6 +923,7 @@ Schema:
         questions_dict = self.get_analytical_questions(symbol)
         categorized_results = {}
         global_used_indices = set()
+        collected_evidence_records = []
 
         print(f"[Multi-Query Hybrid RAG] Executing Dual-Horizon Multi-Query Search across 6 Analytical Categories:")
 
@@ -829,9 +984,36 @@ Schema:
                 formatted_passage = f"[Metadata: Ticker={m.get('ticker')} | Horizon={m.get('time_horizon')} | Source={m.get('source')} | Type={m.get('document_type')} | Published={m.get('published_at')} | Reliability={m.get('reliability')} | Importance={m.get('importance')}]\nContent: {passage_text}"
                 category_passages.append(formatted_passage)
 
+                # Step 4.1: Construct explicit 10-field Auditable EvidenceRecord
+                doc_id = m.get("document_id") or generate_document_id(
+                    symbol,
+                    m.get("source_type", SourceType.GENERAL_NEWS.value),
+                    m.get("publication_timestamp", m.get("published_at", "")),
+                    passage_text,
+                )
+                rec = EvidenceRecord(
+                    document_id=doc_id,
+                    ticker=symbol,
+                    source_type=m.get("source_type", SourceType.GENERAL_NEWS.value),
+                    source_url=m.get("source_url", ""),
+                    publication_timestamp=m.get("publication_timestamp", m.get("published_at", "")),
+                    available_timestamp=m.get("available_timestamp", m.get("effective_date", m.get("published_at", ""))),
+                    retrieval_timestamp=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    passage_or_excerpt=passage_text,
+                    event_type=m.get("event_type", EventType.GENERAL_BUSINESS.value),
+                    event_horizon=m.get("event_horizon", EventHorizon.SHORT_TERM_7D.value),
+                    reliability=float(m.get("reliability", 0.75)),
+                    importance=float(m.get("importance", 0.75)),
+                    hybrid_score=round(float(item["hybrid_score"]), 4),
+                    sub_query=cat_name,
+                    as_of_timestamp=as_of_timestamp,
+                )
+                collected_evidence_records.append(rec)
+
             print(f"  • [{target_horizon}] {cat_name}: Retrieved {len(category_passages)} top hybrid-ranked passages.")
             categorized_results[cat_name] = category_passages
 
+        self.last_retrieved_evidence_records = collected_evidence_records
         return categorized_results
 
     def retrieve_knowledge(self, gloomberb_payload: Dict, technical_data: Dict = None, institutional_data: Dict = None, query: str = None) -> List[str]:
@@ -842,12 +1024,29 @@ Schema:
             flat_list.extend(passages)
         return flat_list
 
+    def retrieve_evidence_as_of(
+        self,
+        ticker: str,
+        as_of_timestamp: str,
+        limit: int = 50,
+        db_path: str = None,
+    ) -> List[Dict]:
+        """Query auditable evidence records strictly as of the simulated decision time."""
+        from db import query_evidence_as_of, DB_PATH
+        return query_evidence_as_of(
+            ticker=ticker,
+            as_of_timestamp=as_of_timestamp,
+            limit=limit,
+            db_path=db_path or DB_PATH,
+        )
+
     def get_nemotron_payload(
         self,
         gloomberb_payload: Dict,
         technical_data: Dict,
         institutional_data: Dict = None,
         prompt_profile: str = "full",
+        as_of_timestamp: str = None,
     ) -> Dict:
         """Build a full cloud prompt or a compact 8K local-model prompt."""
         if prompt_profile not in {"full", "compact"}:
@@ -855,11 +1054,14 @@ Schema:
 
         compact = prompt_profile == "compact"
         symbol = gloomberb_payload.get("symbol", "N/A")
+        rag_kwargs = {"max_per_question": 1 if compact else 2}
+        if as_of_timestamp is not None:
+            rag_kwargs["as_of_timestamp"] = as_of_timestamp
         categorized_rag = self.retrieve_knowledge_by_questions(
             gloomberb_payload,
             technical_data,
             institutional_data,
-            max_per_question=1 if compact else 2,
+            **rag_kwargs,
         )
 
         profile = gloomberb_payload.get("profile", {})
@@ -1099,6 +1301,7 @@ Return a valid JSON object matching the required schema.
             "user_prompt": user_prompt.strip(),
             "technical_summary": market_benchmark_summary,
             "prompt_profile": prompt_profile,
+            "evidence_records": [r.to_dict() for r in getattr(self, "last_retrieved_evidence_records", [])],
         }
 
     def get_portfolio_analysis_payload(

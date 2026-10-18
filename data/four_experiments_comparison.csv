@@ -1,0 +1,5 @@
+Experiment,Net CAGR,Sharpe Ratio,Sortino Ratio,Max Drawdown,Calmar Ratio,Mean Turnover,Annual Excess Ret,Information Ratio,Mean Rank IC
+Experiment A (Quant Only),+26.29%,1.09,1.67,-22.19%,1.18,44.6%,+15.84%,0.93,0.0676
+Experiment B (ML Only),+45.46%,1.14,3.42,-30.25%,1.5,40.2%,+34.57%,1.05,0.0859
+Experiment C (Quant 80% + ML 20%),+22.81%,0.81,1.42,-31.56%,0.72,47.3%,+14.91%,0.6,0.0793
+Experiment D (Training-Validated: Quant 30% + ML 70%),+49.85%,1.22,3.11,-32.36%,1.54,46.4%,+37.71%,1.17,0.0916

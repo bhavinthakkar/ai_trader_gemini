@@ -101,15 +101,15 @@ flowchart TD
         B3 --> B4["ML 20-Session Score (0-100)"]:::ml
     end
 
-    subgraph TrackC ["Track C: Qualitative RAG & LLM"]
-        C1["SEC 10-K/Q, Transcripts, Press Releases"]:::rag --> C2["Dual-Horizon FastEmbed RAG & 6 Sub-Agents"]:::rag
-        C2 --> C3["LLM Master Trader Synthesis (Advisory)"]:::rag
-        C3 --> C4["Candidate Trade Setup (BUY/HOLD/SELL)"]:::rag
+    subgraph TrackC ["Track C: Auditable RAG & LLM Evidence Service"]
+        C1["10-Field Auditable Evidence Feeds (SEC EDGAR, FRED, IR)"]:::rag --> C2["Dual-Horizon FastEmbed RAG & Point-in-Time Filter"]:::rag
+        C2 --> C3["LLM Evidence Synthesis & Contradiction Detection"]:::rag
+        C3 --> C4["Catalysts & Risk Flags (Advisory - Stored in DB)"]:::rag
     end
 
     subgraph Blending ["Stage D: ML Hybrid Blending Engine"]
         A5 & B4 --> D1{"In-Scope Check (25 Leaders?)"}
-        D1 -->|"In-Scope: YES"| D2["0.80 × Quant + 0.20 × ML"]
+        D1 -->|"In-Scope: YES"| D2["0.30 × Quant + 0.70 × ML (Exp D)"]
         D1 -->|"Out-of-Scope: NO"| D3["1.00 × Quant (ML wt = 0%)"]
         D2 & D3 --> D4["Decision Composite Score (0-100)"]
     end
@@ -174,7 +174,7 @@ $$\text{ATR\%} = \frac{\text{ATR}_{14}}{\text{Price}} \times 100$$
 * $\text{ATR\%} \le 4.0\%$ (elevated): Multiplier = **$0.90$**
 * $\text{ATR\%} > 4.0\%$ (extreme volatility): Multiplier = **$0.85$**
 
-$$\text{Deterministic Quant Score} = \text{Raw Composite} \times \text{vol\_factor}$$
+$$\text{Deterministic Quant Score} = 50.0 + (\text{Raw Composite} - 50.0) \times \text{vol\_factor}$$
 
 #### Stage D: Machine Learning Hybrid Blending (80% Quant + 20% ML)
 The trader consumes point-in-time 20-session XGBoost scores exported from the sibling `stock_ml` repository. The service prioritizes the focused 25-stock ETF leader universe (`data/xgb_focused_current_scores.csv`), with graceful fallback to the broad S&P 500 universe (`data/xgb_current_scores_1m.csv`):
@@ -183,7 +183,7 @@ The trader consumes point-in-time 20-session XGBoost scores exported from the si
   $$\text{Decision Composite} = 0.80 \times \text{Deterministic Quant Score} + 0.20 \times \text{ML Score}$$
 * **For Out-of-Scope Stocks**:
   $$\text{Decision Composite} = 1.00 \times \text{Deterministic Quant Score} \quad (\text{ML weight} = 0\%)$$
-  *(Out-of-scope stocks safely return `in_scope=False`, `score_0_100=50.0`, and `status="OUT_OF_SCOPE"`; their ML weight is zeroed out so unmodeled stocks are scored purely on deterministic market data).*
+  *(Out-of-scope stocks explicitly return `in_scope=False`, `model_status="OUT_OF_SCOPE"`, `ml_score=None`, and `ml_weight=0.0`; unmodeled stocks never receive an artificial 50.0 score or accidental ML weighting, falling back 100% to deterministic quantitative market data).*
 
 To refresh and export current scores from `stock_ml`:
 ```bash

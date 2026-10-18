@@ -1,0 +1,189 @@
+# Institutional Deterministic Trading Compliance Policy Configuration (Step 5.1)
+# Version: 1.0.0
+# Scope: Centralized safety gates, entry/exit score thresholds, and precedence rules.
+
+version: "1.0.0"
+policy_name: "Institutional Deterministic Compliance Policy"
+
+# =============================================================================
+# 1. COMPOSITE SCORE FLOORS & CEILINGS
+# =============================================================================
+scores:
+  # Minimum deterministic composite score (0-100) required to certify a standard long entry
+  buy_minimum: 60.0
+  # Minimum composite score required for a certified catalyst dip-buy
+  dip_buy_minimum: 52.0
+  # Maximum composite score permitted to certify a directional short entry
+  short_maximum: 45.0
+  # Score threshold above which an existing long holding's thesis is considered intact
+  holding_thesis_minimum: 70.0
+
+# =============================================================================
+# 2. CATALYST DIP-BUY SEPARATE BRANCH SPECIFICATION
+# =============================================================================
+# The dip-buy branch is defined distinctly from standard momentum/trend entries.
+# It buys an adverse-catalyst dislocation with sound valuation rather than technical momentum.
+dip_buy:
+  enabled: true
+  # Branch-specific composite floor (dislocation discounts trend score by design)
+  score_minimum: 52.0
+  # Required 5-day price drop percentage window
+  min_drop_pct_5d: 5.0
+  max_drop_pct_5d: 15.0
+  # RSI boundaries: must be oversold but not in an unrecoverable structural collapse
+  min_rsi: 30.0
+  max_rsi: 45.0
+  # Fundamental valuation anchors: business must remain cheap vs history and peers
+  min_valuation_history: 60.0
+  min_peer_valuation: 55.0
+  # Volume surge confirming institutional liquidation absorption
+  min_rvol: 1.2
+  # Maximum recency of the adverse news trigger
+  max_catalyst_age_days: 3
+  # Prohibit dip-buys into confirmed balance sheet value traps
+  forbid_value_trap: true
+  forbid_collapse: true
+
+# =============================================================================
+# 3. TRADE QUALITY & SETUP GEOMETRY
+# =============================================================================
+trade_quality:
+  # Minimum channel-anchored upside-to-downside reward-to-risk ratio
+  reward_risk_minimum: 1.20
+  # Minimum data completeness percentage required across all 5 quantitative pillars
+  min_data_completeness: 0.80
+  # Minimum relative volume (20-day ratio) required for tradeable liquidity
+  min_rvol_20d: 0.50
+  # Minimum 20-day average daily dollar turnover in USD
+  min_avg_dollar_volume: 1000000.0
+  # Chase filter: distance to 20-day high in ATRs (values below threshold indicate extended chase)
+  max_distance_to_resistance_atr: 0.80
+  # Wall Street target sanity ratio: street 12M target vs entry price
+  min_wall_street_rr: 1.0
+  # Maximum permissible stop loss distance as a percentage of entry price (e.g. 30%)
+  max_stop_distance_pct: 0.30
+  # Expected slippage per execution leg in basis points (5 bps = 0.05%)
+  slippage_bps: 5.0
+  # Transaction commissions and regulatory fees per execution leg in basis points
+  commission_bps: 1.0
+  # Minimum statistical edge: win_probability must exceed net break-even win rate by at least this fraction
+  min_edge_pct: 0.02
+  # Require strictly positive mathematical expectancy E[R] > 0 after accounting for transaction costs
+  require_positive_expectancy: true
+  # Maximum order participation rate relative to 20-day Average Daily Volume (ADV) (1.0% = 0.01)
+  max_participation_rate: 0.01
+  # Maximum permissible estimated market impact in basis points (square-root model)
+  max_market_impact_bps: 15.0
+  # Empirically justified gated confidence threshold required for directional entry (Gate 5)
+  min_confidence_threshold: 0.65
+
+# =============================================================================
+# 4. EVENT RISKS & SCHEDULED BLACKOUTS
+# =============================================================================
+events:
+  # Number of trading sessions preceding scheduled earnings report triggering mandatory HOLD
+  earnings_blackout_sessions: 3
+  # Whether scheduled company event risks (investor days, regulatory decisions) force HOLD
+  event_risk_blackout: true
+  # Number of days preceding ex-dividend date during which new short sales are prohibited
+  ex_dividend_short_blackout_days: 2
+
+# =============================================================================
+# 5. VOLATILITY NOISE & OPTION REGIMES
+# =============================================================================
+volatility:
+  # Minimum ATR volatility dampening factor (vol_factor < 0.80 triggers volatility veto)
+  min_vol_factor: 0.80
+  # Maximum ratio of stop-loss distance to option-implied expected move
+  max_stop_expected_move_ratio: 0.85
+  # Minimum stop distance noise multiple: stop must clear >= 0.85 * 1-sigma move to avoid price-noise shakeout
+  min_stop_noise_multiple: 0.85
+  # Horizon in trading days for options 1-sigma expected move calculation
+  option_horizon_days: 20
+  # Lookback window in trading days for realized volatility fallback when options are missing
+  realized_vol_fallback_window: 20
+  # Reject entries when market regime is classified as extreme tail-risk volatility
+  reject_extreme_regime: true
+
+# =============================================================================
+# 6. DATA QUALITY & FRESHNESS CONTRACTS
+# =============================================================================
+data_quality:
+  # Reject entries if market prices, ATR, or technical indicators are stale or non-positive
+  require_fresh_market_data: true
+  # Reject entries for in-scope tickers if ML model predictions are stale or missing
+  require_fresh_ml_data_for_in_scope_tickers: true
+  # Maximum allowable staleness (in calendar days) for market data snapshots
+  max_market_data_staleness_days: 5
+  # Maximum allowable staleness (in calendar days) for ML predictions
+  max_ml_score_staleness_days: 5
+  # Data outage policy (Step 5.4): Strictly block new entries during data outage
+  block_new_entries_on_outage: true
+  # Inviolable Invariant: NEVER silently substitute neutral-looking scores (e.g. 50.0) during an outage
+  allow_neutral_score_substitution: false
+  # Separate fail-safe policy for open positions during data outage (never ignore open risk)
+  enable_open_position_failsafe: true
+  # Maximum duration in hours to maintain open position surveillance during quote outage before emergency alert
+  max_outage_tolerance_hours: 2.0
+
+# =============================================================================
+# 7. HOLDING THESIS GUARD (PREVENT PREMATURE EXITS)
+# =============================================================================
+holding_guard:
+  enabled: true
+  # Composite threshold for active holdings to prevent premature stopouts on noise
+  thesis_intact_score_minimum: 70.0
+  # If true, an active long position with intact thesis is converted from SELL to HOLD
+  prevent_premature_exit: true
+  # Mandatory forced exit exceptions that must NEVER be blocked by the holding guard:
+  never_block_stop_breach: true
+  never_block_critical_evidence_veto: true
+  never_block_earnings_blackout: true
+  # Catastrophic composite collapse floor: exits are never blocked if composite falls below this
+  catastrophic_composite_floor: 50.0
+
+# =============================================================================
+# 8. GOVERNANCE & EXECUTION POLICY
+# =============================================================================
+policy:
+  # Strict Invariant: The LLM functions purely as an evidence service and CANNOT authorize orders
+  llm_has_execution_authority: false
+  # If data is missing, ambiguous, or gates fail, default unconditionally to HOLD
+  fail_closed_for_new_entries: true
+  # Enable deterministic veto when qualitative evidence uncovers critical fraud/litigation
+  enable_evidence_veto: true
+  # Enable deterministic veto when financial solvency indicates a value trap
+  enable_value_trap_veto: true
+
+# =============================================================================
+# 9. SIGNAL STRENGTH & CONFIDENCE FORMALIZATION (STEP 5.5)
+# =============================================================================
+signal_strength:
+  # Score decisiveness neutral anchor (D = |S - neutral_score_anchor| / 50.0)
+  neutral_score_anchor: 50.0
+  # Dispersion metric across normalized pillar scores: 'mad', 'std', or 'range'
+  dispersion_metric: "mad"
+  # Maximum theoretical dispersion scale for normalization (50.0 for [0, 100] scores)
+  max_dispersion_scale: 50.0
+  # Minimum valid pillars required for consensus dispersion calculation
+  min_valid_pillars: 3
+  # Default agreement when fewer than min_valid_pillars are present
+  fallback_agreement: 0.50
+  # Combination method: 'hierarchical_gated', 'linear_weighted', or 'geometric'
+  combination_method: "hierarchical_gated"
+  # Weights for Hierarchical Gated combination:
+  weight_decisiveness: 0.70
+  weight_agreement: 0.30
+  # Completeness blend factor (0.50 + 0.50 * completeness)
+  completeness_blend_weight: 0.50
+  # Direct linear combination weights (must sum to 1.0)
+  linear_weight_decisiveness: 0.50
+  linear_weight_agreement: 0.25
+  linear_weight_completeness: 0.25
+  # Non-directional HOLD confidence ceiling
+  hold_ceiling: 0.60
+  # Directional entry threshold (signal strength >= 0.65)
+  min_signal_strength_threshold: 0.65
+  # Explicit labeling: Not an empirical win/profit probability until calibrated
+  is_calibrated_probability: false
+
