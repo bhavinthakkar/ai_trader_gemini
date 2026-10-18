@@ -187,3 +187,113 @@ signal_strength:
   # Explicit labeling: Not an empirical win/profit probability until calibrated
   is_calibrated_probability: false
 
+# =============================================================================
+# 10. PORTFOLIO RISK & POSITION SIZING (STEP 7.1 & STEP 7.2)
+# =============================================================================
+portfolio_risk:
+  # Baseline portfolio equity in USD
+  default_portfolio_equity: 100000.0
+  # Maximum permissible fraction of portfolio equity risked per trade (1.0% = 0.010)
+  max_risk_fraction_per_trade: 0.010
+  # Maximum position market value as fraction of portfolio equity (10% = 0.10)
+  max_position_equity_pct: 0.10
+  # Maximum single-stock exposure (default 10%)
+  max_single_stock_pct: 0.10
+  # Maximum participation rate of 20-day Average Daily Volume (1.0% = 0.01)
+  max_adv_participation_pct: 0.01
+  # Maximum permitted gross portfolio exposure (1.00 = 100% unleveraged)
+  max_gross_exposure_pct: 1.00
+  # Gap risk reserve expressed as multiple of ATR (G = 0.50 * ATR)
+  gap_risk_atr_multiple: 0.50
+  # Fallback price gap risk percentage when ATR is unavailable (1.0% = 0.01)
+  default_gap_risk_pct: 0.01
+  # Invariant: Do not automatically give a score of 90 a larger risk budget than a score of 70
+  allow_score_budget_scaling: false
+  # Minimum executable share count
+  min_trade_size_shares: 1
+
+  # --- Step 7.2 Portfolio-Level Controls ---
+  # Maximum aggregate exposure permitted in any single economic/GICS sector (25% = 0.25)
+  max_sector_pct: 0.25
+  # Maximum combined exposure to any correlated factor cluster in the 25-stock universe (30% = 0.30)
+  max_correlated_factor_pct: 0.30
+  # Maximum absolute net exposure (|Long - Short| / Equity) (80% = 0.80)
+  max_net_exposure_pct: 0.80
+  # Minimum unencumbered cash reserve buffer (10% = 0.10)
+  min_cash_reserve_pct: 0.10
+  # Drawdown warning threshold from high-water mark triggering risk de-risking (5% = 0.05)
+  drawdown_warning_pct: 0.05
+  # Drawdown circuit breaker halt threshold freezing all new risk entries (10% = 0.10)
+  drawdown_halt_pct: 0.10
+  # Risk budget fraction multiplier during de-risking regime (0.50x normal risk)
+  drawdown_dampener_factor: 0.50
+  # Maximum allowable days to liquidate portfolio at 1% ADV participation
+  max_portfolio_liquidation_days: 3.0
+
+  # --- Step 7.2 Short Eligibility & Financing Checks ---
+  # Maximum allowable annualized borrow fee in basis points (500 bps = 5.0% annual)
+  short_borrow_fee_max_bps: 500.0
+  # Additional cash margin collateral required for short positions (50% Reg-T margin)
+  short_margin_requirement_pct: 0.50
+  # Minimum reward-to-risk ratio required to certify directional short entry (1.50 vs 1.20 for long)
+  short_min_rr_threshold: 1.50
+  # Minimum RSI required to authorize short (blocks shorting into exhausted oversold panic)
+  short_min_rsi_threshold: 25.0
+  # Require structural trend breakdown (price < EMA20 and price < EMA50) before opening short
+  short_require_trend_breakdown: true
+  # Prohibit shorting into fortress-quality value stocks (squeeze trap guard)
+  short_forbid_high_quality_value: true
+
+# =============================================================================
+# 10. ORDER EXECUTION & OPERATIONAL SAFETY CONTROLS (Step 7.3)
+# =============================================================================
+execution:
+  # Maximum allowed staleness of market quotes in seconds before rejecting entry
+  max_quote_staleness_seconds: 300.0
+  # Maximum allowed price drift percentage between signal generation and order routing (2.0% = 0.02)
+  max_price_drift_pct: 0.02
+  # Maximum participation rate of 20-day ADV (1.0% = 0.01)
+  max_adv_participation_pct: 0.01
+  # Maximum permissible estimated market impact in basis points (square-root model)
+  max_market_impact_bps: 15.0
+  # Default commission per share in USD
+  default_commission_per_share: 0.005
+  # Minimum commission per order in USD
+  min_commission_per_order: 1.00
+  # Prevent duplicate order submissions and enforce idempotency
+  enable_idempotency_enforcement: true
+  # Trip kill switch automatically when order reconciliation detects position discrepancy
+  kill_switch_on_reconciliation_failure: true
+  # Trip kill switch automatically on market data feed outage or staleness
+  kill_switch_on_data_failure: true
+  # Trip kill switch automatically when drawdown exceeds circuit breaker halt threshold
+  kill_switch_on_drawdown_halt: true
+
+# =============================================================================
+# 11. SHADOW TRADING & PROMOTION CRITERIA (Step 8)
+# =============================================================================
+shadow_trading:
+  # Minimum independent observations required to evaluate promotion
+  min_observations_for_promotion: 20
+  # Minimum signal reproducibility rate (1.00 = 100% deterministic reproducibility)
+  min_reproducibility_rate: 0.99
+  # Maximum permissible quote freshness violation rate (1% = 0.01)
+  max_freshness_violation_rate: 0.01
+  # Maximum allowable 95th-percentile pipeline decision latency in seconds
+  max_p95_latency_seconds: 10.0
+  # Minimum Spearman rank Information Coefficient (IC) required
+  min_spearman_ic: 0.00
+  # Minimum directional accuracy threshold (50% = 0.50)
+  min_directional_accuracy: 0.50
+  # Minimum net expectancy percentage required after realistic execution slippage and commissions
+  min_net_expectancy_pct: 0.00
+  # Minimum profit factor (gross gains / gross losses)
+  min_profit_factor: 1.00
+  # Maximum Population Stability Index (PSI) feature drift tolerance
+  max_feature_psi: 0.25
+  # Zero tolerance for temporal data leakage or look-ahead bias in evidence retrieval
+  max_temporal_leakage_rate: 0.00
+  # Zero tolerance for ledger position or cash reconciliation mismatch
+  max_reconciliation_error_rate: 0.00
+  # Maximum allowable portfolio drawdown percentage
+  max_drawdown_pct: 0.10

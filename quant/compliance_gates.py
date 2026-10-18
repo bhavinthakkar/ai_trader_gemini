@@ -30,6 +30,8 @@ from quant.signal_strength import (
     SignalStrengthWeights,
     calculate_signal_strength,
 )
+from quant.portfolio_controls import ShortEligibilityValidator
+
 
 
 class GateStatus(str, Enum):
@@ -542,7 +544,23 @@ class SellExitSymmetryGate:
         composite_score: Optional[float],
         has_critical_evidence_veto: bool = False,
         is_earnings_blackout: bool = False,
+        borrow_available: bool = True,
         policy: Optional[TradingPolicy] = None,
+        borrow_status: str = "ETB",
+        borrow_fee_bps: float = 0.0,
+        available_borrow_shares: Optional[int] = None,
+        shares_requested: int = 1,
+        rsi: Optional[float] = None,
+        ema_20: Optional[float] = None,
+        ema_50: Optional[float] = None,
+        trend_score: Optional[float] = None,
+        financial_quality_score: Optional[float] = None,
+        valuation_history_score: Optional[float] = None,
+        reward_risk_ratio: Optional[float] = None,
+        days_to_ex_dividend: Optional[int] = None,
+        available_cash: Optional[float] = None,
+        portfolio_equity: Optional[float] = None,
+        ticker: str = "TICKER",
     ) -> GateResult:
         active_policy = policy or get_default_policy()
         metrics = {
@@ -552,6 +570,9 @@ class SellExitSymmetryGate:
             "stop_loss": stop_loss,
             "composite_score": composite_score,
             "has_critical_evidence_veto": has_critical_evidence_veto,
+            "borrow_available": borrow_available,
+            "borrow_status": borrow_status,
+            "borrow_fee_bps": borrow_fee_bps,
         }
 
         # Branch A: Active Holding Exit Evaluation
@@ -632,26 +653,36 @@ class SellExitSymmetryGate:
 
         # Branch B: Directional Short Entry Evaluation
         if not is_holding and candidate_decision.upper() == "SELL":
-            ceiling = active_policy.scores.short_maximum
-            if composite_score is None:
+            short_res = ShortEligibilityValidator.validate(
+                ticker=ticker,
+                entry_price=current_price,
+                stop_loss=stop_loss or (current_price * 1.05),
+                composite_score=composite_score,
+                policy=active_policy,
+                borrow_available=borrow_available,
+                borrow_status=borrow_status,
+                borrow_fee_bps=borrow_fee_bps,
+                available_borrow_shares=available_borrow_shares,
+                shares_requested=shares_requested,
+                rsi=rsi,
+                ema_20=ema_20,
+                ema_50=ema_50,
+                trend_score=trend_score,
+                financial_quality_score=financial_quality_score,
+                valuation_history_score=valuation_history_score,
+                reward_risk_ratio=reward_risk_ratio,
+                days_to_ex_dividend=days_to_ex_dividend,
+                available_cash=available_cash,
+                portfolio_equity=portfolio_equity,
+            )
+            metrics.update(short_res.metrics)
+            if not short_res.is_eligible:
                 return GateResult(
                     gate_name="4. SELL & Exit Symmetry",
                     passed=False,
                     status=GateStatus.FAIL,
-                    reason_code="SHORT_COMPOSITE_MISSING",
-                    message="Directional short entry requires deterministic breakdown composite.",
-                    metrics=metrics,
-                )
-            if float(composite_score) > ceiling:
-                return GateResult(
-                    gate_name="4. SELL & Exit Symmetry",
-                    passed=False,
-                    status=GateStatus.FAIL,
-                    reason_code="SHORT_CEILING_EXCEEDED",
-                    message=(
-                        f"Directional short rejected: Composite {float(composite_score):.1f} > {ceiling:.0f} ceiling "
-                        f"(requires structural breakdown <= {ceiling:.0f})."
-                    ),
+                    reason_code=short_res.reason_code or "SHORT_STRUCTURAL_INVALID",
+                    message=short_res.message or "Short eligibility and financing check failed.",
                     metrics=metrics,
                 )
 

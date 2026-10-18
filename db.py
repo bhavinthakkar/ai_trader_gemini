@@ -1,8 +1,12 @@
 import sqlite3
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 DB_PATH = "trader.db"
+
+
+def _now_str() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def get_connection(db_path=DB_PATH):
@@ -109,7 +113,15 @@ def init_db(db_path=DB_PATH):
             "ml_rank": "INTEGER",
             "ml_universe_size": "INTEGER",
             "ml_signal_label": "TEXT",
-            "ml_disposition": "TEXT"
+            "ml_disposition": "TEXT",
+            "run_id": "TEXT",
+            "model_status": "TEXT",
+            "passed_gates": "TEXT",
+            "failed_gates": "TEXT",
+            "data_quality_status": "TEXT",
+            "position_action": "TEXT",
+            "reason_codes": "TEXT",
+            "structured_decision": "TEXT"
         }
 
         cursor.execute("PRAGMA table_info(signals);")
@@ -175,6 +187,132 @@ def init_db(db_path=DB_PATH):
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_evidence_ticker ON rag_evidence_records(ticker);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_evidence_doc ON rag_evidence_records(document_id);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_evidence_pub_avail ON rag_evidence_records(publication_timestamp, available_timestamp);")
+
+        # Step 7.3: Order Execution Engine Schema
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS execution_orders (
+                order_id TEXT PRIMARY KEY,
+                client_order_id TEXT UNIQUE NOT NULL,
+                idempotency_key TEXT UNIQUE NOT NULL,
+                signal_id INTEGER,
+                run_id TEXT,
+                ticker TEXT NOT NULL,
+                side TEXT NOT NULL,
+                order_type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                requested_shares INTEGER NOT NULL,
+                filled_shares INTEGER DEFAULT 0,
+                remaining_shares INTEGER NOT NULL,
+                signal_price REAL,
+                limit_price REAL,
+                stop_loss_price REAL,
+                target_price REAL,
+                avg_fill_price REAL DEFAULT 0.0,
+                total_commission REAL DEFAULT 0.0,
+                broker_order_id TEXT,
+                rejection_reason TEXT,
+                cancellation_reason TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                raw_json TEXT
+            );
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_exec_orders_ticker ON execution_orders(ticker);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_exec_orders_status ON execution_orders(status);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_exec_orders_idemp ON execution_orders(idempotency_key);")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS execution_fills (
+                fill_id TEXT PRIMARY KEY,
+                order_id TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                side TEXT NOT NULL,
+                shares INTEGER NOT NULL,
+                price REAL NOT NULL,
+                commission REAL DEFAULT 0.0,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                execution_id TEXT,
+                slippage_bps REAL DEFAULT 0.0,
+                raw_json TEXT,
+                FOREIGN KEY (order_id) REFERENCES execution_orders (order_id)
+            );
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_exec_fills_order ON execution_fills(order_id);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_exec_fills_ticker ON execution_fills(ticker);")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS execution_events (
+                event_id TEXT PRIMARY KEY,
+                order_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                from_status TEXT,
+                to_status TEXT NOT NULL,
+                details TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (order_id) REFERENCES execution_orders (order_id)
+            );
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_exec_events_order ON execution_events(order_id);")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS operational_kill_switch_state (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                is_tripped INTEGER NOT NULL,
+                reason TEXT,
+                details TEXT,
+                actor TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
+        # Step 8: Shadow Trading Schema
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS shadow_decisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                ticker TEXT NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                quote_timestamp DATETIME,
+                decision_latency_seconds REAL,
+                quote_age_seconds REAL,
+                is_fresh BOOLEAN,
+                decision TEXT NOT NULL,
+                position_action TEXT NOT NULL,
+                composite_score REAL,
+                signal_strength REAL,
+                ml_score REAL,
+                ml_predicted_return REAL,
+                entry_price REAL,
+                suggested_stop_loss REAL,
+                suggested_target_price REAL,
+                passed_gates TEXT,
+                failed_gates TEXT,
+                reason_codes TEXT,
+                proposed_shares INTEGER DEFAULT 0,
+                binding_constraint TEXT,
+                is_order_proposed BOOLEAN DEFAULT 0,
+                pre_flight_valid BOOLEAN,
+                rejection_reasons TEXT,
+                simulated_order_id TEXT,
+                simulated_fill_price REAL,
+                simulated_slippage_bps REAL,
+                simulated_commission REAL,
+                simulated_status TEXT,
+                input_snapshot_json TEXT,
+                component_outputs_json TEXT,
+                realized_forward_return_pct REAL,
+                realized_net_return_pct REAL,
+                outcome_evaluated_at DATETIME,
+                hit_target BOOLEAN,
+                hit_stop BOOLEAN,
+                is_profitable BOOLEAN,
+                raw_json TEXT
+            );
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_shadow_ticker ON shadow_decisions(ticker);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_shadow_session ON shadow_decisions(session_id);")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_shadow_time ON shadow_decisions(timestamp);")
 
         conn.commit()
 
@@ -318,6 +456,20 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                     pass
             ml_disposition = _ensure_str(item.get("ml_signal_assessment", {}).get("disposition") if isinstance(item.get("ml_signal_assessment"), dict) else "", "")
 
+            # Structured decision fields (Step 6.4)
+            run_id = _ensure_str(item.get("run_id"), "")
+            model_status = _ensure_str(item.get("model_status"), "")
+            passed_gates = json.dumps(item.get("passed_gates") or []) if isinstance(item.get("passed_gates"), (list, tuple)) else _ensure_str(item.get("passed_gates"), "[]")
+            failed_gates = json.dumps(item.get("failed_gates") or []) if isinstance(item.get("failed_gates"), (list, tuple)) else _ensure_str(item.get("failed_gates"), "[]")
+            data_quality_status = _ensure_str(item.get("data_quality_status"), "VALID")
+            position_action = _ensure_str(item.get("position_action"), "NO_ACTION")
+            reason_codes = json.dumps(item.get("reason_codes") or []) if isinstance(item.get("reason_codes"), (list, tuple)) else _ensure_str(item.get("reason_codes"), "[]")
+            struct_dec = item.get("structured_decision")
+            if isinstance(struct_dec, dict):
+                structured_decision = json.dumps(struct_dec)
+            else:
+                structured_decision = _ensure_str(struct_dec, "")
+
             # Backward-compatible text summaries
             reason = _ensure_str(item.get("reason") or bull_case)
             inst_data = _ensure_str(item.get("institutional_data", ""))
@@ -347,8 +499,9 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                     sell_type, short_reward_risk_ratio, structural_short_stop_price, structural_short_target_price,
                     short_stop_distance, short_stop_distance_pct, short_expected_move_stop_ratio,
                     pillar_status, pillar_input_tracking, financial_quality_score, is_value_trap, value_trap_reasons,
-                    ml_score, ml_predicted_return, ml_rank, ml_universe_size, ml_signal_label, ml_disposition
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ml_score, ml_predicted_return, ml_rank, ml_universe_size, ml_signal_label, ml_disposition,
+                    run_id, model_status, passed_gates, failed_gates, data_quality_status, position_action, reason_codes, structured_decision
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 timestamp, stock, decision, confidence, reason, inst_data, macro_data, news,
                 bank_coverage, risk_info, pe_peg, model_used, raw_json,
@@ -367,8 +520,10 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                 sell_type, short_reward_risk_ratio, structural_short_stop_price, structural_short_target_price,
                 short_stop_distance, short_stop_distance_pct, short_expected_move_stop_ratio,
                 pillar_status, pillar_input_tracking, financial_quality_score, is_value_trap, value_trap_reasons,
-                ml_score, ml_predicted_return, ml_rank, ml_universe_size, ml_signal_label, ml_disposition
+                ml_score, ml_predicted_return, ml_rank, ml_universe_size, ml_signal_label, ml_disposition,
+                run_id, model_status, passed_gates, failed_gates, data_quality_status, position_action, reason_codes, structured_decision
             ))
+
             signal_id = cursor.lastrowid
             evidence_records = item.get("evidence_records") or []
             if evidence_records and signal_id:
@@ -558,7 +713,28 @@ def _enrich_signal_dict(s: dict) -> dict:
             s["ml_badge"] = cls["badge"]
         except Exception:
             pass
+
+    # Deserialize structured decision columns (Step 6.4)
+    for json_col in ("passed_gates", "failed_gates", "reason_codes", "structured_decision"):
+        val = s.get(json_col)
+        if val and isinstance(val, str):
+            try:
+                s[json_col] = json.loads(val)
+            except Exception:
+                pass
+
+    if "position_sizing" not in s or not s["position_sizing"]:
+        raw_j = s.get("raw_json")
+        if raw_j:
+            try:
+                parsed_payload = json.loads(raw_j) if isinstance(raw_j, str) else raw_j
+                if parsed_payload.get("position_sizing"):
+                    s["position_sizing"] = parsed_payload.get("position_sizing")
+            except Exception:
+                pass
     return s
+
+
 
 
 def get_signal_history(symbol: str = None, limit: int = 100, db_path=DB_PATH) -> list:
@@ -818,3 +994,384 @@ def get_outcome_performance_stats(db_path=DB_PATH) -> dict:
             "profitable_trades": profitable,
             "losing_trades": total - profitable
         }
+
+
+# =============================================================================
+# Execution Layer Persistence Helpers (Step 7.3)
+# =============================================================================
+
+def save_execution_order(order_dict: dict, db_path=DB_PATH) -> None:
+    """
+    Inserts or updates an order in the execution_orders table.
+    """
+    init_db(db_path)
+    now_str = _now_str()
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO execution_orders (
+                order_id, client_order_id, idempotency_key, signal_id, run_id,
+                ticker, side, order_type, status, requested_shares, filled_shares,
+                remaining_shares, signal_price, limit_price, stop_loss_price,
+                target_price, avg_fill_price, total_commission, broker_order_id,
+                rejection_reason, cancellation_reason, created_at, updated_at, raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(order_id) DO UPDATE SET
+                status = excluded.status,
+                filled_shares = excluded.filled_shares,
+                remaining_shares = excluded.remaining_shares,
+                avg_fill_price = excluded.avg_fill_price,
+                total_commission = excluded.total_commission,
+                broker_order_id = excluded.broker_order_id,
+                rejection_reason = excluded.rejection_reason,
+                cancellation_reason = excluded.cancellation_reason,
+                updated_at = excluded.updated_at,
+                raw_json = excluded.raw_json;
+        """, (
+            str(order_dict.get("order_id")),
+            str(order_dict.get("client_order_id")),
+            str(order_dict.get("idempotency_key")),
+            order_dict.get("signal_id"),
+            order_dict.get("run_id"),
+            str(order_dict.get("ticker")),
+            str(order_dict.get("side")),
+            str(order_dict.get("order_type", "LIMIT")),
+            str(order_dict.get("status")),
+            int(order_dict.get("requested_shares", 0)),
+            int(order_dict.get("filled_shares", 0)),
+            int(order_dict.get("remaining_shares", 0)),
+            _to_float(order_dict.get("signal_price")),
+            _to_float(order_dict.get("limit_price")),
+            _to_float(order_dict.get("stop_loss_price")),
+            _to_float(order_dict.get("target_price")),
+            _to_float(order_dict.get("avg_fill_price"), 0.0),
+            _to_float(order_dict.get("total_commission"), 0.0),
+            order_dict.get("broker_order_id"),
+            order_dict.get("rejection_reason"),
+            order_dict.get("cancellation_reason"),
+            str(order_dict.get("created_at") or now_str),
+            str(order_dict.get("updated_at") or now_str),
+            json.dumps(order_dict) if not isinstance(order_dict.get("raw_json"), str) else order_dict.get("raw_json"),
+        ))
+        conn.commit()
+
+
+def save_execution_fill(fill_dict: dict, db_path=DB_PATH) -> None:
+    """
+    Records a trade execution fill into the execution_fills table.
+    """
+    init_db(db_path)
+    now_str = _now_str()
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO execution_fills (
+                fill_id, order_id, ticker, side, shares, price,
+                commission, timestamp, execution_id, slippage_bps, raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            str(fill_dict.get("fill_id")),
+            str(fill_dict.get("order_id")),
+            str(fill_dict.get("ticker")),
+            str(fill_dict.get("side")),
+            int(fill_dict.get("shares", 0)),
+            float(fill_dict.get("price", 0.0)),
+            float(fill_dict.get("commission", 0.0)),
+            str(fill_dict.get("timestamp") or now_str),
+            fill_dict.get("execution_id"),
+            float(fill_dict.get("slippage_bps", 0.0)),
+            json.dumps(fill_dict),
+        ))
+        conn.commit()
+
+
+def save_execution_event(event_dict: dict, db_path=DB_PATH) -> None:
+    """
+    Records an execution state transition event into the execution_events table.
+    """
+    init_db(db_path)
+    now_str = _now_str()
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO execution_events (
+                event_id, order_id, event_type, from_status, to_status, details, timestamp
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            str(event_dict.get("event_id")),
+            str(event_dict.get("order_id")),
+            str(event_dict.get("event_type")),
+            event_dict.get("from_status"),
+            str(event_dict.get("to_status")),
+            str(event_dict.get("details", "")),
+            str(event_dict.get("timestamp") or now_str),
+        ))
+        conn.commit()
+
+
+def save_kill_switch_state(
+    is_tripped: bool,
+    reason: str = "",
+    details: str = "",
+    actor: str = "SYSTEM",
+    db_path=DB_PATH
+) -> int:
+    """
+    Persists an operational kill switch state change event.
+    """
+    init_db(db_path)
+    now_str = _now_str()
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO operational_kill_switch_state (
+                is_tripped, reason, details, actor, timestamp
+            ) VALUES (?, ?, ?, ?, ?)
+        """, (
+            1 if is_tripped else 0,
+            str(reason),
+            str(details),
+            str(actor),
+            now_str,
+        ))
+        conn.commit()
+        return cursor.lastrowid
+
+
+def get_latest_kill_switch_state(db_path=DB_PATH) -> Optional[dict]:
+    """
+    Returns the most recent operational kill switch state record, or None if never recorded.
+    """
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM operational_kill_switch_state
+            ORDER BY id DESC
+            LIMIT 1;
+        """)
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def get_execution_orders(
+    ticker: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 100,
+    db_path=DB_PATH
+) -> list:
+    """
+    Fetches execution orders matching optional filter criteria, sorted newest first.
+    """
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        query = "SELECT * FROM execution_orders WHERE 1=1"
+        params = []
+        if ticker:
+            query += " AND ticker = ?"
+            params.append(ticker.upper())
+        if status:
+            query += " AND status = ?"
+            params.append(status.upper())
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        cursor.execute(query, params)
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def get_execution_fills(
+    order_id: Optional[str] = None,
+    ticker: Optional[str] = None,
+    limit: int = 100,
+    db_path=DB_PATH
+) -> list:
+    """
+    Fetches execution fills matching optional filter criteria, sorted newest first.
+    """
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        query = "SELECT * FROM execution_fills WHERE 1=1"
+        params = []
+        if order_id:
+            query += " AND order_id = ?"
+            params.append(str(order_id))
+        if ticker:
+            query += " AND ticker = ?"
+            params.append(ticker.upper())
+        query += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+        cursor.execute(query, params)
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def get_execution_events(
+    order_id: Optional[str] = None,
+    limit: int = 100,
+    db_path=DB_PATH
+) -> list:
+    """
+    Fetches execution status events, sorted newest first.
+    """
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        query = "SELECT * FROM execution_events WHERE 1=1"
+        params = []
+        if order_id:
+            query += " AND order_id = ?"
+            params.append(str(order_id))
+        query += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+        cursor.execute(query, params)
+        return [dict(r) for r in cursor.fetchall()]
+
+
+# =============================================================================
+# Shadow Trading Persistence Helpers (Step 8)
+# =============================================================================
+
+def save_shadow_decision(record_dict: dict, db_path=DB_PATH) -> int:
+    """
+    Inserts a shadow trading decision record into shadow_decisions table.
+    Returns the new record id.
+    """
+    init_db(db_path)
+    now_str = _now_str()
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO shadow_decisions (
+                session_id, run_id, ticker, timestamp, quote_timestamp,
+                decision_latency_seconds, quote_age_seconds, is_fresh,
+                decision, position_action, composite_score, signal_strength,
+                ml_score, ml_predicted_return, entry_price, suggested_stop_loss,
+                suggested_target_price, passed_gates, failed_gates, reason_codes,
+                proposed_shares, binding_constraint, is_order_proposed,
+                pre_flight_valid, rejection_reasons, simulated_order_id,
+                simulated_fill_price, simulated_slippage_bps, simulated_commission,
+                simulated_status, input_snapshot_json, component_outputs_json,
+                realized_forward_return_pct, realized_net_return_pct,
+                outcome_evaluated_at, hit_target, hit_stop, is_profitable, raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            str(record_dict.get("session_id", "DEFAULT_SHADOW_SESSION")),
+            str(record_dict.get("run_id", "")),
+            str(record_dict.get("ticker", "")).upper(),
+            str(record_dict.get("timestamp") or now_str),
+            str(record_dict.get("quote_timestamp") or ""),
+            _to_float(record_dict.get("decision_latency_seconds")),
+            _to_float(record_dict.get("quote_age_seconds")),
+            1 if record_dict.get("is_fresh", True) else 0,
+            str(record_dict.get("decision", "HOLD")),
+            str(record_dict.get("position_action", "NO_ACTION")),
+            _to_float(record_dict.get("composite_score")),
+            _to_float(record_dict.get("signal_strength")),
+            _to_float(record_dict.get("ml_score")),
+            _to_float(record_dict.get("ml_predicted_return")),
+            _to_float(record_dict.get("entry_price")),
+            _to_float(record_dict.get("suggested_stop_loss")),
+            _to_float(record_dict.get("suggested_target_price")),
+            json.dumps(record_dict.get("passed_gates") or []) if isinstance(record_dict.get("passed_gates"), (list, tuple)) else _ensure_str(record_dict.get("passed_gates"), "[]"),
+            json.dumps(record_dict.get("failed_gates") or []) if isinstance(record_dict.get("failed_gates"), (list, tuple)) else _ensure_str(record_dict.get("failed_gates"), "[]"),
+            json.dumps(record_dict.get("reason_codes") or []) if isinstance(record_dict.get("reason_codes"), (list, tuple)) else _ensure_str(record_dict.get("reason_codes"), "[]"),
+            int(record_dict.get("proposed_shares", 0)),
+            _ensure_str(record_dict.get("binding_constraint")),
+            1 if record_dict.get("is_order_proposed") else 0,
+            1 if record_dict.get("pre_flight_valid") else (0 if record_dict.get("pre_flight_valid") is not None else None),
+            json.dumps(record_dict.get("rejection_reasons") or []) if isinstance(record_dict.get("rejection_reasons"), (list, tuple)) else _ensure_str(record_dict.get("rejection_reasons"), "[]"),
+            _ensure_str(record_dict.get("simulated_order_id")),
+            _to_float(record_dict.get("simulated_fill_price")),
+            _to_float(record_dict.get("simulated_slippage_bps")),
+            _to_float(record_dict.get("simulated_commission")),
+            _ensure_str(record_dict.get("simulated_status")),
+            json.dumps(record_dict.get("input_snapshot") or {}, default=str) if isinstance(record_dict.get("input_snapshot"), dict) else _ensure_str(record_dict.get("input_snapshot_json"), "{}"),
+            json.dumps(record_dict.get("component_outputs") or {}, default=str) if isinstance(record_dict.get("component_outputs"), dict) else _ensure_str(record_dict.get("component_outputs_json"), "{}"),
+            _to_float(record_dict.get("realized_forward_return_pct")),
+            _to_float(record_dict.get("realized_net_return_pct")),
+            str(record_dict.get("outcome_evaluated_at") or ""),
+            1 if record_dict.get("hit_target") else (0 if record_dict.get("hit_target") is not None else None),
+            1 if record_dict.get("hit_stop") else (0 if record_dict.get("hit_stop") is not None else None),
+            1 if record_dict.get("is_profitable") else (0 if record_dict.get("is_profitable") is not None else None),
+            json.dumps(record_dict, default=str) if not isinstance(record_dict.get("raw_json"), str) else record_dict.get("raw_json"),
+        ))
+        conn.commit()
+        return cursor.lastrowid
+
+
+def update_shadow_decision_outcome(
+    decision_id: int,
+    outcome_dict: Optional[dict] = None,
+    db_path: str = DB_PATH,
+    **kwargs
+) -> None:
+    """
+    Updates the realized outcome metrics of a shadow trade record.
+    Supports either passing an outcome_dict or keyword arguments.
+    """
+    init_db(db_path)
+    combined = dict(outcome_dict or {})
+    combined.update(kwargs)
+    now_str = _now_str()
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE shadow_decisions SET
+                realized_forward_return_pct = ?,
+                realized_net_return_pct = ?,
+                outcome_evaluated_at = ?,
+                hit_target = ?,
+                hit_stop = ?,
+                is_profitable = ?
+            WHERE id = ?;
+        """, (
+            _to_float(combined.get("realized_forward_return_pct")),
+            _to_float(combined.get("realized_net_return_pct")),
+            str(combined.get("outcome_evaluated_at") or now_str),
+            1 if combined.get("hit_target") else 0,
+            1 if combined.get("hit_stop") else 0,
+            1 if combined.get("is_profitable") else 0,
+            decision_id,
+        ))
+        conn.commit()
+
+
+
+def get_shadow_decisions(
+    session_id: Optional[str] = None,
+    ticker: Optional[str] = None,
+    limit: int = 1000,
+    db_path=DB_PATH
+) -> list:
+    """
+    Fetches shadow decisions matching optional filter criteria, sorted newest first.
+    """
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        query = "SELECT * FROM shadow_decisions WHERE 1=1"
+        params = []
+        if session_id:
+            query += " AND session_id = ?"
+            params.append(str(session_id))
+        if ticker:
+            query += " AND ticker = ?"
+            params.append(ticker.upper())
+        query += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            for json_col in ("passed_gates", "failed_gates", "reason_codes", "rejection_reasons", "input_snapshot_json", "component_outputs_json"):
+                if d.get(json_col) and isinstance(d[json_col], str):
+                    try:
+                        d[json_col] = json.loads(d[json_col])
+                    except Exception:
+                        pass
+            results.append(d)
+        return results
+
+

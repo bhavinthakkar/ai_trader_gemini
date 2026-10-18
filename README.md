@@ -8,61 +8,110 @@ An autonomous, multi-agent financial reasoning system designed for 20-session (a
 
 The platform operates on a **Deterministic quantitative-first architecture** paired with **Multi-Query Dual-Horizon Hybrid RAG**. Numerical market metrics are computed strictly outside the LLM to prevent hallucinations, while qualitative text feeds are retrieved using a multi-factor multiplicative ranking engine.
 
-```
-                                    ┌────────────────────────┐
-                                    │   FastEmbed (384-dim)  │
-                                    │  BAAI/bge-small-en-v1.5│
-                                    └───────────┬────────────┘
-                                                │
-         ┌──────────────────────────────────────┴──────────────────────────────────────┐
-         │                                                                             │
- ┌───────┴───────────────────────┐                                     ┌───────────────┴──────────────────────────┐
- │   Gloomberb Terminal Engine   │                                     │    Institutional Data Engine             │
- ├───────────────────────────────┤                                     ├──────────────────────────────────────────┤
- │ 1. News & Catalysts           │                                     │ 11. Investor-Relations (IR) Website      │
- │ 2. SEC EDGAR Filings (CLI)    │                                     │ 12. SEC EDGAR Direct Submissions (API)   │
- │ 3. Financial Statements       │                                     │ 13. Earnings Call Transcripts & Guidance │
- │ 4. Options Flow & Volatility  │                                     │ 14. Official Corporate Press Releases    │
- │ 5. Insider/Institutional %    │                                     │ 15. Reputable News (Reuters/Bloomberg)   │
- │ 6. Peer Relative Multiples    │                                     │ 16. Macro US Treasury Yield Curve (FRED) │
- │ 7. Ticker Architecture        │                                     └──────────────────────────────────────────┘
- │ 8. Macro Fear & Greed Index   │
- │ 9. Economic Events Calendar   │
- │ 10. Sector ETF Benchmarks     │
- └───────────────┬───────────────┘
-                 │
-                 ├──────────────────────────────────────────────┐
-                 │                                              │
-                 ▼                                              ▼
-┌──────────────────────────────────┐          ┌──────────────────────────────────┐
-│  Deterministic 5-Pillar Engine   │          │ Multiplicative Hybrid RAG        │
-│  (Trend, Sector, Alpha,          │          │ (Sim x Reliability x Importance  │
-│   Valuation History, Peer Val)   │          │  x Recency Weight)               │
-└────────────────┬─────────────────┘          └────────────────┬─────────────────┘
-                 │                                              │
-                 │     ┌──────────────────────────────────┐     │
-                 └────►│  Dual-Horizon Partitioning       │◄────┘
-                       │  - CURRENT CONTEXT (24h/7d)      │
-                       │  - HISTORICAL CONTEXT (10-K/Multi)│
-                       └────────────────┬─────────────────┘
-                                        │
-                                        ▼
-                       ┌──────────────────────────────────┐
-                       │ NVIDIA Nemotron-3 Super 120B     │
-                       │ (Data Producer)                  │
-                       └────────────────┬─────────────────┘
-                                        │
-                                        ▼
-                       ┌──────────────────────────────────┐
-                       │ Python JSON Schema Validator     │
-                       │ (normalize_master_trader_json)    │
-                       └────────────────┬─────────────────┘
-                                        │
-                                        ▼
-                       ┌──────────────────────────────────┐
-                       │ SQLite & Reporting Layer         │
-                       │ (trader.db & Web / Mobile Apps)  │
-                       └──────────────────────────────────┘
+```text
+┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                   16-CHANNEL INSTITUTIONAL DATA PIPELINE                                │
+├────────────────────────────────────────────────────┬───────────────────────────────────────────────────┤
+│  1. Real-Time Market Data (OHLCV, EMAs, RSI, ATR)   │   9. Macro Yield Curve & FRED (10Y, 2Y, TIPS)     │
+│  2. SPDR Sector Benchmarks (XLK, XLC, XLY, XLF)    │  10. Macro Economic Calendar & Fed Policy Mandate │
+│  3. Historical Volatility & Peer Relative Multiples│  11. Corporate Investor Relations (IR) Filings    │
+│  4. SEC EDGAR Direct Submissions (10-K, 10-Q, 8-K) │  12. Earnings Call Transcripts & Management Guidance│
+│  5. Institutional Holdings & 13F Sentiment         │  13. Corporate Press Releases & Regulatory News   │
+│  6. Insider Transactions & Management Changes      │  14. Options Flow, Implied Volatility & Max Pain  │
+│  7. News & Catalysts (Reuters / Bloomberg / PR)    │  15. European Cross-Listings (gettex / XETRA / €) │
+│  8. Market Breadth & CNN Fear/Greed Sentiment      │  16. 25-Stock ETF Leaders Frozen Factor Set       │
+└─────────────────────────────────────────┬──────────────────────────────────────────────────────────────┘
+                                          │
+                 ┌────────────────────────┼────────────────────────┐
+                 │                        │                        │
+                 ▼                        ▼                        ▼
+  ┌──────────────────────────────┐ ┌──────────────────────────────┐ ┌──────────────────────────────┐
+  │ Track A: Deterministic Quant │ │  Track B: Point-in-Time ML   │ │ Track C: Auditable RAG & LLM │
+  │  (Mathematical Scoring)      │ │  (LambdaMART NDCG Ranker)    │ │  (FastEmbed + Multi-Agent)   │
+  ├──────────────────────────────┤ ├──────────────────────────────┤ ├──────────────────────────────┤
+  │ • 5 Pillars: Trend (25%),    │ │ • Top 25 ETF Leaders Universe│ │ • FastEmbed 384-dim PIT RAG  │
+  │   Sector (20%), Alpha (20%), │ │ • 16 Frozen Factor Features  │ │ • Dual-Horizon Partitioning: │
+  │   Val Hist (15%), Peer (20%) │ │ • Purged Walk-Forward Cutoff │ │   - Current Context (24h/7d) │
+  │ • Continuous Yield Multiples │ │ • NDCG Pairwise List Ranking │ │   - Historical Multi-Year    │
+  │ • Financial Quality Gate     │ │ • Cross-Sectional Percentile │ │ • 6-Agent LLM Synthesis:     │
+  │ • Centered ATR% Vol Dampener │ │   Score (0-100 Relative)     │ │   Kimi-K3 / Nemotron / Gemini│
+  │ ► Output: Quant Score (0-100)│ │ ► Output: ML Score (0-100)   │ │ ► Output: Auditable Evidence │
+  └──────────────┬───────────────┘ └──────────────┬───────────────┘ └──────────────┬───────────────┘
+                 │                                │                                │
+                 └────────────────┬───────────────┘                                │
+                                  ▼                                                │
+                 ┌──────────────────────────────────┐                              │
+                 │ Stage D: Hybrid Blending Engine  │                              │
+                 ├──────────────────────────────────┤                              │
+                 │ In-Scope: 0.30 Quant + 0.70 ML   │                              │
+                 │ Out-of-Scope: 1.00 Quant Fallback│                              │
+                 │ ► Output: Composite Score (0-100)│                              │
+                 └────────────────┬─────────────────┘                              │
+                                  │                                                │
+                                  ├────────────────────────────────────────────────┘
+                                  ▼
+                 ┌──────────────────────────────────────────────────┐
+                 │ Stage E: Structured Decision Policy (Step 6.4)   │
+                 ├──────────────────────────────────────────────────┤
+                 │ • Hard Compliance Safety Gates:                  │
+                 │   - Buy Floor (≥60.0), Reward-to-Risk (≥1.20)    │
+                 │   - Trend Alignment, Volatility / Earnings Gate  │
+                 │   - ML Confirmation Gate & Borrow Availability   │
+                 │ • Programmatic Reason Codes (e.g. TREND_BEARISH) │
+                 │ ► Output: PositionAction (OPEN_LONG/SHORT/HOLD)  │
+                 └────────────────┬─────────────────────────────────┘
+                                  ▼
+                 ┌──────────────────────────────────────────────────┐
+                 │ Stage F: Risk-Based Position Sizing (Step 7.1-2) │
+                 ├──────────────────────────────────────────────────┤
+                 │ • Fixed-Fractional 1% Account Risk Budget        │
+                 │ • Volatility Stop Distance + 20% ATR Gap Reserve │
+                 │ • Portfolio Controls: 10% Single-Stock Max,      │
+                 │   25% Sector Max, 35% Correlated Factor Exposure,│
+                 │   100% Gross / 50% Net, Cash ≥10%, Drawdown ≤15% │
+                 │ • Liquidity Constraint: ≤ 2.0% 20d ADV           │
+                 │ ► Output: Shares Allowed & Binding Constraint Tag│
+                 └────────────────┬─────────────────────────────────┘
+                                  ▼
+                 ┌──────────────────────────────────────────────────┐
+                 │ Stage G: Execution Layer & Kill Switch (Step 7.3)│
+                 ├──────────────────────────────────────────────────┤
+                 │ • Pre-Flight Order Validator (Freshness & Sanity)│
+                 │ • Operational Kill Switch (Auto-Trip on Drift)   │
+                 │ • Immutable Execution Ledger State Machine:      │
+                 │   SIGNAL_GENERATED → ORDER_SUBMITTED → FILLED    │
+                 │ • Position Reconciler (Zero Drift Invariant)     │
+                 └────────────────┬─────────────────────────────────┘
+                                  ▼
+                 ┌──────────────────────────────────────────────────┐
+                 │ Stage H: Institutional Shadow Desk (Step 8)      │
+                 ├──────────────────────────────────────────────────┤
+                 │ • SimulatedBroker: Half-Spread + Sqrt Impact Drag│
+                 │ • Audit Log: Full Snapshots, Orders & Fills in DB│
+                 │ • The 8 Formal Verification Measurements:        │
+                 │   1. Reproducibility (100%)  5. Gate Rejection % │
+                 │   2. Latency & Freshness     6. Model Drift (PSI)│
+                 │   3. Predicted vs Realized   7. LLM PIT Integrity│
+                 │   4. Cost-Adjusted Sharpe    8. Ledger Compliance│
+                 │ • Institutional Promotion Evaluator (Pass/Fail)  │
+                 └────────────────┬─────────────────────────────────┘
+                                  │
+         ┌────────────────────────┴────────────────────────┐
+         ▼                                                 ▼
+┌──────────────────────────────────┐      ┌──────────────────────────────────┐
+│ FastAPI REST Engine (api.py)     │      │ SQLite Persistence (trader.db)   │
+│ - /api/signals, /api/shadow      │      │ - signals, shadow_decisions,     │
+│ - /api/execution/kill-switch     │      │   execution_ledger, evidence_log │
+└────────┬─────────────────────────┘      └──────────────────────────────────┘
+         │
+         ├─────────────────────────────────────────┐
+         ▼                                         ▼
+┌──────────────────────────────────┐      ┌──────────────────────────────────┐
+│ React Native Mobile App (App.js) │      │ Streamlit Dashboard (app.py)     │
+│ - Signals & Deep-Dive Inspection │      │ - Real-Time Screener & Deep Dive │
+│ - Structured Decision & Sizing   │      │ - ML Alpha & 5-Pillar Scorecards │
+│ - ⚡ Execution Desk & Kill Switch │      │ - ⚡ Shadow Desk & Promotion Gate │
+└──────────────────────────────────┘      └──────────────────────────────────┘
 ```
 
 ---
@@ -85,47 +134,74 @@ flowchart TD
     classDef quant fill:#EEF2FF,stroke:#4F46E5,stroke-width:1.5px,color:#1E293B;
     classDef ml fill:#ECFDF5,stroke:#059669,stroke-width:1.5px,color:#1E293B;
     classDef rag fill:#FAF5FF,stroke:#7C3AED,stroke-width:1.5px,color:#1E293B;
-    classDef gate fill:#FFF7ED,stroke:#EA580C,stroke-width:2px,color:#9A3412;
-    classDef outcome fill:#FFFFFF,stroke:#334155,stroke-width:2px,color:#0F172A;
+    classDef blend fill:#F0FDF4,stroke:#16A34A,stroke-width:1.5px,color:#14532D;
+    classDef policy fill:#FFFBEB,stroke:#D97706,stroke-width:1.5px,color:#78350F;
+    classDef sizing fill:#EFF6FF,stroke:#2563EB,stroke-width:1.5px,color:#1E3A8A;
+    classDef exec fill:#FEF2F2,stroke:#DC2626,stroke-width:1.5px,color:#7F1D1D;
+    classDef shadow fill:#FDF4FF,stroke:#9333EA,stroke-width:1.5px,color:#581C87;
+    classDef ui fill:#F8FAFC,stroke:#475569,stroke-width:1.5px,color:#0F172A;
 
-    subgraph TrackA ["Track A: Deterministic Quant Engine"]
+    subgraph TrackA ["Track A: Deterministic Quant Engine (Step 2)"]
         A1["Market Data (OHLCV, EMAs, RSI, ATR, SPY)"]:::quant --> A2["5-Pillar Scoring & Dynamic Weight Normalization"]:::quant
         A2 --> A3["Financial Quality & Value-Trap Guard (-15 / +3)"]:::quant
-        A3 --> A4["ATR% Volatility Factor Dampener (0.85 to 1.00)"]:::quant
+        A3 --> A4["Centered ATR% Volatility Factor Dampener"]:::quant
         A4 --> A5["Deterministic Quant Score (0-100)"]:::quant
     end
 
-    subgraph TrackB ["Track B: Stock ML (stock_ml)"]
-        B1["Top 25 Focused ETF Leaders Universe"]:::ml --> B2["Pairwise XGBRanker (LambdaMART 20d Excess)"]:::ml
-        B2 --> B3["Scope & Freshness Filter (≤ 7d)"]:::ml
-        B3 --> B4["ML 20-Session Score (0-100)"]:::ml
+    subgraph TrackB ["Track B: Point-in-Time ML Ranker (Step 3)"]
+        B1["Top 25 Focused ETF Leaders Universe"]:::ml --> B2["16 Frozen Factors (Momentum, Value, Quality, Growth, Risk)"]:::ml
+        B2 --> B3["Pairwise LambdaMART (NDCG Ranking, Purged Walk-Forward)"]:::ml
+        B3 --> B4["Cross-Sectional Relative Percentile Score (0-100)"]:::ml
     end
 
-    subgraph TrackC ["Track C: Auditable RAG & LLM Evidence Service"]
-        C1["10-Field Auditable Evidence Feeds (SEC EDGAR, FRED, IR)"]:::rag --> C2["Dual-Horizon FastEmbed RAG & Point-in-Time Filter"]:::rag
-        C2 --> C3["LLM Evidence Synthesis & Contradiction Detection"]:::rag
-        C3 --> C4["Catalysts & Risk Flags (Advisory - Stored in DB)"]:::rag
+    subgraph TrackC ["Track C: Auditable RAG & Multi-Agent LLM (Steps 4 & 5)"]
+        C1["16-Channel PIT Feeds (SEC EDGAR, FRED, IR, News)"]:::rag --> C2["Dual-Horizon FastEmbed RAG (Current vs Historical)"]:::rag
+        C2 --> C3["6-Agent LLM Synthesis (Kimi-K3 / Nemotron-3 / Gemini)"]:::rag
+        C3 --> C4["Structured Evidence Records & Thesis Dispositions"]:::rag
     end
 
-    subgraph Blending ["Stage D: ML Hybrid Blending Engine"]
-        A5 & B4 --> D1{"In-Scope Check (25 Leaders?)"}
-        D1 -->|"In-Scope: YES"| D2["0.30 × Quant + 0.70 × ML (Exp D)"]
-        D1 -->|"Out-of-Scope: NO"| D3["1.00 × Quant (ML wt = 0%)"]
-        D2 & D3 --> D4["Decision Composite Score (0-100)"]
+    subgraph StageD ["Stage D: Hybrid Composite Blending (Step 3.3)"]
+        A5 & B4 --> D1{"In-Scope Check (25 Leaders?)"}:::blend
+        D1 -->|"In-Scope: YES"| D2["0.30 × Quant + 0.70 × ML"]:::blend
+        D1 -->|"Out-of-Scope: NO"| D3["1.00 × Quant (ML wt = 0%)"]:::blend
+        D2 & D3 --> D4["Decision Composite Score (0-100)"]:::blend
     end
 
-    subgraph Gatekeeper ["Deterministic Compliance Safety Gates"]
-        D4 & C4 --> G1["Gate 1: BUY Floor (Composite ≥ 60.0)"]:::gate
-        D4 & C4 --> G2["Gate 2: Reward-to-Risk (RR ≥ 1.20)"]:::gate
-        D4 & C4 --> G3["Gate 3: Volatility & Gap Noise (Stop vs Expected Move, Earnings > 3d)"]:::gate
-        D4 & C4 --> G4["Gate 4: SELL Floor (≤ 45.0) & Holding Thesis Intact (≥ 70.0)"]:::gate
-        D4 & C4 --> G5["Gate 5: Mechanistic Gated Confidence (Decisiveness & Dispersion)"]:::gate
+    subgraph StageE ["Stage E: Structured Decision Policy & Compliance Gates (Step 6.4)"]
+        D4 & C4 --> E1["Deterministic Policy Compliance Gates"]:::policy
+        E1 --> E2{"Compliance Gate Evaluation"}:::policy
+        E2 -->|"Passed All Gates"| E3["Position Action: OPEN_LONG / OPEN_SHORT"]:::policy
+        E2 -->|"Failed Any Gate"| E4["Position Action: NO_ACTION / CLOSE"]:::policy
+        E3 & E4 --> E5["Programmatic Reason Codes (TREND_BEARISH, MIN_COMPOSITE, etc.)"]:::policy
     end
 
-    subgraph Outcomes ["Certified Execution Outcomes"]
-        G1 & G2 & G3 & G4 & G5 -->|"All 5 Gates Cleared"| O1["🟢 CERTIFIED BUY SIGNAL"]:::outcome
-        G1 & G2 & G3 & G4 & G5 -->|"Any Gate Failed (Veto)"| O2["🔴 ALGORITHMIC VETO → FORCE HOLD"]:::outcome
-        G1 & G2 & G3 & G4 & G5 -->|"Short / Exit Cleared"| O3["🟣 CERTIFIED SELL / SHORT / EXIT"]:::outcome
+    subgraph StageF ["Stage F: Risk-Based Position Sizing & Portfolio Controls (Step 7.1 & 7.2)"]
+        E3 --> F1["Fixed-Fractional 1% Account Risk Budget"]:::sizing
+        F1 --> F2["Volatility Stop Distance + 20% ATR Gap Reserve"]:::sizing
+        F2 --> F3["Portfolio Limits (Single-Stock 10%, Sector 25%, Factor Corr 35%)"]:::sizing
+        F3 --> F4["Exposure & Liquidity Caps (Gross 100%, Net 50%, Cash ≥10%, ≤2% ADV)"]:::sizing
+        F4 --> F5["Shares Allowed & Binding Constraint Tag"]:::sizing
+    end
+
+    subgraph StageG ["Stage G: Execution Layer & Operational Kill Switch (Step 7.3)"]
+        F5 --> G1["Pre-Flight Order Validator (Freshness, Sanity, Idempotency)"]:::exec
+        G1 --> G2{"Operational Kill Switch Active?"}:::exec
+        G2 -->|"Tripped (Stale/Error/Manual)"| G3["🛑 FREEZE EXECUTION / REJECT ENTRY"]:::exec
+        G2 -->|"Normal Active"| G4["Immutable Execution Ledger State Machine"]:::exec
+        G4 --> G5["Position Reconciler (Zero Internal vs Broker Drift)"]:::exec
+    end
+
+    subgraph StageH ["Stage H: Institutional Shadow Desk & Promotion Gate (Step 8)"]
+        G4 --> H1["SimulatedBroker (Realistic Half-Spread + Sqrt Market Impact)"]:::shadow
+        H1 --> H2["Log Decisions, Component Outputs, Orders & Fills to SQLite"]:::shadow
+        H2 --> H3["The 8 Formal Shadow Measurements Analyzer"]:::shadow
+        H3 --> H4["Predefined Promotion Evaluator (PASSED / PENDING / FAILED)"]:::shadow
+    end
+
+    subgraph Delivery ["Delivery & Operator Interfaces"]
+        H3 & H4 & G2 & E5 --> U1["FastAPI REST API (api.py)"]:::ui
+        U1 --> U2["React Native Mobile App (App.js)"]:::ui
+        U1 --> U3["Streamlit Web Dashboard (app.py)"]:::ui
     end
 ```
 

@@ -529,43 +529,241 @@ LATEST SESSION UPDATES (2026-10-16)
 
 ---
 
-## CURRENT ACTIVE STATE (Updated: 2026-10-17)
+---
 
-### Completed Steps in Step 5 (Deterministic Policy Engine):
-1. **Step 5.1 (Central Policy Configuration)**:
-   - Config: [`config/trading_policy.yaml`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/config/trading_policy.yaml)
-   - Module: [`quant/policy_config.py`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/quant/policy_config.py) & [`policy_config.py`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/policy_config.py)
-   - Tests: [`tests/test_policy_config.py`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/tests/test_policy_config.py) (8/8 PASS)
-   - Spec: [`docs/COMPLIANCE_POLICY_SPECIFICATION.md`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/docs/COMPLIANCE_POLICY_SPECIFICATION.md)
+## CURRENT ACTIVE STATE (Updated: 2026-10-18)
 
-2. **Step 5.2 (Reward-to-Risk & Validated Prices)**:
-   - Module: [`quant/trade_geometry.py`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/quant/trade_geometry.py) & [`trade_geometry.py`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/trade_geometry.py)
-   - Tests: [`tests/test_trade_geometry.py`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/tests/test_trade_geometry.py) (13/13 PASS)
-   - Spec: [`docs/REWARD_TO_RISK_AND_TRADE_GEOMETRY_SPECIFICATION.md`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/docs/REWARD_TO_RISK_AND_TRADE_GEOMETRY_SPECIFICATION.md)
+### Completed Steps in Step 6 (Automated Testing Before Broker Connection):
+1. **Step 6.1 (Unit-Test Each Mathematical Component)**:
+   - Test Suite: [`tests/test_math_components.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/tests/test_math_components.py) (47/47 PASS in 0.27s)
+   - Spec: [`docs/STEP_6_AUTOMATED_TESTING_SPECIFICATION.md`](file:///home/bhavin/Desktop/git/ai_trader_gemini/docs/STEP_6_AUTOMATED_TESTING_SPECIFICATION.md)
+   - Tested 6 components across 6 mandatory dimensions (normal inputs, min/max bounds, missing/stale inputs, zero denominators/invalid values, exact threshold boundaries, and unexpected data types/malformed outputs):
+     1. **Five Pillars**: Trend (EMA alignment & RSI multi-regime velocity), Sector Relative (excess returns & logistic scaling), Market Alpha (Jensen's alpha vs SPY), Valuation History (continuous yield space percentile ranks), Peer Valuation (robust MAD z-scores & normal CDF scaling, cash-heavy fallback).
+     2. **Quality Adjustments**: Financial quality scoring (0–100), compounder bonus (+3.0 pts at $\ge 80$), and Value Trap hard eligibility gate (`FQ-VETO-01` blocking BUY without double-counting).
+     3. **Volatility Transformation**: ATR% factor bands (1.00, 0.95, 0.90, 0.85) and centred volatility dampening ($50 + (Q - 50) \times f_{\text{vol}}$) with verified **Neutral Invariance** (Score 50.00 remains 50.00 for all $f_{\text{vol}}$).
+     4. **ML Blending**: Strict in-scope vs out-of-scope contracts (0% weight, None score for unmodeled/stale tickers), minimum 3-pillar information hurdle, and exact classification boundaries (**60.00** Strong Bullish BUY candidate vs **59.99** Neutral HOLD candidate; **45.00** Neutral vs **44.99** Bearish).
+     5. **Reward-to-Risk & Trade Geometry**: Price ordering monotonicity ($0 < \text{Stop} < \text{Entry} < \text{Target}$ for long; $0 < \text{Target} < \text{Entry} < \text{Stop}$ for short), execution cost drag accounting (slippage/commissions), exact threshold boundaries (Gross RR **1.20** passes vs **1.199** fails; Short RR **1.50**), maximum stop distance cap (30%), break-even win rates, and empirical statistical edge ($\ge +2\%$ margin and $\mathbb{E}[R] > 0$).
+     6. **Confidence & Signal Strength**: Score Decisiveness ($D = |S - 50|/50$ with strict symmetry $D(50+x) \equiv D(50-x)$), Pillar Agreement ($A = 1 - \text{MAD}/50$), Data Completeness ($C$), directional entry gate ($\ge 0.65$), and mandatory non-directional HOLD ceiling ($\le 0.60$).
+   - Hardened component routines ([`quant/factors.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/quant/factors.py), [`quant/normalization.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/quant/normalization.py), [`quant/volatility.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/quant/volatility.py), [`quant/composite_score.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/quant/composite_score.py), [`quant/trade_geometry.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/quant/trade_geometry.py), [`quant/signal_strength.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/quant/signal_strength.py)) against booleans, NaNs, Infs, non-string decisions, and division-by-zero.
 
-3. **Step 5.3 (Compliance Gate Semantics)**:
-   - Module: [`quant/compliance_gates.py`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/quant/compliance_gates.py) & [`compliance_gates.py`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/compliance_gates.py)
-   - Tests: [`tests/test_compliance_gates.py`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/tests/test_compliance_gates.py) (13/13 PASS)
-   - Spec: [`docs/COMPLIANCE_GATE_SEMANTICS_SPECIFICATION.md`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/docs/COMPLIANCE_GATE_SEMANTICS_SPECIFICATION.md)
+2. **Step 6.2 (Mandatory Decision Scenarios & Integration Regression)**:
+   - Test Suite: [`tests/test_mandatory_decision_scenarios.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/tests/test_mandatory_decision_scenarios.py) (17/17 PASS in 3.18s)
+   - Tested 10 mandatory decision scenarios and complete end-to-end integration path:
+     1. **Score 59.99 vs 60.00 Floor**: Ordinary BUY with score 59.99 rejected (`COMPOSITE_BELOW_FLOOR` -> `HOLD`); score 60.00 clears floor.
+     2. **Dip-Buy Qualification (Score 52.00)**: Score 52.00 rejected when failing RSI, drawdown, valuation history, or value trap; passes when all dip criteria met.
+     3. **Advisory Proposal RR Gate**: Candidate BUY with $RR < 1.20$ or inverted price ordering (`target <= entry`) rejected and downgraded to `HOLD`.
+     4. **Earnings Blackout Active**: Score 85.0 blocked from fresh entry when earnings $\le 3$ sessions (`EARNINGS_BLACKOUT`).
+     5. **Existing Long Stop Loss Breach**: Stop breach immediately executes exit policy (`SELL_TO_CLOSE`); Holding-Thesis Guard cannot intercept.
+     6. **Stale ML Data**: Stale score receives `0.0` weight falling back to pure quant; blocks entry under fail-closed policy.
+     7. **Ticker Outside ML Universe**: Out-of-scope ticker receives `0.0` weight, pure quant fallback.
+     8. **Invalid LLM JSON / Actions**: Malformed JSON, prohibited broker execution commands, or unsupported actions rejected; no order issued.
+     9. **Short Borrow Availability**: Short breakdown score blocked when borrow unavailable (`BORROW_UNAVAILABLE`); certified when borrow available.
+     10. **Market Data Outage / Fail-Safe**: Stale market data blocks new entries; protective liquidation triggered if outage exceeds tolerance ($> 2.0$h).
+     11. **End-to-End Pipeline Integration**: Data ingestion $\to$ deterministic composite $\to$ ML blending $\to$ strict `LLMEvidenceAnalysis` validation $\to$ normalization $\to$ SQLite `signals` and `rag_evidence_records` foreign key persistence.
 
-4. **Step 5.4 (Decision Precedence & 5 Internal Action Types)**:
-   - Module: [`quant/decision_precedence.py`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/quant/decision_precedence.py) & [`decision_precedence.py`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/decision_precedence.py)
-   - Tests: [`tests/test_decision_precedence.py`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/tests/test_decision_precedence.py) (21/21 PASS)
-   - Spec: [`docs/DECISION_PRECEDENCE_SPECIFICATION.md`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/docs/DECISION_PRECEDENCE_SPECIFICATION.md)
+3. **Step 6.3 (Property-Based Invariants with Hypothesis)**:
+   - Test Suite: [`tests/test_property_based_invariants.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/tests/test_property_based_invariants.py) (20/20 PASS in 4.34s)
+   - Tested 6 core invariants using `@seed(42)` and `@settings(max_examples=100, deadline=None)` with preserved historical regression cases (`@example`):
+     1. **Invariant 1 (Permitted Bounds)**: Clamped values, scaled outputs (`logistic_scale`, `normal_cdf_scale`), volatility factor ($[0.0, 1.0]$), damped score, and blended composite score ($[0.0, 100.0]$) strictly remain in bounds under extreme floats, infinities, and NaNs.
+     2. **Invariant 2 (Monotonicity & Data Completeness)**: Missing required inputs cannot artificially strengthen signals. Signal strength is strictly non-decreasing with data completeness ($\partial SS / \partial C \ge 0$); $<3$ pillars unconditionally aborts with `INSUFFICIENT_PILLARS`.
+     3. **Invariant 3 (Fail-Closed BUY Gate Invariance)**: No `BUY` is ever certified when a mandatory gate fails (sub-floor scores $\le 59.99$ without dip pass, failed dip criteria, earnings blackout $\le 3$ sessions, stale market data, sub-threshold $RR < 1.20$, or inverted risk geometry).
+     4. **Invariant 4 (Short Eligibility Invariance)**: No short order is opened without clearing all short criteria (score $\le 45.0$, borrow pool available, ex-dividend blackout $> 3$ sessions, and existing long position liquidation emits `SELL_TO_CLOSE`, never shorting).
+     5. **Invariant 5 (Zero LLM Broker Authority)**: Malformed LLM outputs, unsupported actions, or injected broker commands (`shares`, `quantity`, `execute_now`, `broker_action`, `order_type`, `limit_price`, `stop_price`, `time_in_force`, `portfolio_pct`, `account_id`, `route`, `leverage_ratio`, `margin_enabled`) are rejected fail-closed; no order can ever be authorized.
+     6. **Invariant 6 (Determinism & Idempotence)**: Identical inputs, models, and policy configurations produce bitwise deterministic and idempotent decisions.
+   - Code Hardening Discovered during Property Exploration:
+     - `quant/normalization.py`: Fixed NaN fallback in `clamp` to `max(min_val, min(max_val, 50.0))` when `min_val > 50.0`.
+     - `quant/composite_score.py`: Added explicit bounds clamping for `ml_w` in `[0.0, 1.0]` and output composite in `[0.0, 100.0]`.
+     - `llm_evidence_schema.py`: Extended `FORBIDDEN_BROKER_FIELDS` with `broker_action`, `account_id`, `route`, `portfolio_pct`, and `time_in_force`.
 
-5. **Step 5.5 (Signal Strength & Confidence Formalization)**:
-   - Module: [`quant/signal_strength.py`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/quant/signal_strength.py) & [`signal_strength.py`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/signal_strength.py)
-   - Tests: [`tests/test_signal_strength.py`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/tests/test_signal_strength.py) (17/17 PASS)
-   - Spec: [`docs/SIGNAL_STRENGTH_FORMALIZATION_SPECIFICATION.md`](file:///home/bhavin-thakkar/gitClient/ai_trader_gemini/docs/SIGNAL_STRENGTH_FORMALIZATION_SPECIFICATION.md)
+4. **Step 6.4 (Separate the Decision from the Explanation)**:
+   - Module: [`quant/structured_decision.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/quant/structured_decision.py) & re-export [`structured_decision.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/structured_decision.py)
+   - Test Suite: [`tests/test_structured_decision.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/tests/test_structured_decision.py) (19/19 PASS in 3.31s)
+   - Architecture & Guarantees:
+     - Purely machine-readable, canonical decision dictionary with typed enumerations:
+       `run_id`, `ticker`, `decision`, `composite_score`, `model_status`, `passed_gates`, `failed_gates`, `data_quality_status`, `position_action`, `reason_codes`.
+     - Investment decision and action derivation are 100% independent of rendered narrative or LLM commentary.
+     - Reason codes are derived entirely from programmatic calculations and policy configurations without relying on free-form natural language.
+     - SQLite Persistence: Migrated `signals` table in [`db.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/db.py) to store all structured decision fields and auto-deserialize JSON columns on read.
+     - Pipeline Integration: [`main.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/main.py) updated to expose `structured_decision` and explicit gate reason codes to Streamlit and Mobile clients.
+     - Reproducibility & Determinism: 50/50 consecutive runs produce exact identical reason codes and gate outcomes.
+
+### Completed Steps in Step 7 (Portfolio Construction & Risk Management):
+1. **Step 7.1 (Calculate Position Size from Risk, Not Score Alone)**:
+   - Module: [`quant/position_sizing.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/quant/position_sizing.py) & re-export [`position_sizing.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/position_sizing.py)
+   - Test Suite: [`tests/test_position_sizing.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/tests/test_position_sizing.py) (20/20 PASS in 0.38s)
+   - Spec: [`docs/STEP_7_PORTFOLIO_CONSTRUCTION_SPECIFICATION.md`](file:///home/bhavin/Desktop/git/ai_trader_gemini/docs/STEP_7_PORTFOLIO_CONSTRUCTION_SPECIFICATION.md)
+   - Architecture & Guarantees:
+     - Mathematical Risk-Based Preliminary Sizing:
+       $$N_{\text{risk}} = \left\lfloor \frac{E \cdot r}{|P - S| + C + G} \right\rfloor$$
+     - Round-trip trading friction $C = P \times (\text{slippage\_bps} + \text{commission\_bps}) \times 2 / 10\,000$.
+     - Explicit gap risk reserve $G = 0.50 \times \text{ATR}$ (or price fallback).
+     - Strict Multi-Cap Constraint Hierarchy:
+       $$N_{\text{allowed}} = \min(N_{\text{risk}}, N_{\text{position cap}}, N_{\text{liquidity cap}}, N_{\text{portfolio cap}})$$
+     - Binding Constraint Identification: `RISK_BUDGET`, `POSITION_CAP`, `LIQUIDITY_CAP`, `PORTFOLIO_CAP`, `ZERO_ALLOCATION`, `INVALID_INPUTS`.
+     - Inviolable Mandate Invariant: A score of 90.0 receives the exact same risk budget fraction ($r = 1.0\%$) and share count as a score of 70.0 (or 60.0). Score governs eligibility, not arbitrary capital inflation.
+     - Policy & YAML Integration: Added `PortfolioRiskConfig` to `quant/policy_config.py` and `config/trading_policy.yaml`.
+     - Pipeline Integration: Certified trades in `quant/structured_decision.py` and `main.py` automatically calculate and embed `position_sizing` audit metadata.
+
+2. **Step 7.2 (Add Portfolio-Level Controls & Short Eligibility/Financing Checks)**:
+   - Module: [`quant/portfolio_controls.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/quant/portfolio_controls.py) & re-export [`portfolio_controls.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/portfolio_controls.py)
+   - Test Suite: [`tests/test_portfolio_controls.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/tests/test_portfolio_controls.py) (20/20 PASS in 0.39s)
+   - Spec: [`docs/STEP_7_2_PORTFOLIO_CONTROLS_SPECIFICATION.md`](file:///home/bhavin/Desktop/git/ai_trader_gemini/docs/STEP_7_2_PORTFOLIO_CONTROLS_SPECIFICATION.md)
+   - Architecture & Guarantees:
+     - Single-Stock Exposure Limit: $N_{\text{single stock}} = \lfloor \max(0, E \cdot 0.10 - \text{current}) / P \rfloor$.
+     - Sector Concentration Limit: $N_{\text{sector}} = \lfloor \max(0, E \cdot 0.25 - \text{sector current}) / P \rfloor$.
+     - Correlated-Factor Cluster Exposure (25-Stock Universe Analysis):
+       - Grouped into 7 canonical alpha clusters (`AI_SEMICONDUCTORS`, `MEGA_CAP_GROWTH`, `HIGH_BETA_EXPANSION`, `FINANCIAL_RATE_SENSITIVE`, `ENERGY_CYCLICAL`, `DEFENSIVE_STAPLES`, `DEFENSIVE_HEALTHCARE`).
+       - Combined factor cluster exposure capped at 30% of portfolio equity: $N_{\text{factor}} = \min_{f} \lfloor \max(0, E \cdot 0.30 - \text{factor current}_f) / P \rfloor$.
+     - Total Gross & Net Exposure Caps: Gross capped at 100% unleveraged; Net capped at 80% absolute net long/short.
+     - Cash Reserve & Margin Collateral: Enforces 10% unencumbered cash buffer; short sales require initial margin collateral (100% value + 50% Reg-T margin) without invading the cash reserve.
+     - Portfolio Drawdown Governor & Circuit Breakers:
+       - NORMAL: DD < 5% (full risk budget).
+       - DE_RISKING: 5% <= DD < 10% (risk fraction dampened by 50% to $r = 0.50\%$).
+       - CIRCUIT_BREAKER_HALT: DD >= 10% (0 shares, freezes all new risk entries).
+     - Portfolio Liquidity Horizon: Weighted average liquidation days at 1% ADV participation <= 3.0 days.
+     - Short Position Structural & Financing Validator:
+       - Mandate Invariant: A low composite score does NOT itself justify opening a short.
+       - Enforces structural trend breakdown (price < EMA20 & price < EMA50).
+       - Enforces oversold climax squeeze protection (RSI >= 25.0).
+       - Enforces fortress-quality, historically cheap value squeeze trap guard.
+       - Enforces higher Reward:Risk hurdle (RR >= 1.50).
+       - Enforces borrow availability and locate verification.
+       - Enforces borrow fee ceiling (fee <= 500 bps).
+       - Enforces ex-dividend blackout window (<= 3 sessions).
+      - Full Pipeline Integration: Integrated into `calculate_risk_based_position_size`, `SellExitSymmetryGate`, `DecisionPrecedenceEngine`, and `TradingPolicy`.
+
+3. **Step 7.3 (Define Order-Execution Assumptions, Pre-Flight Validation, Kill Switch & Ledger Reconciliation)**:
+   - Module: [`quant/order_execution.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/quant/order_execution.py) & re-export [`order_execution.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/order_execution.py)
+   - Test Suite: [`tests/test_order_execution.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/tests/test_order_execution.py) (17/17 PASS in 0.38s)
+   - Spec: [`docs/STEP_7_3_ORDER_EXECUTION_SPECIFICATION.md`](file:///home/bhavin/Desktop/git/ai_trader_gemini/docs/STEP_7_3_ORDER_EXECUTION_SPECIFICATION.md)
+   - Architecture & Guarantees:
+     - Strict Lifecycle State Machine Separation:
+       * Invariant: A BUY recommendation (`SIGNAL_GENERATED`) is NEVER recorded as an executed trade.
+       * Explicit states: `SIGNAL_GENERATED` -> `ORDER_SUBMITTED` -> `BROKER_ACKNOWLEDGED` -> `PARTIALLY_FILLED` -> `FILLED` (or `CANCELLED` / `REJECTED`).
+     - Pre-Flight Order Validation Layer (`PreFlightOrderValidator`):
+       * Tradability and data freshness: quote staleness <= 300.0s, halt status check, non-positive price check.
+       * Position alignment: prevents opening short when long, prevents opening long when short, validates sell/cover share bounds.
+       * Cash sufficiency & reserve: ensures post-trade cash >= 10% portfolio equity reserve buffer (covering principal, margin collateral, commissions, and slippage buffer).
+       * Liquidity & market impact: order size <= 1.0% of 20d ADV, square-root market impact <= 15.0 bps.
+       * Stop & target validity vs latest price:
+         - Long: $0 < \text{Stop} < P_{\text{live}} < \text{Target}$ and live $RR \ge 1.20$. Inverted or dead-on-arrival stops rejected.
+         - Short: $0 < \text{Target} < P_{\text{live}} < \text{Stop}$ and live $RR \ge 1.50$.
+         - Price drift guard: $|P_{\text{live}} - P_{\text{signal}}| / P_{\text{signal}} \le 2.0\%$.
+       * Duplicate prevention & idempotency: deterministic SHA-256 idempotency key prevents duplicate execution loops.
+     - Operational Kill Switch (`OperationalKillSwitch`):
+       * Fail-closed emergency protection freezing new risk entries (`BUY`, `SELL_SHORT`) while permitting defensive exits (`SELL`, `BUY_TO_COVER`).
+       * Automatic trip triggers: `DATA_QUALITY_FAILURE`, `ORDER_RECONCILIATION_FAILURE`, `RISK_MONITORING_FAILURE` (drawdown circuit breaker >= 10%), `MANUAL_OPERATOR_TRIP`.
+     - Execution Ledger & Position Reconciliation (`ExecutionLedger` & `PositionReconciler`):
+       * Immutable append-only ledger tracking all orders, fills, and transition events.
+       * Position mathematical derivation: $\text{Shares} = \sum (\text{fill\_shares} \times \text{sign})$.
+       * Acceptance gate verified: internal portfolio positions and cash reconcile with zero discrepancy against ledger fills; discrepancies automatically trip kill switch.
+     - Simulated Broker Adapter (`SimulatedBroker`):
+       * Models spread costs, square-root market impact slippage, broker fees, and multi-leg partial fills.
+     - Database Integration (`db.py`):
+       * Added persistent tables: `execution_orders`, `execution_fills`, `execution_events`, `operational_kill_switch_state`.
+       * Added query and persistence methods: `save_execution_order`, `save_execution_fill`, `save_execution_event`, `save_kill_switch_state`, `get_execution_orders`, `get_execution_fills`, `get_execution_events`, `get_latest_kill_switch_state`.
+     - Configuration Integration:
+       * Added `ExecutionConfig` to `quant/policy_config.py` and `config/trading_policy.yaml`.
+
+### Completed Steps in Step 8 (Shadow Trade the Complete Workflow):
+1. **Step 8 (Shadow Trading Architecture, 8 Formal Measurement Suites & Institutional Promotion Evaluator)**:
+   - Module: [`quant/shadow_trading.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/quant/shadow_trading.py) & re-export [`shadow_trading.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/shadow_trading.py)
+   - CLI Runner & Orchestrator: [`shadow_trader.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/shadow_trader.py)
+   - Test Suite: [`tests/test_shadow_trading.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/tests/test_shadow_trading.py) (18/18 PASS in 0.39s)
+   - Spec: [`docs/STEP_8_SHADOW_TRADING_SPECIFICATION.md`](file:///home/bhavin/Desktop/git/ai_trader_gemini/docs/STEP_8_SHADOW_TRADING_SPECIFICATION.md)
+   - Architecture & Guarantees:
+     - **Non-Broker Complete Production Workflow Simulation**:
+       * Feeds market quotes, 16 frozen factors, RAG evidence retrieval, LLM context, and deterministic composite scores.
+       * Runs compliance gates, decision precedence, risk-based position sizing, and portfolio concentration controls.
+       * Runs pre-flight order validation, executes simulated fills through `SimulatedBroker` with half-spread and square-root market impact slippage.
+       * Updates the immutable `ExecutionLedger` and verifies zero-discrepancy reconciliation with `PositionReconciler`.
+       * Logs complete input snapshots, intermediate component outputs, gate states, proposed orders, simulated fills, and forward outcome performance to SQLite database `shadow_decisions`.
+     - **The Eight Formal Shadow Trading Measurements**:
+       1. *Signal Reproducibility*: Verifies 100% deterministic decision, score, and reason code consistency across identical input snapshots ($\ge 99.0\%$ target).
+       2. *Decision Latency & Data Freshness*: Tracks P95 decision latency and quote age distribution; enforces $\le 1.0\%$ staleness violation rate.
+       3. *Predicted vs. Realized Returns*: Computes Spearman Rank Information Coefficient ($\rho_{\text{IC}} \ge 0.00$), Directional Accuracy ($\ge 50.0\%$), and top-bottom quintile return spread.
+       4. *Cost-Adjusted Performance*: Computes gross vs. net returns, slippage drag in bps ($(R_{\text{gross}} - R_{\text{net}}) \times 100$), Net Sharpe ratio, and profit factor ($\ge 1.0$).
+       5. *Gate Rejection Rate & Attribution*: Measures trade filtering efficiency $\Delta_{\text{filter}} = \bar{R}_{\text{certified}} - \bar{R}_{\text{rejected}}$ and per-gate failure breakdown.
+       6. *Model Feature Drift (PSI)*: Computes Population Stability Index across core feature distributions; classifies drift into `NO_DRIFT` (PSI < 0.10), `MODERATE_DRIFT` (0.10 <= PSI < 0.25), and `SIGNIFICANT_DRIFT` (PSI >= 0.25).
+       7. *LLM Quality & Temporal Integrity*: Strict Point-in-Time verification ensuring $0.0\%$ future data leakage ($T_{\text{published}} \le T_{\text{signal}}$) and citation precision.
+       8. *Risk & Order State Compliance*: Enforces 1.0% risk budget adherence, sector/factor concentration caps, and 0 reconciliation errors against the execution ledger.
+     - **Predefined Institutional Promotion Evaluator (`ShadowPromotionEvaluator`)**:
+       * Evaluates performance against rigid promotion criteria before promoting to production.
+       * Emits `PromotionDecision` (`PROMOTED_TO_PRODUCTION`, `INSUFFICIENT_OBSERVATIONS`, `REJECTED_FOR_PROMOTION`).
+       * Maps failed criteria to exact remediation routing:
+         - Temporal Leakage $\to$ `STEP_4_RAG_POINT_IN_TIME_REMEDIATION`
+         - Sub-zero IC / low accuracy $\to$ `STEP_2_3_FACTOR_REMEDIATION` / `STEP_3_ML_TRAINING_REMEDIATION`
+         - Feature drift (PSI >= 0.25) $\to$ `STEP_3_WALK_FORWARD_RETRAINING`
+         - Negative net expectancy $\to$ `STEP_7_3_EXECUTION_COST_REMEDIATION`
+         - Reconciliation error $\to$ `STEP_7_3_RECONCILIATION_REMEDIATION`
+         - Non-deterministic reproducibility $\to$ `STEP_5_COMPLIANCE_GATES_REMEDIATION`
+     - **Database Integration (`db.py`)**:
+       - Added table `shadow_decisions` with indexes on `ticker`, `session_id`, and `timestamp`.
+       - Added helper functions: `save_shadow_decision()`, `update_shadow_decision_outcome()`, and `get_shadow_decisions()`.
+     - **Policy Configuration (`quant/policy_config.py` & `config/trading_policy.yaml`)**:
+       - Added `ShadowTradingConfig` dataclass and validation rules.
 
 ### Test Suite Health:
-- Unit & Integration Tests in `tests/`: **144 PASS, 1 SKIPPED** (optional xgboost) in ~6.7s via `./venv/bin/python -m pytest tests/`
-- Full Root Discovery Tests: **255 PASS, 0 FAIL** in ~11s via `./venv/bin/python -m unittest discover -s . -p "test_*.py"`
-- All core invariants verified (fail-closed on outage, mandatory stops cannot be blocked by high scores, holding guard protects winning positions, LLM has zero execution authority, signal strength explicitly distinguished from profit probability).
+- `tests/test_shadow_trading.py`: **18 PASS, 0 FAIL** in 0.39s via `PYTHONPATH=. ./venv/bin/pytest tests/test_shadow_trading.py`
+- `tests/test_order_execution.py`: **17 PASS, 0 FAIL** in 0.38s via `PYTHONPATH=. ./venv/bin/pytest tests/test_order_execution.py`
+- `tests/test_portfolio_controls.py`: **20 PASS, 0 FAIL** in 0.39s via `PYTHONPATH=. ./venv/bin/pytest tests/test_portfolio_controls.py`
+- `tests/test_position_sizing.py`: **20 PASS, 0 FAIL** in 0.37s via `PYTHONPATH=. ./venv/bin/pytest tests/test_position_sizing.py`
+- `tests/test_structured_decision.py`: **19 PASS, 0 FAIL** in 3.31s via `PYTHONPATH=. ./venv/bin/pytest tests/test_structured_decision.py`
+- `tests/test_property_based_invariants.py`: **20 PASS, 0 FAIL** in 4.34s via `PYTHONPATH=. ./venv/bin/pytest tests/test_property_based_invariants.py`
+- `tests/test_mandatory_decision_scenarios.py`: **17 PASS, 0 FAIL** in 3.18s via `PYTHONPATH=. ./venv/bin/pytest tests/test_mandatory_decision_scenarios.py`
+- `tests/test_math_components.py`: **47 PASS, 0 FAIL** in 0.27s via `PYTHONPATH=. ./venv/bin/pytest tests/test_math_components.py`
+- Full `tests/` Directory Pytest: **322 PASS, 1 SKIPPED** (optional xgboost) in 5.41s via `PYTHONPATH=. ./venv/bin/pytest tests/`
+- Full Repository Pytest: **577 PASS, 1 SKIPPED** in 9.11s via `PYTHONPATH=. ./venv/bin/pytest`
+- Full Root Discovery Tests: **255 PASS, 0 FAIL** in 2.74s via `./venv/bin/python -m unittest discover -s . -p "test_*.py"`
+- Zero regressions across the entire codebase.
 
-### Ready to Continue:
-- All changes are cleanly staged and tested in local workspace `/home/bhavin-thakkar/gitClient/ai_trader_gemini`.
-- Next session can immediately resume with the user's next request or step.
+### Next Steps:
+- Step 8 is **100% Complete and Fully Verified**.
+- Ready to proceed to Step 9 / subsequent production milestones per roadmap or user instruction.
+
+---
+
+## 2026-10-18: Mobile Application & User Interface Institutional Update (Steps 6.4, 7.1–7.3, & 8)
+
+### Summary of Enhancements:
+1. **REST API Backend Extensions ([`api.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/api.py))**:
+   - `GET /api/shadow/decisions`: Fetches Point-in-Time shadow trading decision audit logs with optional session and ticker filtering.
+   - `GET /api/shadow/metrics`: Computes the 8 formal shadow trading measurements (reproducibility, latency & freshness, predictive performance, cost-adjusted net return & slippage drag, gate efficiency, model drift PSI, LLM temporal integrity, and risk compliance) and runs the institutional promotion evaluator.
+   - `GET /api/execution/orders`: Returns the immutable execution ledger history and simulated fills.
+   - `GET /api/execution/kill-switch`: Exposes real-time operational kill switch state.
+   - `POST /api/execution/kill-switch/trip`: Emergency operator kill switch trigger freezing all new risk entries.
+   - `POST /api/execution/kill-switch/reset`: Operator reset restoring active execution.
+   - Added 4 new test cases in [`test_api.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/test_api.py) (**18/18 PASS** in 0.68s).
+
+2. **React Native Mobile App ([`mobile_app/App.js`](file:///home/bhavin/Desktop/git/ai_trader_gemini/mobile_app/App.js))**:
+   - **Signal Cards (Signals Tab)**: Added structured policy action indicator row displaying deterministic action (`OPEN_LONG`, `NO_ACTION`) and permitted share sizing.
+   - **Deep-Dive Tab (`activeTab === 'deepdive'`)**:
+     - *Structured Decision & Compliance Gates Card*: Displays policy engine action, passed compliance gates (`MIN_COMPOSITE`, `REWARD_RISK`, `TREND_ALIGNMENT`), failed/restricting gates (`ML_CONFIRMATION`, `MAX_DRAWDOWN`), and programmatic reason codes (`TREND_BEARISH`, `NO_TRADE_DEFAULT`).
+     - *Risk-Based Position Sizing Card*: Displays shares allowed, binding constraint (`RISK_BUDGET_RESTORATION`, `SINGLE_STOCK_MAX`, `CASH_RESERVE`), 1% risk budget, dollar risk, overnight ATR gap reserve, and active sizing restriction callouts.
+   - **Dedicated Execution Tab (`activeTab === 'shadow'`)**:
+     - *Operational Kill Switch Banner*: Displays active/tripped state with instant TRIP / RESTORE button triggers.
+     - *Institutional Promotion Gate Scorecard*: Evaluates the 8 formal measurements, displays gate status (`PASSED`, `PENDING_OBSERVATION`, `FAILED`), requirements passed, and observation progress against the 30-trade minimum.
+     - *Shadow Audit Trail*: Real-time list of shadow decisions, simulated fills, slippage bps, composite scores, and gate tags.
+   - **Bottom Navigation**: Updated with `{ key: 'shadow', label: 'Execution', icon: '⚡' }`.
+   - Verified syntax with `node -c mobile_app/App.js`.
+
+3. **Streamlit Web Dashboard ([`app.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/app.py))**:
+   - **Stock Deep-Dive (`tab2`)**: Added Structured Decision & Policy Compliance Gates and Institutional Position Sizing & Risk Controls sections matching the mobile application.
+   - **Dedicated Execution Tab (`tab8: ⚡ Shadow Execution Desk`)**:
+     - Operational Kill Switch status alert and Emergency Trip / Restore operator controls.
+     - Institutional Promotion Gate Scorecard with 8 formal measurement metric tiles.
+     - Interactive DataFrame audit log of shadow decisions with simulated fills, slippage, and gate lists.
+   - Bytecode compiled with `./venv/bin/python -m py_compile app.py` (0 errors).
+
+### Verification Status:
+- `PYTHONPATH=. ./venv/bin/pytest test_api.py tests/test_shadow_trading.py`: **36/36 PASS** in 0.68s.
+- `PYTHONPATH=. ./venv/bin/pytest tests/`: **322 PASS, 1 SKIPPED** in 5.11s.
+- Total zero regressions across tests and runtimes.
+
+
+
+
+
 
 
 

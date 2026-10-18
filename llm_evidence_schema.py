@@ -89,12 +89,17 @@ FORBIDDEN_BROKER_FIELDS: Set[str] = {
     "execute_buy",
     "execute_sell",
     "broker_command",
+    "broker_action",
     "broker_routing",
     "broker_account",
+    "account_id",
+    "route",
+    "portfolio_pct",
     "position_size_usd",
     "leverage_ratio",
     "margin_enabled",
     "send_order",
+    "time_in_force",
 }
 
 

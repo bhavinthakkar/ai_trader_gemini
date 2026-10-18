@@ -126,8 +126,12 @@ def compute_score_decisiveness(
     """
     if composite_score is None:
         return 0.0
+    if isinstance(composite_score, bool):
+        return 0.0
     try:
         score_val = float(composite_score)
+        if math.isnan(score_val) or math.isinf(score_val):
+            return 0.0
     except (TypeError, ValueError):
         return 0.0
 
@@ -322,7 +326,7 @@ class SignalStrengthEngine:
 
         # Cap neutral / non-directional HOLD signals
         final_signal = raw_signal
-        if decision.upper() == "HOLD":
+        if isinstance(decision, str) and decision.upper() == "HOLD":
             final_signal = min(final_signal, self.weights.hold_ceiling)
 
         rounded_signal = round(max(0.0, min(1.0, final_signal)), 2)
@@ -352,7 +356,7 @@ class SignalStrengthEngine:
             valid_pillars_count=valid_pillars_count,
             total_pillars_count=5,
             combination_method=method,
-            decision=decision.upper(),
+            decision=str(decision).upper() if decision is not None else "HOLD",
             is_calibrated_probability=False,
             label="SIGNAL_STRENGTH",
             calibration_status="UNCALIBRATED_HEURISTIC_INDEX",

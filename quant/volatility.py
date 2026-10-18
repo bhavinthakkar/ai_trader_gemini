@@ -16,11 +16,17 @@ def compute_vol_factor(atr: Optional[float], price: Optional[float]) -> float:
       <= 4.0%  -> 0.90  (Elevated)
       >  4.0%  -> 0.85  (Extreme Volatility)
     """
-    if atr is None or price is None or price <= 0.0 or atr < 0.0:
+    if atr is None or price is None:
         return 1.0
 
     try:
-        atr_pct = (float(atr) / float(price)) * 100.0
+        f_atr = float(atr)
+        f_price = float(price)
+        if math.isnan(f_atr) or math.isnan(f_price) or math.isinf(f_atr) or math.isinf(f_price):
+            return 1.0
+        if f_price <= 0.0 or f_atr < 0.0:
+            return 1.0
+        atr_pct = (f_atr / f_price) * 100.0
     except (TypeError, ValueError, ZeroDivisionError):
         return 1.0
 
@@ -45,12 +51,23 @@ def apply_volatility_dampener(adjusted_score: float, vol_factor: float) -> float
     """
     if adjusted_score is None:
         return 50.0
-    if not (0.0 <= adjusted_score <= 100.0):
+    try:
+        score_val = float(adjusted_score)
+        vf_val = float(vol_factor) if vol_factor is not None else 1.0
+    except (TypeError, ValueError):
+        return 50.0
+
+    if math.isnan(score_val) or math.isinf(score_val):
+        return 50.0
+    if math.isnan(vf_val) or math.isinf(vf_val):
+        vf_val = 1.0
+
+    if not (0.0 <= score_val <= 100.0):
         raise ValueError(f"Score must be between 0 and 100, got {adjusted_score}")
-    if not (0.0 <= vol_factor <= 1.0):
+    if not (0.0 <= vf_val <= 1.0):
         raise ValueError(f"Volatility factor must be between 0 and 1, got {vol_factor}")
 
-    score = 50.0 + (adjusted_score - 50.0) * vol_factor
+    score = 50.0 + (score_val - 50.0) * vf_val
     return clamp(score, 0.0, 100.0)
 
 

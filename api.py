@@ -35,10 +35,27 @@ from db import (
     delete_signals_older_than,
     update_signal_outcomes,
     get_connection,
+    get_shadow_decisions,
+    get_execution_orders,
+    get_execution_fills,
+    get_execution_events,
+    get_latest_kill_switch_state,
+    save_kill_switch_state,
 )
 from dashboard import collect_dashboard_data
 from ticker_resolver import resolve_symbol, get_currency_for_symbol
 from ml_signal_service import get_ml_context, get_all_ml_scores
+from quant.shadow_trading import (
+    ShadowTradingEngine,
+    ShadowMetricsAnalyzer,
+    ShadowPromotionEvaluator,
+    ShadowDecisionRecord,
+)
+from quant.order_execution import (
+    GLOBAL_KILL_SWITCH,
+    KillSwitchReason,
+)
+
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -415,6 +432,154 @@ def fetch_portfolio_reviews(
     }
 
 
+# ==========================================
+# Shadow Trading & Execution Endpoints (Steps 7.3 & 8)
+# ==========================================
+
+class KillSwitchTripRequest(BaseModel):
+    reason: str = Field(default="MANUAL_OPERATOR_TRIP", description="Reason for tripping kill switch")
+    operator: str = Field(default="MobileClient", description="Operator identity or system tag")
+
+
+@app.get("/api/shadow/decisions", tags=["Shadow Trading"])
+def fetch_shadow_decisions(
+    session_id: Optional[str] = Query(default=None, description="Filter by session ID"),
+    ticker: Optional[str] = Query(default=None, description="Filter by ticker symbol"),
+    limit: int = Query(default=50, ge=1, le=500, description="Max records to return"),
+):
+    """Returns Point-in-Time shadow trading decision audit records."""
+    records = get_shadow_decisions(session_id=session_id, ticker=ticker, limit=limit)
+    return {
+        "count": len(records),
+        "session_id": session_id,
+        "ticker": ticker.upper() if ticker else None,
+        "decisions": records,
+    }
+
+
+@app.get("/api/shadow/metrics", tags=["Shadow Trading"])
+def fetch_shadow_metrics(
+    session_id: Optional[str] = Query(default=None, description="Filter by session ID"),
+    limit: int = Query(default=100, ge=1, le=500, description="Number of recent shadow records to analyze"),
+):
+    """Computes the 8 formal shadow trading measurements and promotion scorecard."""
+    raw_records = get_shadow_decisions(session_id=session_id, limit=limit)
+    if not raw_records:
+        return {
+            "status": "NO_DATA",
+            "message": "No shadow trading records found. Run shadow_trader.py to accumulate observations.",
+            "metrics": None,
+            "promotion_decision": None,
+        }
+
+    record_objs = []
+    for r in raw_records:
+        rec = ShadowDecisionRecord(
+            session_id=r.get("session_id", ""),
+            run_id=r.get("run_id", ""),
+            ticker=r.get("ticker", ""),
+            timestamp=r.get("timestamp", ""),
+            decision=r.get("decision", "HOLD"),
+            position_action=r.get("position_action", "NO_ACTION"),
+            composite_score=r.get("composite_score"),
+            signal_strength=r.get("signal_strength"),
+            ml_score=r.get("ml_score"),
+            ml_predicted_return=r.get("ml_predicted_return"),
+            entry_price=r.get("entry_price"),
+            suggested_stop_loss=r.get("suggested_stop_loss"),
+            suggested_target_price=r.get("suggested_target_price"),
+            passed_gates=r.get("passed_gates") or [],
+            failed_gates=r.get("failed_gates") or [],
+            reason_codes=r.get("reason_codes") or [],
+            proposed_shares=r.get("proposed_shares", 0),
+            binding_constraint=r.get("binding_constraint"),
+            is_order_proposed=bool(r.get("is_order_proposed")),
+            simulated_order_id=r.get("simulated_order_id"),
+            simulated_fill_price=r.get("simulated_fill_price"),
+            simulated_slippage_bps=r.get("simulated_slippage_bps"),
+            simulated_commission=r.get("simulated_commission"),
+            simulated_status=r.get("simulated_status"),
+            realized_forward_return_pct=r.get("realized_forward_return_pct"),
+            realized_net_return_pct=r.get("realized_net_return_pct"),
+            is_fresh=bool(r.get("is_fresh", True)),
+            decision_latency_seconds=r.get("decision_latency_seconds", 0.001),
+            quote_age_seconds=r.get("quote_age_seconds", 0.0),
+            input_snapshot=r.get("input_snapshot_json") or {},
+            component_outputs=r.get("component_outputs_json") or {},
+        )
+        record_objs.append(rec)
+
+    analyzer = ShadowMetricsAnalyzer()
+    report = analyzer.analyze_session(records=record_objs, session_id=session_id or "RECENT_AGGREGATE")
+    evaluator = ShadowPromotionEvaluator()
+    promo = evaluator.evaluate(report)
+
+    return {
+        "status": "SUCCESS",
+        "total_analyzed": len(record_objs),
+        "metrics": report.to_dict(),
+        "promotion_decision": promo.to_dict(),
+    }
+
+
+@app.get("/api/execution/orders", tags=["Execution"])
+def fetch_execution_orders(
+    ticker: Optional[str] = Query(default=None, description="Filter by ticker"),
+    status: Optional[str] = Query(default=None, description="Filter by order status"),
+    limit: int = Query(default=50, ge=1, le=500, description="Max orders to return"),
+):
+    """Returns execution ledger order history and fills."""
+    orders = get_execution_orders(ticker=ticker, status=status, limit=limit)
+    return {
+        "count": len(orders),
+        "orders": orders,
+    }
+
+
+@app.get("/api/execution/kill-switch", tags=["Execution"])
+def get_kill_switch_state():
+    """Returns current operational kill switch state."""
+    status_dict = GLOBAL_KILL_SWITCH.get_status()
+    db_state = get_latest_kill_switch_state()
+    return {
+        "is_tripped": status_dict["is_tripped"],
+        "reason": status_dict["trip_reason"] or (db_state.get("reason") if db_state else None),
+        "tripped_at": status_dict["trip_timestamp"] or (db_state.get("tripped_at") if db_state else None),
+        "details": status_dict["trip_details"] or (db_state.get("details") if db_state else ""),
+        "actor": status_dict["tripped_by"] or (db_state.get("actor") if db_state else "SYSTEM"),
+    }
+
+
+@app.post("/api/execution/kill-switch/trip", tags=["Execution"])
+def trip_kill_switch(req: KillSwitchTripRequest):
+    """Trips the operational kill switch to freeze all new trade risk."""
+    reason_enum = KillSwitchReason.MANUAL_OPERATOR_TRIP
+    try:
+        reason_enum = KillSwitchReason(req.reason)
+    except ValueError:
+        pass
+    GLOBAL_KILL_SWITCH.trip(reason=reason_enum, details=f"Tripped via API: {req.reason}", actor=req.operator)
+    return {
+        "status": "TRIPPED",
+        "is_tripped": True,
+        "reason": GLOBAL_KILL_SWITCH.trip_reason.value if GLOBAL_KILL_SWITCH.trip_reason else "MANUAL_OPERATOR_TRIP",
+        "tripped_at": GLOBAL_KILL_SWITCH.trip_timestamp,
+    }
+
+
+@app.post("/api/execution/kill-switch/reset", tags=["Execution"])
+def reset_kill_switch(operator: str = Query(default="MobileClient"), reason: str = Query(default="Manual operator reset")):
+    """Resets the operational kill switch to allow trading."""
+    GLOBAL_KILL_SWITCH.reset(actor=operator, reason=reason)
+    return {
+        "status": "ACTIVE",
+        "is_tripped": False,
+        "reset_by": operator,
+    }
+
+
+
 if __name__ == "__main__":
+
     import uvicorn
     uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)

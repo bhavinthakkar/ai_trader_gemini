@@ -6,9 +6,16 @@ from typing import Sequence, Optional
 
 def clamp(value: float, min_val: float = 0.0, max_val: float = 100.0) -> float:
     """Clamps numeric value into [min_val, max_val]."""
-    if math.isnan(value):
-        return 50.0
-    return max(min_val, min(max_val, value))
+    default_val = max(min_val, min(max_val, 50.0))
+    if value is None:
+        return default_val
+    try:
+        val = float(value)
+        if math.isnan(val):
+            return default_val
+        return max(min_val, min(max_val, val))
+    except (TypeError, ValueError):
+        return default_val
 
 
 def logistic_scale(val: float, k: float = 25.0, midpoint: float = 0.0) -> float:
@@ -17,7 +24,15 @@ def logistic_scale(val: float, k: float = 25.0, midpoint: float = 0.0) -> float:
     using a logistic sigmoid centred at midpoint:
         S = 100.0 / (1.0 + exp(-k * (val - midpoint)))
     """
-    diff = val - midpoint
+    if val is None:
+        return 50.0
+    try:
+        f_val = float(val)
+        if math.isnan(f_val):
+            return 50.0
+    except (TypeError, ValueError):
+        return 50.0
+    diff = f_val - midpoint
     # Avoid overflow
     if k * diff > 40.0:
         return 100.0
@@ -37,9 +52,17 @@ def normal_cdf_scale(z: float, scale: float = 1.0) -> float:
     using the standard normal CDF:
         S = 100.0 * Phi(z / scale)
     """
+    if z is None:
+        return 50.0
+    try:
+        fz = float(z)
+        if math.isnan(fz):
+            return 50.0
+    except (TypeError, ValueError):
+        return 50.0
     if scale <= 0.0:
         scale = 1.0
-    scaled_z = z / scale
+    scaled_z = fz / scale
     return clamp(100.0 * normal_cdf(scaled_z))
 
 

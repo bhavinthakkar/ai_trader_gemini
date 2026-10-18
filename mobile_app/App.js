@@ -273,9 +273,37 @@ function getMLInfo(item, supplementalML = null) {
   };
 }
 
+/**
+ * Extracts structured decision gates, programmatic reason codes, and position sizing (Steps 6.4 & 7).
+ */
+function getStructuredDecisionInfo(item) {
+  if (!item) return null;
+  let rawData = {};
+  if (typeof item.raw_json === 'string') {
+    try { rawData = JSON.parse(item.raw_json); } catch (e) {}
+  } else if (typeof item.raw_json === 'object' && item.raw_json !== null) {
+    rawData = item.raw_json;
+  }
+
+  const struct = item.structured_decision || rawData.structured_decision || {};
+  const positionAction = item.position_action || struct.position_action || rawData.position_action || 'NO_ACTION';
+  const passedGates = item.passed_gates || struct.passed_gates || rawData.passed_gates || [];
+  const failedGates = item.failed_gates || struct.failed_gates || rawData.failed_gates || [];
+  const reasonCodes = item.reason_codes || struct.reason_codes || rawData.reason_codes || [];
+  const sizing = item.position_sizing || rawData.position_sizing || {};
+
+  return {
+    positionAction,
+    passedGates: Array.isArray(passedGates) ? passedGates : [],
+    failedGates: Array.isArray(failedGates) ? failedGates : [],
+    reasonCodes: Array.isArray(reasonCodes) ? reasonCodes : [],
+    sizing: typeof sizing === 'object' && sizing !== null ? sizing : {},
+  };
+}
+
 export default function App() {
   const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
-  const [activeTab, setActiveTab] = useState('signals'); // 'signals' | 'deepdive' | 'movers' | 'history' | 'settings'
+  const [activeTab, setActiveTab] = useState('signals'); // 'signals' | 'deepdive' | 'shadow' | 'movers' | 'history' | 'settings'
   const [refreshing, setRefreshing] = useState(false);
   const [connected, setConnected] = useState(true);
 
@@ -295,6 +323,12 @@ export default function App() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState('');
 
+  // Shadow Trading & Execution State (Steps 7.3 & 8)
+  const [shadowDecisions, setShadowDecisions] = useState([]);
+  const [shadowMetrics, setShadowMetrics] = useState(null);
+  const [killSwitchState, setKillSwitchState] = useState(null);
+  const [loadingShadow, setLoadingShadow] = useState(false);
+
   // Movers State
   const [activeMarket, setActiveMarket] = useState('US'); // 'US' | 'EU'
   const [activeMovers, setActiveMovers] = useState([]);
@@ -307,6 +341,7 @@ export default function App() {
   // Settings State
   const [serverStatus, setServerStatus] = useState(null);
   const [evaluatingOutcomes, setEvaluatingOutcomes] = useState(false);
+
 
   // Fetch Signals & KPIs
   const loadSignalsData = useCallback(async () => {
@@ -374,6 +409,65 @@ export default function App() {
     }
   }, [apiUrl]);
 
+  // Fetch Shadow Trading & Execution State (Steps 7.3 & 8)
+  const loadShadowData = useCallback(async () => {
+    setLoadingShadow(true);
+    try {
+      const [decRes, metRes, ksRes] = await Promise.all([
+        fetch(`${apiUrl}/api/shadow/decisions?limit=25`),
+        fetch(`${apiUrl}/api/shadow/metrics?limit=50`),
+        fetch(`${apiUrl}/api/execution/kill-switch`),
+      ]);
+      if (decRes.ok) {
+        const d = await decRes.json();
+        setShadowDecisions(d.decisions || []);
+      }
+      if (metRes.ok) {
+        const m = await metRes.json();
+        setShadowMetrics(m);
+      }
+      if (ksRes.ok) {
+        const ks = await ksRes.json();
+        setKillSwitchState(ks);
+      }
+    } catch (err) {
+      setConnected(false);
+    } finally {
+      setLoadingShadow(false);
+    }
+  }, [apiUrl]);
+
+  // Operational Kill Switch Actions (Step 7.3)
+  const triggerTripKillSwitch = async () => {
+    try {
+      const res = await fetch(`${apiUrl}/api/execution/kill-switch/trip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'MANUAL_OPERATOR_TRIP', operator: 'MobileApp' }),
+      });
+      if (res.ok) {
+        await loadShadowData();
+        Alert.alert('Kill Switch Tripped', 'All new risk entries have been frozen.');
+      }
+    } catch (err) {
+      Alert.alert('Error', 'Failed to communicate with execution server.');
+    }
+  };
+
+  const triggerResetKillSwitch = async () => {
+    try {
+      const res = await fetch(`${apiUrl}/api/execution/kill-switch/reset?operator=MobileApp`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        await loadShadowData();
+        Alert.alert('Kill Switch Reset', 'Trading execution restored to active state.');
+      }
+    } catch (err) {
+      Alert.alert('Error', 'Failed to communicate with execution server.');
+    }
+  };
+
   // Initial load
   useEffect(() => {
     loadSignalsData();
@@ -384,8 +478,10 @@ export default function App() {
       loadMoversData();
     } else if (activeTab === 'history') {
       loadHistoryData();
+    } else if (activeTab === 'shadow') {
+      loadShadowData();
     }
-  }, [activeTab, loadMoversData, loadHistoryData]);
+  }, [activeTab, loadMoversData, loadHistoryData, loadShadowData]);
 
   // Live ML context sync for Deep-Dive inspection
   useEffect(() => {
@@ -427,8 +523,10 @@ export default function App() {
     if (activeTab === 'signals') await loadSignalsData();
     else if (activeTab === 'movers') await loadMoversData();
     else if (activeTab === 'history') await loadHistoryData();
+    else if (activeTab === 'shadow') await loadShadowData();
     setRefreshing(false);
   };
+
 
   // Trigger Single Analysis
   const triggerAnalysis = async (symbol) => {
@@ -717,6 +815,38 @@ export default function App() {
                         <Text style={styles.statVal}>{item.rvol_20d ? `${item.rvol_20d.toFixed(1)}x` : 'N/A'}</Text>
                       </View>
                     </View>
+
+                    {/* Structured Policy Action Row */}
+                    {(() => {
+                      const sInfo = getStructuredDecisionInfo(item);
+                      if (!sInfo || !sInfo.positionAction || sInfo.positionAction === 'NO_ACTION') return null;
+                      const isLong = sInfo.positionAction === 'OPEN_LONG';
+                      return (
+                        <View style={styles.signalPolicyRow}>
+                          <Text style={styles.signalPolicyLabel}>Policy Action:</Text>
+                          <View
+                            style={[
+                              styles.signalPolicyBadge,
+                              { backgroundColor: isLong ? '#064E3B' : '#1E293B' },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.signalPolicyBadgeText,
+                                { color: isLong ? '#34D399' : '#CBD5E1' },
+                              ]}
+                            >
+                              {sInfo.positionAction}
+                            </Text>
+                          </View>
+                          {sInfo.sizing && sInfo.sizing.shares_allowed ? (
+                            <Text style={styles.signalPolicySizing}>
+                              • Sizing: {sInfo.sizing.shares_allowed} shs
+                            </Text>
+                          ) : null}
+                        </View>
+                      );
+                    })()}
 
                     {item.reason ? (
                       <Text style={styles.signalReason} numberOfLines={2}>
@@ -1092,6 +1222,143 @@ export default function App() {
                   </View>
                 </View>
 
+                {/* Structured Decision & Policy Compliance Gates Card (Step 6.4 & 7.2) */}
+                {(() => {
+                  const structInfo = getStructuredDecisionInfo(selectedStock);
+                  const action = structInfo?.positionAction || 'NO_ACTION';
+                  const actionColor =
+                    action === 'OPEN_LONG' ? '#10B981' :
+                    action === 'OPEN_SHORT' ? '#EF4444' :
+                    action === 'CLOSE_LONG' || action === 'CLOSE_SHORT' ? '#F59E0B' : '#94A3B8';
+                  const actionBg =
+                    action === 'OPEN_LONG' ? '#064E3B' :
+                    action === 'OPEN_SHORT' ? '#7F1D1D' :
+                    action === 'CLOSE_LONG' || action === 'CLOSE_SHORT' ? '#78350F' : '#1E293B';
+
+                  const sizing = structInfo?.sizing || {};
+                  return (
+                    <>
+                      <Text style={styles.subHeading}>🛡️ Structured Decision & Policy Gates</Text>
+                      <View style={styles.structuredCard}>
+                        <View style={styles.structuredHeaderRow}>
+                          <View>
+                            <Text style={styles.structuredHeaderTitle}>Policy Engine Action</Text>
+                            <Text style={styles.structuredHeaderSub}>Deterministic Gates & Policy Rules</Text>
+                          </View>
+                          <View style={[styles.actionBadge, { backgroundColor: actionBg, borderColor: actionColor }]}>
+                            <Text style={[styles.actionBadgeText, { color: actionColor }]}>{action}</Text>
+                          </View>
+                        </View>
+
+                        {/* Passed & Failed Gates */}
+                        <View style={styles.gateSection}>
+                          <Text style={styles.gateSectionLabel}>Passed Compliance Gates ({structInfo?.passedGates?.length || 0})</Text>
+                          <View style={styles.gatePillsRow}>
+                            {structInfo?.passedGates && structInfo.passedGates.length > 0 ? (
+                              structInfo.passedGates.map((gate, idx) => (
+                                <View key={idx} style={styles.passedGatePill}>
+                                  <Text style={styles.passedGateText}>✓ {gate}</Text>
+                                </View>
+                              ))
+                            ) : (
+                              <Text style={styles.gateEmptyText}>None recorded</Text>
+                            )}
+                          </View>
+                        </View>
+
+                        {structInfo?.failedGates && structInfo.failedGates.length > 0 && (
+                          <View style={styles.gateSection}>
+                            <Text style={[styles.gateSectionLabel, { color: '#F87171' }]}>
+                              Failed / Restricting Gates ({structInfo.failedGates.length})
+                            </Text>
+                            <View style={styles.gatePillsRow}>
+                              {structInfo.failedGates.map((gate, idx) => (
+                                <View key={idx} style={styles.failedGatePill}>
+                                  <Text style={styles.failedGateText}>✗ {gate}</Text>
+                                </View>
+                              ))}
+                            </View>
+                          </View>
+                        )}
+
+                        {/* Programmatic Reason Codes */}
+                        {structInfo?.reasonCodes && structInfo.reasonCodes.length > 0 && (
+                          <View style={styles.gateSection}>
+                            <Text style={styles.gateSectionLabel}>Programmatic Reason Codes</Text>
+                            <View style={styles.gatePillsRow}>
+                              {structInfo.reasonCodes.map((code, idx) => (
+                                <View key={idx} style={styles.reasonCodePill}>
+                                  <Text style={styles.reasonCodeText}>🏷️ {code}</Text>
+                                </View>
+                              ))}
+                            </View>
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Institutional Position Sizing & Controls Card (Step 7.1 - 7.3) */}
+                      <Text style={styles.subHeading}>📐 Risk-Based Position Sizing</Text>
+                      <View style={styles.sizingCard}>
+                        <View style={styles.sizingHeaderRow}>
+                          <View>
+                            <Text style={styles.sizingHeaderTitle}>Fixed-Fractional & Volatility Sizing</Text>
+                            <Text style={styles.sizingHeaderSub}>1% Account Risk • ATR-Gap Reserve Buffer</Text>
+                          </View>
+                          {sizing.binding_constraint && (
+                            <View style={styles.constraintBadge}>
+                              <Text style={styles.constraintBadgeText}>
+                                {String(sizing.binding_constraint).replace(/_/g, ' ')}
+                              </Text>
+                            </View>
+                          )}
+                        </View>
+
+                        <View style={styles.sizingGrid}>
+                          <View style={styles.sizingCol}>
+                            <Text style={styles.sizingLabel}>Shares Allowed</Text>
+                            <Text style={[styles.sizingVal, { color: (sizing.shares_allowed || 0) > 0 ? '#34D399' : '#94A3B8' }]}>
+                              {sizing.shares_allowed ?? 0} shs
+                            </Text>
+                            <Text style={styles.sizingSub}>
+                              {(sizing.shares_allowed || 0) > 0 ? `~$${Math.round((sizing.shares_allowed || 0) * (selectedStock.entry_price || selectedStock.price || 0))}` : 'Entry barred'}
+                            </Text>
+                          </View>
+                          <View style={styles.sizingCol}>
+                            <Text style={styles.sizingLabel}>Risk Budget</Text>
+                            <Text style={styles.sizingVal}>
+                              ${Math.round(sizing.risk_budget_usd ?? 1000)}
+                            </Text>
+                            <Text style={styles.sizingSub}>1.0% portfolio equity</Text>
+                          </View>
+                          <View style={styles.sizingCol}>
+                            <Text style={styles.sizingLabel}>Dollar Risk</Text>
+                            <Text style={[styles.sizingVal, { color: '#F87171' }]}>
+                              ${Math.round(sizing.dollar_risk ?? 0)}
+                            </Text>
+                            <Text style={styles.sizingSub}>Max stop-out loss</Text>
+                          </View>
+                          <View style={styles.sizingCol}>
+                            <Text style={styles.sizingLabel}>Gap Reserve</Text>
+                            <Text style={styles.sizingVal}>
+                              {sizing.gap_reserve_pct ? `${Math.round(sizing.gap_reserve_pct * 100)}%` : '20%'}
+                            </Text>
+                            <Text style={styles.sizingSub}>Overnight gap buffer</Text>
+                          </View>
+                        </View>
+
+                        {sizing.rejection_reasons && sizing.rejection_reasons.length > 0 && (
+                          <View style={styles.sizingRejectBox}>
+                            <Text style={styles.sizingRejectTitle}>⚠️ Sizing Restrictions Active:</Text>
+                            {sizing.rejection_reasons.map((r, i) => (
+                              <Text key={i} style={styles.sizingRejectText}>• {r}</Text>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    </>
+                  );
+                })()}
+
                 {/* Bull Case Narrative */}
                 <View style={styles.narrativeBox}>
                   <Text style={styles.narrativeTitle}>💡 Bull Case Rationale</Text>
@@ -1130,6 +1397,292 @@ export default function App() {
                   </TouchableOpacity>
                 )}
               </View>
+            )}
+          </View>
+        )}
+
+        {/* ==================== TAB: SHADOW TRADING & EXECUTION (Steps 7.3 & 8) ==================== */}
+        {activeTab === 'shadow' && (
+          <View style={styles.tabContainer}>
+            {/* Operational Kill Switch Status Banner */}
+            <View
+              style={[
+                styles.killSwitchBanner,
+                {
+                  backgroundColor: killSwitchState?.is_tripped ? '#450A0A' : '#052E16',
+                  borderColor: killSwitchState?.is_tripped ? '#EF4444' : '#10B981',
+                },
+              ]}
+            >
+              <View style={styles.killSwitchHeader}>
+                <View style={{ flex: 1, marginRight: 10 }}>
+                  <Text
+                    style={[
+                      styles.killSwitchTitle,
+                      { color: killSwitchState?.is_tripped ? '#FCA5A5' : '#86EFAC' },
+                    ]}
+                  >
+                    {killSwitchState?.is_tripped ? '🛑 OPERATIONAL KILL SWITCH: TRIPPED' : '⚡ KILL SWITCH: OPERATIONAL & ACTIVE'}
+                  </Text>
+                  <Text style={styles.killSwitchDesc}>
+                    {killSwitchState?.is_tripped
+                      ? `Execution frozen by ${killSwitchState.tripped_by || 'system'}: ${killSwitchState.trip_reason || 'Manual Trip'}`
+                      : 'Pre-flight order gating active. Position reconciler and risk monitors operational.'}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={[
+                    styles.killSwitchBtn,
+                    {
+                      backgroundColor: killSwitchState?.is_tripped ? '#10B981' : '#EF4444',
+                    },
+                  ]}
+                  onPress={() => {
+                    if (killSwitchState?.is_tripped) {
+                      triggerResetKillSwitch();
+                    } else {
+                      Alert.alert(
+                        'Trip Kill Switch?',
+                        'This will freeze all new risk entries across simulated and production execution.',
+                        [
+                          { text: 'Cancel', style: 'cancel' },
+                          { text: 'TRIP KILL SWITCH', style: 'destructive', onPress: triggerTripKillSwitch },
+                        ]
+                      );
+                    }
+                  }}
+                >
+                  <Text style={styles.killSwitchBtnText}>
+                    {killSwitchState?.is_tripped ? 'RESTORE' : 'TRIP'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Institutional Promotion Criteria Scorecard (Step 8) */}
+            <View style={styles.promoCard}>
+              <View style={styles.promoHeader}>
+                <View>
+                  <Text style={styles.promoTitle}>🏆 Institutional Promotion Gate</Text>
+                  <Text style={styles.promoSub}>Predefined 8 Formal Verification Gates</Text>
+                </View>
+                {shadowMetrics?.promotion_decision && (
+                  <View
+                    style={[
+                      styles.promoStatusPill,
+                      {
+                        backgroundColor:
+                          shadowMetrics.promotion_decision.status === 'PASSED'
+                            ? '#064E3B'
+                            : shadowMetrics.promotion_decision.status === 'PENDING_OBSERVATION'
+                            ? '#78350F'
+                            : '#7F1D1D',
+                        borderColor:
+                          shadowMetrics.promotion_decision.status === 'PASSED'
+                            ? '#10B981'
+                            : shadowMetrics.promotion_decision.status === 'PENDING_OBSERVATION'
+                            ? '#F59E0B'
+                            : '#EF4444',
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.promoStatusText,
+                        {
+                          color:
+                            shadowMetrics.promotion_decision.status === 'PASSED'
+                              ? '#34D399'
+                              : shadowMetrics.promotion_decision.status === 'PENDING_OBSERVATION'
+                              ? '#FCD34D'
+                              : '#FCA5A5',
+                        },
+                      ]}
+                    >
+                      {shadowMetrics.promotion_decision.status}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {shadowMetrics?.promotion_decision ? (
+                <>
+                  <Text style={styles.promoRationale}>
+                    {shadowMetrics.promotion_decision.recommendation_summary || 'Evaluating shadow trading stream against institutional promotion criteria.'}
+                  </Text>
+                  <View style={styles.promoProgressRow}>
+                    <Text style={styles.promoProgressText}>
+                      Gates Passed: {shadowMetrics.promotion_decision.passed_requirements_count || 0} / {shadowMetrics.promotion_decision.total_requirements_count || 7}
+                    </Text>
+                    <Text style={styles.promoProgressText}>
+                      Observations: {shadowMetrics.promotion_decision.observation_count || 0} / {shadowMetrics.promotion_decision.required_min_observations || 30}
+                    </Text>
+                  </View>
+                </>
+              ) : null}
+
+              {/* 8 Formal Shadow Measurements Grid */}
+              {shadowMetrics?.metrics ? (
+                <View style={styles.metricPillGrid}>
+                  <View style={styles.metricPillCard}>
+                    <Text style={styles.metricPillLabel}>1. Signal Reproducibility</Text>
+                    <Text style={styles.metricPillVal}>
+                      {((shadowMetrics.metrics.reproducibility?.decision_match_rate ?? 1.0) * 100).toFixed(0)}%
+                    </Text>
+                    <Text style={styles.metricPillSub}>Deterministic match</Text>
+                  </View>
+                  <View style={styles.metricPillCard}>
+                    <Text style={styles.metricPillLabel}>2. Latency & Age</Text>
+                    <Text style={styles.metricPillVal}>
+                      {((shadowMetrics.metrics.latency_freshness?.median_decision_latency_seconds ?? 0.001) * 1000).toFixed(1)}ms
+                    </Text>
+                    <Text style={styles.metricPillSub}>
+                      Freshness: {shadowMetrics.metrics.latency_freshness?.staleness_violations ?? 0} stale
+                    </Text>
+                  </View>
+                  <View style={styles.metricPillCard}>
+                    <Text style={styles.metricPillLabel}>3. Predicted vs Realized</Text>
+                    <Text style={styles.metricPillVal}>
+                      {((shadowMetrics.metrics.predictive_performance?.directional_accuracy ?? 0) * 100).toFixed(0)}%
+                    </Text>
+                    <Text style={styles.metricPillSub}>Directional hit rate</Text>
+                  </View>
+                  <View style={styles.metricPillCard}>
+                    <Text style={styles.metricPillLabel}>4. Cost-Adjusted Net</Text>
+                    <Text style={styles.metricPillVal}>
+                      {(shadowMetrics.metrics.cost_adjusted?.net_sharpe_ratio ?? 0).toFixed(2)}
+                    </Text>
+                    <Text style={styles.metricPillSub}>
+                      Drag: {(shadowMetrics.metrics.cost_adjusted?.slippage_drag_bps ?? 0).toFixed(1)} bps
+                    </Text>
+                  </View>
+                  <View style={styles.metricPillCard}>
+                    <Text style={styles.metricPillLabel}>5. Gate Rejection Rate</Text>
+                    <Text style={styles.metricPillVal}>
+                      {((shadowMetrics.metrics.gate_efficiency?.rejection_rate ?? 0) * 100).toFixed(0)}%
+                    </Text>
+                    <Text style={styles.metricPillSub}>Risk-screened out</Text>
+                  </View>
+                  <View style={styles.metricPillCard}>
+                    <Text style={styles.metricPillLabel}>6. Model Drift (PSI)</Text>
+                    <Text style={styles.metricPillVal}>
+                      {(shadowMetrics.metrics.model_drift?.aggregate_psi ?? 0).toFixed(3)}
+                    </Text>
+                    <Text style={styles.metricPillSub}>Feature stability</Text>
+                  </View>
+                  <View style={styles.metricPillCard}>
+                    <Text style={styles.metricPillLabel}>7. LLM Temporal Integrity</Text>
+                    <Text style={[styles.metricPillVal, { color: '#34D399' }]}>
+                      {((shadowMetrics.metrics.llm_temporal_integrity?.point_in_time_adherence ?? 1.0) * 100).toFixed(0)}%
+                    </Text>
+                    <Text style={styles.metricPillSub}>Zero look-ahead bias</Text>
+                  </View>
+                  <View style={styles.metricPillCard}>
+                    <Text style={styles.metricPillLabel}>8. Ledger Reconciliation</Text>
+                    <Text style={[styles.metricPillVal, { color: (shadowMetrics.metrics.risk_compliance?.reconciliation_discrepancies ?? 0) === 0 ? '#34D399' : '#EF4444' }]}>
+                      {shadowMetrics.metrics.risk_compliance?.reconciliation_discrepancies ?? 0} errors
+                    </Text>
+                    <Text style={styles.metricPillSub}>State drift count</Text>
+                  </View>
+                </View>
+              ) : null}
+            </View>
+
+            {/* Shadow Trading Decision Audit Log */}
+            <Text style={styles.sectionHeading}>
+              ⚡ Shadow Audit Trail ({shadowDecisions.length})
+            </Text>
+
+            {loadingShadow ? (
+              <View style={styles.loadingBox}>
+                <ActivityIndicator size="large" color="#3B82F6" />
+                <Text style={styles.loadingText}>Fetching shadow execution records...</Text>
+              </View>
+            ) : shadowDecisions.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyText}>No shadow trading decisions logged yet.</Text>
+                <Text style={[styles.emptyText, { marginTop: 6, fontSize: 11, color: '#64748B' }]}>
+                  Run an analysis on any ticker or run the shadow desk to populate simulated execution logs.
+                </Text>
+              </View>
+            ) : (
+              shadowDecisions.map((dec, idx) => {
+                const isBuy = dec.decision === 'BUY';
+                const isSell = dec.decision === 'SELL';
+                const badgeColor = isBuy ? '#059669' : isSell ? '#DC2626' : '#4B5563';
+                const textColor = isBuy ? '#34D399' : isSell ? '#F87171' : '#D1D5DB';
+                const passedGates = dec.passed_gates || [];
+                const failedGates = dec.failed_gates || [];
+                const reasonCodes = dec.reason_codes || [];
+
+                return (
+                  <View key={dec.run_id || idx} style={styles.shadowCard}>
+                    <View style={styles.shadowHeaderRow}>
+                      <View>
+                        <Text style={styles.shadowTicker}>{dec.ticker}</Text>
+                        <Text style={styles.shadowActionText}>Action: {dec.position_action || 'NO_ACTION'}</Text>
+                      </View>
+                      <View style={[styles.badge, { backgroundColor: badgeColor }]}>
+                        <Text style={[styles.badgeText, { color: textColor }]}>{dec.decision}</Text>
+                      </View>
+                    </View>
+
+                    {/* Sizing & Execution Stats */}
+                    <View style={styles.shadowStatsRow}>
+                      <View style={styles.shadowStatCol}>
+                        <Text style={styles.shadowStatLabel}>Composite</Text>
+                        <Text style={styles.shadowStatVal}>{dec.composite_score ? dec.composite_score.toFixed(1) : 'N/A'}</Text>
+                      </View>
+                      <View style={styles.shadowStatCol}>
+                        <Text style={styles.shadowStatLabel}>Proposed Shs</Text>
+                        <Text style={styles.shadowStatVal}>{dec.proposed_shares ?? 0}</Text>
+                      </View>
+                      <View style={styles.shadowStatCol}>
+                        <Text style={styles.shadowStatLabel}>Sim Fill</Text>
+                        <Text style={styles.shadowStatVal}>
+                          {dec.simulated_fill_price ? `$${dec.simulated_fill_price.toFixed(2)}` : 'N/A'}
+                        </Text>
+                      </View>
+                      <View style={styles.shadowStatCol}>
+                        <Text style={styles.shadowStatLabel}>Slippage</Text>
+                        <Text style={styles.shadowStatVal}>
+                          {dec.simulated_slippage_bps ? `${dec.simulated_slippage_bps.toFixed(1)} bps` : '0 bps'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Gates & Reason Codes Pills */}
+                    {(passedGates.length > 0 || failedGates.length > 0 || reasonCodes.length > 0) && (
+                      <View style={styles.shadowGatesBox}>
+                        <View style={styles.gatePillsRow}>
+                          {passedGates.slice(0, 3).map((g, i) => (
+                            <View key={i} style={styles.passedGatePill}>
+                              <Text style={styles.passedGateText}>✓ {g}</Text>
+                            </View>
+                          ))}
+                          {failedGates.slice(0, 3).map((g, i) => (
+                            <View key={i} style={styles.failedGatePill}>
+                              <Text style={styles.failedGateText}>✗ {g}</Text>
+                            </View>
+                          ))}
+                          {reasonCodes.slice(0, 2).map((rc, i) => (
+                            <View key={i} style={styles.reasonCodePill}>
+                              <Text style={styles.reasonCodeText}>🏷️ {rc}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      </View>
+                    )}
+
+                    <View style={styles.cardFooter}>
+                      <Text style={styles.cardTimestamp}>🕒 {dec.timestamp}</Text>
+                      <Text style={styles.shadowStatusText}>
+                        Status: {dec.simulated_status || 'SIMULATED'}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })
             )}
           </View>
         )}
@@ -1372,6 +1925,7 @@ export default function App() {
         {[
           { key: 'signals', label: 'Signals', icon: '📊' },
           { key: 'deepdive', label: 'Deep-Dive', icon: '🔍' },
+          { key: 'shadow', label: 'Execution', icon: '⚡' },
           { key: 'movers', label: 'Movers', icon: '🔥' },
           { key: 'history', label: 'History', icon: '📜' },
           { key: 'settings', label: 'Settings', icon: '⚙️' },
@@ -2272,6 +2826,383 @@ const styles = StyleSheet.create({
     color: '#64748B',
     marginBottom: 10,
     lineHeight: 18,
+  },
+  // Structured Decisions & Policy Sizing (Steps 6.4, 7.1, 7.2)
+  signalPolicyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#1E293B',
+  },
+  signalPolicyLabel: {
+    fontSize: 11,
+    color: '#94A3B8',
+    fontWeight: '600',
+    marginRight: 6,
+  },
+  signalPolicyBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  signalPolicyBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  signalPolicySizing: {
+    fontSize: 10,
+    color: '#60A5FA',
+    marginLeft: 6,
+    fontWeight: '600',
+  },
+  structuredCard: {
+    backgroundColor: '#151B26',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#212C3D',
+    padding: 14,
+    marginBottom: 14,
+  },
+  structuredHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  structuredHeaderTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#F1F5F9',
+  },
+  structuredHeaderSub: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 1,
+  },
+  actionBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  actionBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  gateSection: {
+    marginTop: 8,
+  },
+  gateSectionLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#94A3B8',
+    marginBottom: 4,
+  },
+  gatePillsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  passedGatePill: {
+    backgroundColor: '#064E3B',
+    borderColor: '#10B981',
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  passedGateText: {
+    color: '#34D399',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  failedGatePill: {
+    backgroundColor: '#7F1D1D',
+    borderColor: '#EF4444',
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  failedGateText: {
+    color: '#FCA5A5',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  reasonCodePill: {
+    backgroundColor: '#1E293B',
+    borderColor: '#334155',
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  reasonCodeText: {
+    color: '#93C5FD',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  gateEmptyText: {
+    color: '#64748B',
+    fontSize: 11,
+    fontStyle: 'italic',
+  },
+  sizingCard: {
+    backgroundColor: '#151B26',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#212C3D',
+    padding: 14,
+    marginBottom: 14,
+  },
+  sizingHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  sizingHeaderTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#F1F5F9',
+  },
+  sizingHeaderSub: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 1,
+  },
+  constraintBadge: {
+    backgroundColor: '#1E293B',
+    borderColor: '#475569',
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  constraintBadgeText: {
+    color: '#CBD5E1',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  sizingGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 6,
+  },
+  sizingCol: {
+    width: '48%',
+    backgroundColor: '#0D111A',
+    borderRadius: 8,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#1F2937',
+  },
+  sizingLabel: {
+    fontSize: 10,
+    color: '#94A3B8',
+    fontWeight: '600',
+  },
+  sizingVal: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#F1F5F9',
+    marginTop: 2,
+  },
+  sizingSub: {
+    fontSize: 10,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  sizingRejectBox: {
+    backgroundColor: '#450A0A',
+    borderColor: '#7F1D1D',
+    borderWidth: 1,
+    borderRadius: 6,
+    padding: 8,
+    marginTop: 10,
+  },
+  sizingRejectTitle: {
+    color: '#F87171',
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  sizingRejectText: {
+    color: '#FCA5A5',
+    fontSize: 10,
+    marginTop: 1,
+  },
+  // Operational Kill Switch & Shadow Promotion (Steps 7.3 & 8)
+  killSwitchBanner: {
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 12,
+    marginBottom: 14,
+  },
+  killSwitchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  killSwitchTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  killSwitchDesc: {
+    fontSize: 10,
+    color: '#CBD5E1',
+    marginTop: 2,
+    lineHeight: 14,
+  },
+  killSwitchBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  killSwitchBtnText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  promoCard: {
+    backgroundColor: '#151B26',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#212C3D',
+    padding: 14,
+    marginBottom: 14,
+  },
+  promoHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  promoTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#F1F5F9',
+  },
+  promoSub: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 1,
+  },
+  promoStatusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  promoStatusText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  promoRationale: {
+    fontSize: 11,
+    color: '#94A3B8',
+    lineHeight: 16,
+    marginTop: 4,
+  },
+  promoProgressRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    paddingVertical: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#212C3D',
+  },
+  promoProgressText: {
+    fontSize: 11,
+    color: '#60A5FA',
+    fontWeight: '600',
+  },
+  metricPillGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  metricPillCard: {
+    width: '48%',
+    backgroundColor: '#0D111A',
+    borderRadius: 8,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#1F2937',
+  },
+  metricPillLabel: {
+    fontSize: 10,
+    color: '#94A3B8',
+    fontWeight: '600',
+  },
+  metricPillVal: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#F1F5F9',
+    marginTop: 2,
+  },
+  metricPillSub: {
+    fontSize: 9,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  shadowCard: {
+    backgroundColor: '#151B26',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#212C3D',
+    padding: 12,
+    marginBottom: 10,
+  },
+  shadowHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  shadowTicker: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#F1F5F9',
+  },
+  shadowActionText: {
+    fontSize: 10,
+    color: '#60A5FA',
+    fontWeight: '600',
+    marginTop: 1,
+  },
+  shadowStatsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: '#0D111A',
+    borderRadius: 6,
+    padding: 8,
+    marginTop: 4,
+  },
+  shadowStatCol: {
+    alignItems: 'center',
+  },
+  shadowStatLabel: {
+    fontSize: 9,
+    color: '#64748B',
+  },
+  shadowStatVal: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#E2E8F0',
+    marginTop: 2,
+  },
+  shadowGatesBox: {
+    marginTop: 8,
+  },
+  shadowStatusText: {
+    fontSize: 10,
+    color: '#94A3B8',
+    fontWeight: '600',
   },
   bottomNav: {
     flexDirection: 'row',

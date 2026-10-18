@@ -8,6 +8,8 @@ def clean_float(val: Any, default: Optional[float] = None) -> Optional[float]:
     """Safely parses string percentages (e.g. '+4.64%', 'N/A') or numerics to float."""
     if val is None:
         return default
+    if isinstance(val, bool):
+        return default
     if isinstance(val, (int, float)):
         if math.isnan(val) or math.isinf(val):
             return default
@@ -230,9 +232,11 @@ def compute_market_alpha(
 
 def compute_earnings_yield(eps_ttm: Optional[float], price: float) -> Optional[float]:
     """Computes Earnings Yield (E/P). Continuous across negative values without singularities."""
-    if eps_ttm is None or price <= 0.0:
+    clean_eps = clean_float(eps_ttm)
+    clean_p = clean_float(price)
+    if clean_eps is None or clean_p is None or clean_p <= 0.0:
         return None
-    return eps_ttm / price
+    return clean_eps / clean_p
 
 
 def compute_ebitda_yield(
@@ -244,17 +248,21 @@ def compute_ebitda_yield(
     Computes EBITDA Yield (EBITDA / EV).
     Handles cash-heavy companies with EV <= 0 by falling back to Market Cap.
     """
-    if ebitda_ttm is None:
+    clean_ebitda = clean_float(ebitda_ttm)
+    if clean_ebitda is None:
         return None
 
-    denom = enterprise_value
+    clean_ev = clean_float(enterprise_value)
+    clean_mc = clean_float(market_cap)
+
+    denom = clean_ev
     if denom is None or denom <= 0.0:
-        denom = market_cap
+        denom = clean_mc
 
     if denom is None or denom <= 0.0:
         return None
 
-    return ebitda_ttm / denom
+    return clean_ebitda / denom
 
 
 def compute_fcf_yield(
@@ -263,11 +271,15 @@ def compute_fcf_yield(
     market_cap: Optional[float] = None,
 ) -> Optional[float]:
     """Computes Free Cash Flow Yield (FCF / EV or FCF / Market Cap)."""
-    if fcf_ttm is None:
+    clean_fcf = clean_float(fcf_ttm)
+    if clean_fcf is None:
         return None
 
-    denom = enterprise_value if (enterprise_value is not None and enterprise_value > 0.0) else market_cap
+    clean_ev = clean_float(enterprise_value)
+    clean_mc = clean_float(market_cap)
+
+    denom = clean_ev if (clean_ev is not None and clean_ev > 0.0) else clean_mc
     if denom is None or denom <= 0.0:
         return None
 
-    return fcf_ttm / denom
+    return clean_fcf / denom

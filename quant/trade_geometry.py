@@ -172,9 +172,47 @@ def validate_price_ordering(
         (is_valid, status, rejection_reason)
     """
     if isinstance(direction, str):
-        direction = TradeDirection(direction.upper())
+        try:
+            direction = TradeDirection(direction.upper())
+        except ValueError:
+            return (
+                False,
+                PriceOrderingStatus.INVALID_PRICE_ORDERING,
+                f"Invalid trade direction: {direction}",
+            )
 
-    # 1. Non-positive price rejection
+    # 1. Type validation and non-positive price rejection
+    try:
+        if isinstance(entry, bool) or isinstance(stop, bool) or isinstance(target, bool):
+            return (
+                False,
+                PriceOrderingStatus.NON_POSITIVE_PRICE,
+                f"Trade prices cannot be booleans: entry={entry}, stop={stop}, target={target}",
+            )
+        f_entry = float(entry)
+        f_stop = float(stop)
+        f_target = float(target)
+        if (
+            math.isnan(f_entry)
+            or math.isnan(f_stop)
+            or math.isnan(f_target)
+            or math.isinf(f_entry)
+            or math.isinf(f_stop)
+            or math.isinf(f_target)
+        ):
+            return (
+                False,
+                PriceOrderingStatus.NON_POSITIVE_PRICE,
+                f"All trade prices must be finite numbers: entry={entry}, stop={stop}, target={target}",
+            )
+        entry, stop, target = f_entry, f_stop, f_target
+    except (TypeError, ValueError):
+        return (
+            False,
+            PriceOrderingStatus.NON_POSITIVE_PRICE,
+            f"All trade prices must be numeric: entry={entry}, stop={stop}, target={target}",
+        )
+
     if entry <= 0.0 or stop <= 0.0 or target <= 0.0:
         return (
             False,

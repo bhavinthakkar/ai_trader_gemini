@@ -90,12 +90,117 @@ class PrecedenceEvaluationResult:
     message: str
     metrics: Dict[str, Any] = field(default_factory=dict)
     stage_audit_log: List[Dict[str, Any]] = field(default_factory=list)
+    passed_gates: List[str] = field(default_factory=list)
+    failed_gates: List[str] = field(default_factory=list)
+    reason_codes: List[str] = field(default_factory=list)
+    data_quality_status: str = "VALID"
+    position_action: str = "NO_ACTION"
+    model_status: str = "IN_SCOPE"
+
+    def __post_init__(self):
+        if not self.position_action or self.position_action == "NO_ACTION":
+            action_map = {
+                InternalActionType.BUY: "OPEN_LONG",
+                InternalActionType.HOLD: "NO_ACTION",
+                InternalActionType.SELL_TO_CLOSE: "CLOSE_LONG",
+                InternalActionType.OPEN_SHORT: "OPEN_SHORT",
+                InternalActionType.COVER_SHORT: "CLOSE_SHORT",
+            }
+            self.position_action = action_map.get(self.internal_action, "NO_ACTION")
+
+        if not self.reason_codes and self.reason_code:
+            code_map = {
+                "COMPOSITE_BELOW_FLOOR": "SCORE_BELOW_BUY_THRESHOLD",
+                "DIP_BUY_CRITERIA_FAILED": "DIP_CRITERIA_FAILED",
+                "VALUE_TRAP_CONFIRMED": "VALUE_TRAP_DETECTED",
+                "EARNINGS_BLACKOUT": "EARNINGS_BLACKOUT_ACTIVE",
+                "EARNINGS_BLACKOUT_FORCED_EXIT": "EARNINGS_BLACKOUT_ACTIVE",
+                "DATA_OUTAGE_NEW_ENTRIES_BLOCKED": "DATA_OUTAGE_BLOCK",
+                "DATA_OUTAGE_FAILSAFE_STOP_BREACH": "DATA_OUTAGE_FAILSAFE_EXIT",
+                "DATA_OUTAGE_FAILSAFE_SHORT_STOP_BREACH": "DATA_OUTAGE_FAILSAFE_EXIT",
+                "DATA_OUTAGE_FAILSAFE_EVIDENCE_VETO": "DATA_OUTAGE_FAILSAFE_EXIT",
+                "DATA_OUTAGE_PROTECTIVE_LIQUIDATION": "DATA_OUTAGE_FAILSAFE_EXIT",
+                "STOP_LOSS_BREACH": "STOP_LOSS_BREACHED",
+                "SHORT_STOP_LOSS_BREACH": "SHORT_STOP_BREACHED",
+                "TARGET_ACHIEVED": "PROFIT_TARGET_REACHED",
+                "SHORT_TARGET_ACHIEVED": "PROFIT_TARGET_REACHED",
+                "HOLDING_THESIS_INTACT": "HOLDING_THESIS_INTACT",
+                "THESIS_COLLAPSED": "THESIS_COLLAPSED",
+                "SHORT_THESIS_COLLAPSED": "THESIS_COLLAPSED",
+                "EVIDENCE_VETO_FORCED_EXIT": "CRITICAL_EVIDENCE_VETO",
+                "BORROW_UNAVAILABLE": "BORROW_UNAVAILABLE",
+                "SHORT_CEILING_EXCEEDED": "SHORT_CEILING_EXCEEDED",
+                "RR_TOO_LOW": "REWARD_TO_RISK_INSUFFICIENT",
+                "ZERO_OR_NEGATIVE_REWARD": "REWARD_TO_RISK_INSUFFICIENT",
+                "INVALID_PRICE_ORDERING": "PRICE_ORDERING_INVALID",
+                "CONFIDENCE_TOO_LOW": "CONFIDENCE_BELOW_HURDLE",
+                "BUY_ORDER_CERTIFIED": "BUY_ORDER_CERTIFIED",
+                "SHORT_ORDER_CERTIFIED": "SHORT_ORDER_CERTIFIED",
+                "NO_TRADE_DEFAULT": "NO_TRADE_DEFAULT",
+            }
+            mapped_rc = code_map.get(self.reason_code, self.reason_code)
+            self.reason_codes = [mapped_rc]
+
+        if not self.passed_gates and not self.failed_gates:
+            if "DATA_OUTAGE" in self.reason_code:
+                self.failed_gates.append("DATA_QUALITY")
+                self.data_quality_status = "OUTAGE"
+            else:
+                self.passed_gates.append("DATA_QUALITY")
+
+            if self.reason_code in ("COMPOSITE_BELOW_FLOOR", "DIP_BUY_CRITERIA_FAILED", "VALUE_TRAP_CONFIRMED"):
+                self.failed_gates.append("BUY_FLOOR")
+            elif self.reason_code in ("SHORT_CEILING_EXCEEDED",):
+                self.failed_gates.append("SHORT_CEILING")
+            elif self.reason_code in ("BORROW_UNAVAILABLE",):
+                self.failed_gates.append("BORROW_AVAILABILITY")
+            elif self.reason_code in ("RR_TOO_LOW", "ZERO_OR_NEGATIVE_REWARD", "INVALID_PRICE_ORDERING", "NO_STATISTICAL_EDGE"):
+                self.failed_gates.append("REWARD_TO_RISK")
+            elif self.reason_code in ("CONFIDENCE_TOO_LOW",):
+                self.failed_gates.append("CONFIDENCE_HURDLE")
+            elif self.reason_code in ("EARNINGS_BLACKOUT", "EVENT_RISK_BLACKOUT", "EX_DIVIDEND_BLACKOUT", "EARNINGS_BLACKOUT_FORCED_EXIT"):
+                self.failed_gates.append("EVENT_RISK")
+            elif self.reason_code in ("STOP_LOSS_BREACH", "SHORT_STOP_LOSS_BREACH"):
+                self.failed_gates.append("STOP_LOSS_SURVEILLANCE")
+            elif self.reason_code in ("TARGET_ACHIEVED", "SHORT_TARGET_ACHIEVED"):
+                self.passed_gates.append("PROFIT_TARGET")
+            elif self.reason_code in ("HOLDING_THESIS_INTACT",):
+                self.passed_gates.append("HOLDING_THESIS")
+            elif self.reason_code in ("BUY_ORDER_CERTIFIED",):
+                self.passed_gates = ["DATA_QUALITY", "EVENT_RISK", "LIQUIDITY", "BUY_FLOOR", "REWARD_TO_RISK", "CONFIDENCE_HURDLE"]
+            elif self.reason_code in ("SHORT_ORDER_CERTIFIED",):
+                self.passed_gates = ["DATA_QUALITY", "EVENT_RISK", "LIQUIDITY", "SHORT_CEILING", "BORROW_AVAILABILITY", "REWARD_TO_RISK", "CONFIDENCE_HURDLE"]
 
     def to_dict(self) -> Dict[str, Any]:
         res = asdict(self)
         res["internal_action"] = self.internal_action.value
         res["resolved_stage"] = self.resolved_stage.value
         return res
+
+    def to_structured_decision(
+        self,
+        ticker: str,
+        run_id: Optional[str] = None,
+        composite_score: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Converts precedence evaluation to independent structured decision format (Step 6.4)."""
+        reasons = list(self.reason_codes) if self.reason_codes else ([self.reason_code] if self.reason_code else [])
+        from quant.structured_decision import StructuredDecision
+        dec = StructuredDecision(
+            run_id=run_id or "run-default",
+            ticker=ticker,
+            decision=self.external_decision,
+            composite_score=composite_score,
+            model_status=self.model_status,
+            passed_gates=list(self.passed_gates),
+            failed_gates=list(self.failed_gates),
+            data_quality_status=self.data_quality_status,
+            position_action=self.position_action,
+            reason_codes=reasons,
+            metrics=self.metrics,
+        )
+        return dec.to_dict()
+
 
 
 class DecisionPrecedenceEngine:
@@ -135,6 +240,15 @@ class DecisionPrecedenceEngine:
         intended_order_value: float = 25_000.0,
         has_critical_evidence_veto: bool = False,
         execution_costs: Optional[ExecutionCostModel] = None,
+        borrow_available: bool = True,
+        borrow_status: str = "ETB",
+        borrow_fee_bps: float = 0.0,
+        available_borrow_shares: Optional[int] = None,
+        ema_20: Optional[float] = None,
+        ema_50: Optional[float] = None,
+        trend_score: Optional[float] = None,
+        financial_quality_score: Optional[float] = None,
+        ticker: str = "TICKER",
     ) -> PrecedenceEvaluationResult:
         """
         Evaluates trading decision following the strict 6-stage precedence order.
@@ -594,7 +708,7 @@ class DecisionPrecedenceEngine:
 
         # Branch 5B: New Short Entry (OPEN_SHORT)
         elif candidate_decision.upper() == "SELL":
-            # 1. Gate 4: Short Ceiling Check
+            # 1. Gate 4: Short Ceiling Check & Borrow Availability
             g4_short = SellExitSymmetryGate.evaluate(
                 candidate_decision="SELL",
                 is_holding=False,
@@ -602,6 +716,18 @@ class DecisionPrecedenceEngine:
                 stop_loss=stop_loss,
                 target_price=target_price,
                 composite_score=composite_score,
+                borrow_available=borrow_available,
+                borrow_status=borrow_status,
+                borrow_fee_bps=borrow_fee_bps,
+                available_borrow_shares=available_borrow_shares,
+                rsi=rsi14,
+                ema_20=ema_20,
+                ema_50=ema_50,
+                trend_score=trend_score,
+                financial_quality_score=financial_quality_score,
+                valuation_history_score=valuation_history_score,
+                days_to_ex_dividend=days_to_ex_dividend,
+                ticker=ticker,
                 policy=self.policy,
             )
             if not g4_short.passed:
@@ -717,7 +843,16 @@ def evaluate_decision_precedence(
     intended_order_value: float = 25_000.0,
     has_critical_evidence_veto: bool = False,
     execution_costs: Optional[ExecutionCostModel] = None,
+    borrow_available: bool = True,
     policy: Optional[TradingPolicy] = None,
+    borrow_status: str = "ETB",
+    borrow_fee_bps: float = 0.0,
+    available_borrow_shares: Optional[int] = None,
+    ema_20: Optional[float] = None,
+    ema_50: Optional[float] = None,
+    trend_score: Optional[float] = None,
+    financial_quality_score: Optional[float] = None,
+    ticker: str = "TICKER",
 ) -> PrecedenceEvaluationResult:
     """Convenience wrapper for DecisionPrecedenceEngine evaluation."""
     engine = DecisionPrecedenceEngine(policy)
@@ -748,4 +883,13 @@ def evaluate_decision_precedence(
         intended_order_value=intended_order_value,
         has_critical_evidence_veto=has_critical_evidence_veto,
         execution_costs=execution_costs,
+        borrow_available=borrow_available,
+        borrow_status=borrow_status,
+        borrow_fee_bps=borrow_fee_bps,
+        available_borrow_shares=available_borrow_shares,
+        ema_20=ema_20,
+        ema_50=ema_50,
+        trend_score=trend_score,
+        financial_quality_score=financial_quality_score,
+        ticker=ticker,
     )

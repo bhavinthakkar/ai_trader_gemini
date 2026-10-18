@@ -46,6 +46,15 @@ from signal_strength import (
     CombinationMethod,
     calculate_signal_strength,
 )
+from structured_decision import (
+    PositionAction,
+    DataQualityStatus,
+    ModelScopeStatus,
+    StandardGateName,
+    StandardReasonCode,
+    StructuredDecision,
+    build_structured_decision,
+)
 
 _POLICY = load_policy_config()
 WATCHLIST = ["000660.KS"]
@@ -978,6 +987,46 @@ def normalize_master_trader_json(
 
     forward_pe = m_data.get("forward_pe", "N/A")
 
+    # Structured Decision Contract (Step 6.4)
+    run_id_val = str(data.get("run_id") or m_data.get("run_id") or f"run-{stock}-{int(time.time())}")
+    structured_dec = build_structured_decision(
+        ticker=stock,
+        candidate_decision=original_decision,
+        composite_score=decision_composite,
+        position_state="LONG" if is_explicit_holding else "FLAT",
+        current_price=price_v,
+        stop_loss=stop_v,
+        target_price=target_v,
+        atr=atr_v,
+        pillar_scores=pillar_scores,
+        data_completeness=data_completeness,
+        market_data_fresh=(price_v > 0 and atr_v > 0),
+        ml_data_fresh=is_in_scope if ml_context else True,
+        days_to_earnings=days_to_earnings,
+        is_event_risk_blackout=bool(event_risk_info.get("is_blackout")),
+        days_to_ex_dividend=days_to_ex_div,
+        iv_pct=iv_val,
+        rvol_20d=rvol_20d_val,
+        avg_dollar_volume_20d=avg_dollar_vol_20d_val,
+        borrow_available=True,
+        has_critical_evidence_veto=bool(evidence_veto_reasons),
+        catalyst_path="DIP_BUY" if catalyst_path else None,
+        rsi14=rsi14,
+        drawdown_5d_pct=m_data.get("drawdown_5d_pct"),
+        valuation_history_score=pillar_scores.get("valuation_history"),
+        is_value_trap=is_value_trap,
+        model_status=model_status or ("IN_SCOPE" if is_in_scope else "OUT_OF_SCOPE"),
+        run_id=run_id_val,
+        policy=active_policy,
+    )
+    if no_trade_reason and no_trade_reason == "SCHEMA_INVALID":
+        structured_dec.failed_gates = ["SCHEMA_VALIDATION"]
+        structured_dec.reason_codes = ["SCHEMA_VALIDATION_FAILED"]
+        structured_dec.decision = "HOLD"
+        structured_dec.position_action = "NO_ACTION"
+
+
+    # Backward compatibility for SQLite DB string storage
     return {
         "stock": _ensure_str(stock),
         "decision": decision,
@@ -1070,6 +1119,17 @@ def normalize_master_trader_json(
         "advisory_action": data.get("advisory_action"),
         "analysis_status": data.get("analysis_status"),
         "as_of": data.get("as_of"),
+        # Step 6.4: Structured Decision Output (Independent of rendered narrative)
+        "run_id": structured_dec.run_id,
+        "model_status": structured_dec.model_status,
+        "passed_gates": structured_dec.passed_gates,
+        "failed_gates": structured_dec.failed_gates,
+        "data_quality_status": structured_dec.data_quality_status,
+        "position_action": structured_dec.position_action,
+        "reason_codes": structured_dec.reason_codes,
+        "structured_decision": structured_dec.to_dict(),
+        # Step 7.1: Risk-Based Position Sizing (Independent of score)
+        "position_sizing": structured_dec.metrics.get("position_sizing", {}),
         # Backward compatibility for SQLite DB string storage
         "reason": "; ".join(bull_case),
         "risk_assessment": "; ".join(key_risks),
@@ -1079,6 +1139,7 @@ def normalize_master_trader_json(
         "investment_bank_coverage": bank_cov,
         "PE_and_PEG": str(forward_pe)
     }
+
 
 
 

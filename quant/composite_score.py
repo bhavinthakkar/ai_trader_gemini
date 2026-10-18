@@ -1,5 +1,6 @@
 """Complete 7-Step Deterministic Quantitative Composite Pipeline."""
 
+import math
 from typing import Any, Dict, Optional, Tuple
 from quant.schemas import (
     PillarResult,
@@ -198,12 +199,15 @@ def blend_quant_and_ml_scores(
 
     try:
         ml_score = float(raw_ml)
+        if math.isnan(ml_score) or math.isinf(ml_score):
+            return round(det_val, 2), 0.0, None
     except (ValueError, TypeError):
         return round(det_val, 2), 0.0, None
 
     configured_w = ml_context.get("ml_weight")
     ml_w = float(configured_w) if configured_w is not None and float(configured_w) > 0.0 else default_ml_weight
+    ml_w = max(0.0, min(1.0, ml_w))
 
-    composite = round((1.0 - ml_w) * det_val + ml_w * ml_score, 2)
+    composite = round(max(0.0, min(100.0, (1.0 - ml_w) * det_val + ml_w * ml_score)), 2)
     return composite, ml_w, ml_score
 

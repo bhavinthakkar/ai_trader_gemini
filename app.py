@@ -11,11 +11,18 @@ from db import (
     get_summary_stats,
     get_outcome_performance_stats,
     get_latest_portfolio_reviews,
-    delete_signals_older_than
+    delete_signals_older_than,
+    get_shadow_decisions
 )
 from dashboard import collect_dashboard_data, format_volume
 from ticker_resolver import resolve_symbol, is_european_symbol, get_currency_for_symbol
 from ml_signal_service import classify_ml_signal, get_ml_context, get_all_ml_scores
+from quant.order_execution import GLOBAL_KILL_SWITCH, KillSwitchReason
+from quant.shadow_trading import (
+    ShadowDecisionRecord,
+    ShadowMetricsAnalyzer,
+    ShadowPromotionEvaluator,
+)
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -107,6 +114,48 @@ st.markdown("""
         border-radius: 20px;
         font-weight: 600;
         font-size: 0.85rem;
+        display: inline-block;
+    }
+    .badge-open-long {
+        background-color: #064e3b;
+        color: #34d399;
+        border: 1px solid #10b981;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 0.85rem;
+        display: inline-block;
+    }
+    .badge-no-action {
+        background-color: #1e293b;
+        color: #94a3b8;
+        border: 1px solid #334155;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 0.85rem;
+        display: inline-block;
+    }
+    .badge-gate-pass {
+        background-color: #064e3b;
+        color: #34d399;
+        border: 1px solid #10b981;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        margin-right: 4px;
+        display: inline-block;
+    }
+    .badge-gate-fail {
+        background-color: #450a0a;
+        color: #f87171;
+        border: 1px solid #ef4444;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        margin-right: 4px;
         display: inline-block;
     }
 
@@ -329,14 +378,15 @@ with col6:
 st.markdown("---")
 
 # Main Content Tabs
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📊 Latest Signals",
     "🔍 Stock Deep-Dive",
     "🤖 ML Alpha Pipeline",
     "🔥 Most Traded Stocks",
     "📜 Signal History Log",
     "🎯 Model Outcome Tracking",
-    "📁 Portfolio Risk Review"
+    "📁 Portfolio Risk Review",
+    "⚡ Shadow Execution Desk"
 ])
 
 @st.cache_data(ttl=120)
@@ -753,6 +803,56 @@ with tab2:
                     st.markdown(f"**Falsifies buy-side:** _{fbu}_")
                 if fb:
                     st.markdown(f"**Falsifies bear-side:** _{fb}_")
+
+            # =====================================================================
+            # 🛡️ Structured Decision & Policy Compliance Gates (Step 6.4 & 7.2)
+            # =====================================================================
+            st.markdown("#### 🛡️ Structured Decision & Policy Compliance Gates")
+            pos_action = stock_data.get("position_action") or "NO_ACTION"
+            passed_g = stock_data.get("passed_gates") or []
+            failed_g = stock_data.get("failed_gates") or []
+            r_codes = stock_data.get("reason_codes") or []
+            sizing_data = stock_data.get("position_sizing") or {}
+            if not sizing_data and stock_data.get("raw_json"):
+                try:
+                    sizing_data = json.loads(stock_data["raw_json"]).get("position_sizing") or {}
+                except Exception:
+                    pass
+
+            sd_c1, sd_c2 = st.columns([1.5, 3])
+            with sd_c1:
+                action_badge = "badge-open-long" if pos_action == "OPEN_LONG" else "badge-no-action"
+                st.markdown(f"**Policy Action:** <span class='{action_badge}'>{pos_action}</span>", unsafe_allow_html=True)
+                if sizing_data.get("binding_constraint"):
+                    st.caption(f"Binding Constraint: `{sizing_data['binding_constraint']}`")
+            with sd_c2:
+                if passed_g:
+                    p_tags = " ".join([f"<span class='badge-gate-pass'>✓ {g}</span>" for g in passed_g])
+                    st.markdown(f"**Passed Gates:** {p_tags}", unsafe_allow_html=True)
+                if failed_g:
+                    f_tags = " ".join([f"<span class='badge-gate-fail'>✗ {g}</span>" for g in failed_g])
+                    st.markdown(f"**Failed Gates:** {f_tags}", unsafe_allow_html=True)
+                if r_codes:
+                    rc_str = ", ".join([f"`{rc}`" for rc in r_codes])
+                    st.markdown(f"**Reason Codes:** {rc_str}")
+
+            # =====================================================================
+            # 📐 Institutional Position Sizing & Risk Controls (Step 7.1 - 7.3)
+            # =====================================================================
+            st.markdown("#### 📐 Institutional Position Sizing & Risk Controls")
+            sz_c1, sz_c2, sz_c3, sz_c4, sz_c5 = st.columns(5)
+            shares_al = sizing_data.get("shares_allowed", 0)
+            sz_c1.metric("Shares Allowed", f"{shares_al} shs")
+            sz_c2.metric("Risk Budget", f"${sizing_data.get('risk_budget_usd', 1000):,.0f}", help="1% Portfolio Risk Budget")
+            sz_c3.metric("Dollar Risk", f"${sizing_data.get('dollar_risk', 0):,.0f}", help="Max loss to stop-out")
+            gap_pct = sizing_data.get("gap_reserve_pct", 0.20)
+            sz_c4.metric("Gap Reserve", f"{gap_pct * 100:.0f}%", help="Overnight ATR gap buffer")
+            max_alloc = sizing_data.get("max_capital_allocation", 0)
+            sz_c5.metric("Capital Capped", f"${max_alloc:,.0f}" if max_alloc else "N/A", help="Single-stock & sector max limits")
+
+            rejections = sizing_data.get("rejection_reasons") or []
+            if rejections:
+                st.warning("⚠️ **Active Position Sizing Restrictions:** " + "; ".join(rejections))
 
             st.markdown("---")
 
@@ -1219,4 +1319,141 @@ with tab7:
 
                 with st.expander("🔍 View Full JSON Review"):
                     st.json(review)
+
+with tab8:
+    st.subheader("⚡ Institutional Shadow Trading & Order Execution Desk")
+    st.caption("Point-in-Time Shadow Trading Validation, 8 Formal Measurement Scorecards, and Operational Kill Switch (Steps 7.3 & 8).")
+
+    # 1. Operational Kill Switch Controls
+    ks_status = GLOBAL_KILL_SWITCH.get_status()
+    st.markdown("### 🛑 Operational Kill Switch")
+    ks_col1, ks_col2 = st.columns([3, 1])
+    with ks_col1:
+        if ks_status["is_tripped"]:
+            st.error(
+                f"🚨 **KILL SWITCH TRIPPED** | Execution is FROZEN.\n\n"
+                f"- **Reason:** `{ks_status['trip_reason']}`\n"
+                f"- **Tripped By:** `{ks_status['tripped_by']}`\n"
+                f"- **Timestamp:** `{ks_status['trip_timestamp']}`"
+            )
+        else:
+            st.success("✅ **KILL SWITCH OPERATIONAL & ACTIVE** | Zero-latency pre-flight gating active. Normal automated execution enabled.")
+    with ks_col2:
+        if ks_status["is_tripped"]:
+            if st.button("🔄 Reset / Restore Trading", type="primary", use_container_width=True, key="reset_ks_tab8"):
+                GLOBAL_KILL_SWITCH.reset(operator="WebConsole")
+                st.success("Kill switch reset! Trading execution restored.")
+                st.rerun()
+        else:
+            if st.button("🚨 Emergency Trip", type="secondary", use_container_width=True, key="trip_ks_tab8"):
+                GLOBAL_KILL_SWITCH.trip(
+                    reason=KillSwitchReason.MANUAL_OPERATOR_TRIP,
+                    details={"operator": "WebConsole"},
+                    operator="WebConsole"
+                )
+                st.warning("Kill switch tripped! All entries frozen.")
+                st.rerun()
+
+    st.markdown("---")
+
+    # 2. Institutional Promotion Gate Scorecard
+    st.markdown("### 🏆 Institutional Promotion Gate Scorecard (Predefined Criteria)")
+    shadow_raw = get_shadow_decisions(limit=100)
+
+    if not shadow_raw:
+        st.info("No shadow trading records logged yet. Run analyses in terminal or dashboard to stream simulated execution decisions.")
+    else:
+        # Convert to ShadowDecisionRecord objects for analyzer
+        shadow_objs = []
+        for r in shadow_raw:
+            rec = ShadowDecisionRecord(
+                session_id=r.get("session_id", ""),
+                run_id=r.get("run_id", ""),
+                ticker=r.get("ticker", ""),
+                timestamp=r.get("timestamp", ""),
+                decision=r.get("decision", "HOLD"),
+                position_action=r.get("position_action", "NO_ACTION"),
+                composite_score=r.get("composite_score"),
+                signal_strength=r.get("signal_strength"),
+                ml_score=r.get("ml_score"),
+                ml_predicted_return=r.get("ml_predicted_return"),
+                entry_price=r.get("entry_price"),
+                suggested_stop_loss=r.get("suggested_stop_loss"),
+                suggested_target_price=r.get("suggested_target_price"),
+                passed_gates=r.get("passed_gates") or [],
+                failed_gates=r.get("failed_gates") or [],
+                reason_codes=r.get("reason_codes") or [],
+                proposed_shares=r.get("proposed_shares", 0),
+                binding_constraint=r.get("binding_constraint"),
+                is_order_proposed=bool(r.get("is_order_proposed")),
+                simulated_order_id=r.get("simulated_order_id"),
+                simulated_fill_price=r.get("simulated_fill_price"),
+                simulated_slippage_bps=r.get("simulated_slippage_bps"),
+                simulated_commission=r.get("simulated_commission"),
+                simulated_status=r.get("simulated_status"),
+                realized_forward_return_pct=r.get("realized_forward_return_pct"),
+                realized_net_return_pct=r.get("realized_net_return_pct"),
+                is_fresh=bool(r.get("is_fresh", True)),
+                decision_latency_seconds=r.get("decision_latency_seconds", 0.001),
+                quote_age_seconds=r.get("quote_age_seconds", 0.0),
+                input_snapshot=r.get("input_snapshot_json") or {},
+                component_outputs=r.get("component_outputs_json") or {},
+            )
+            shadow_objs.append(rec)
+
+        analyzer = ShadowMetricsAnalyzer()
+        report = analyzer.analyze_session(records=shadow_objs, session_id="WEB_AGGREGATE")
+        evaluator = ShadowPromotionEvaluator()
+        promo = evaluator.evaluate(report)
+
+        p_status = promo.status.value
+        p_badge = "badge-open-long" if p_status == "PASSED" else ("badge-ml-neutral" if p_status == "PENDING_OBSERVATION" else "badge-sell")
+
+        p_c1, p_c2, p_c3, p_c4 = st.columns([1.5, 1, 1, 1])
+        p_c1.markdown(f"**Gate Status:** <span class='{p_badge}'>{p_status}</span>", unsafe_allow_html=True)
+        p_c2.metric("Observations", f"{promo.observation_count} / {promo.required_min_observations}")
+        p_c3.metric("Passed Requirements", f"{promo.passed_requirements_count} / {promo.total_requirements_count}")
+        p_c4.metric("Live Eligible", "YES" if promo.is_eligible_for_live else "NO")
+
+        st.caption(f"**Summary:** {promo.recommendation_summary}")
+
+        if promo.remediation_actions:
+            st.warning("⚠️ **Required Remediation Actions:** " + " • ".join(promo.remediation_actions))
+
+        # 8 Formal Measurements Table
+        st.markdown("#### 📊 The Eight Formal Shadow Measurements")
+        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+        m_col1.metric("1. Signal Reproducibility", f"{report.reproducibility.decision_match_rate * 100:.0f}%", help="Deterministic decision match rate")
+        m_col2.metric("2. Median Latency", f"{report.latency_freshness.median_decision_latency_seconds * 1000:.1f}ms", help="Decision execution latency")
+        m_col3.metric("3. Directional Accuracy", f"{report.predictive_performance.directional_accuracy * 100:.0f}%", help="Forecast direction consistency")
+        m_col4.metric("4. Cost-Adjusted Sharpe", f"{report.cost_adjusted.net_sharpe_ratio:.2f}", help="Net Sharpe after realistic slippage")
+
+        m_col5, m_col6, m_col7, m_col8 = st.columns(4)
+        m_col5.metric("5. Gate Rejection Rate", f"{report.gate_efficiency.rejection_rate * 100:.0f}%", help="Trades filtered by compliance gates")
+        m_col6.metric("6. Model Drift (PSI)", f"{report.model_drift.aggregate_psi:.3f}", help="Population Stability Index")
+        m_col7.metric("7. LLM PIT Adherence", f"{report.llm_temporal_integrity.point_in_time_adherence * 100:.0f}%", help="Timestamp-verified evidence citations")
+        m_col8.metric("8. Ledger Discrepancies", f"{report.risk_compliance.reconciliation_discrepancies}", help="State drift between portfolio & ledger")
+
+        # Shadow Trading Decisions Audit Log
+        st.markdown("#### 📜 Shadow Trading Execution Log")
+        log_rows = []
+        for r in shadow_raw:
+            log_rows.append({
+                "Timestamp": r.get("timestamp"),
+                "Ticker": r.get("ticker"),
+                "Decision": r.get("decision"),
+                "Action": r.get("position_action"),
+                "Composite": f"{r.get('composite_score', 0):.1f}" if r.get("composite_score") is not None else "N/A",
+                "ML Score": f"{r.get('ml_score', 0):.1f}" if r.get("ml_score") is not None else "N/A",
+                "Shares": r.get("proposed_shares", 0),
+                "Sim Fill Price": f"${r.get('simulated_fill_price', 0):.2f}" if r.get("simulated_fill_price") else "N/A",
+                "Slippage": f"{r.get('simulated_slippage_bps', 0):.1f} bps" if r.get("simulated_slippage_bps") is not None else "0 bps",
+                "Status": r.get("simulated_status", "SIMULATED"),
+                "Passed Gates": ", ".join(r.get("passed_gates") or []),
+                "Failed Gates": ", ".join(r.get("failed_gates") or []),
+                "Reason Codes": ", ".join(r.get("reason_codes") or []),
+            })
+        df_shadow = pd.DataFrame(log_rows)
+        st.dataframe(df_shadow, width="stretch", hide_index=True)
+
 

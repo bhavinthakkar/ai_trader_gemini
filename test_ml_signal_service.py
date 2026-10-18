@@ -42,9 +42,9 @@ class TestMLSignalService(unittest.TestCase):
         self.assertEqual(c_none["stance"], "UNAVAILABLE")
 
     def test_get_ml_context_focused_ticker(self):
-        ctx = get_ml_context("AMD")
+        ctx = get_ml_context("MRVL")
         self.assertIsNotNone(ctx)
-        self.assertEqual(ctx["ticker"], "AMD")
+        self.assertEqual(ctx["ticker"], "MRVL")
         self.assertTrue(ctx["in_scope"])
         self.assertEqual(ctx["rank"], 1)
         self.assertGreaterEqual(ctx["universe_size"], 1)
@@ -86,14 +86,14 @@ class TestMLSignalService(unittest.TestCase):
         self.assertGreaterEqual(len(scores), 5)
         # Should be ordered by rank ascending
         self.assertEqual(scores[0]["rank"], 1)
-        self.assertEqual(scores[0]["ticker"], "AMD")
+        self.assertEqual(scores[0]["ticker"], "MRVL")
         self.assertLessEqual(scores[0]["rank"], scores[1]["rank"])
         self.assertIn("signal", scores[0])
         self.assertIn("predicted_20d_excess_return", scores[0])
 
     def test_enrich_signal_dict(self):
         sample = {
-            "symbol": "AMD",
+            "symbol": "MRVL",
             "decision": "BUY",
             "quant_score": 85.0,
             "raw_json": None,

@@ -106,11 +106,11 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(job_resp.json()["model"], "ling")
 
     def test_ml_context_available(self):
-        resp = self.client.get("/api/ml/context/NVDA")
+        resp = self.client.get("/api/ml/context/MRVL")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertTrue(data["available"])
-        self.assertEqual(data["symbol"], "NVDA")
+        self.assertEqual(data["symbol"], "MRVL")
         self.assertIsNotNone(data["data"])
         self.assertGreater(data["data"]["score_0_100"], 80.0)
         self.assertEqual(data["data"]["signal"], "STRONG OUTPERFORM")
@@ -132,7 +132,50 @@ class TestAPI(unittest.TestCase):
         self.assertLessEqual(len(data["top_picks"]), 5)
         self.assertLessEqual(len(data["bottom_picks"]), 5)
 
+    def test_fetch_shadow_decisions(self):
+        resp = self.client.get("/api/shadow/decisions?limit=10")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("count", data)
+        self.assertIn("decisions", data)
+        self.assertIsInstance(data["decisions"], list)
+
+    def test_fetch_shadow_metrics(self):
+        resp = self.client.get("/api/shadow/metrics?limit=10")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("status", data)
+        self.assertIn(data["status"], ["SUCCESS", "NO_DATA"])
+
+    def test_fetch_execution_orders(self):
+        resp = self.client.get("/api/execution/orders?limit=10")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("count", data)
+        self.assertIn("orders", data)
+        self.assertIsInstance(data["orders"], list)
+
+    def test_kill_switch_trip_and_reset(self):
+        # 1. Check initial state
+        resp = self.client.get("/api/execution/kill-switch")
+        self.assertEqual(resp.status_code, 200)
+
+        # 2. Trip kill switch
+        trip_resp = self.client.post("/api/execution/kill-switch/trip", json={"reason": "MANUAL_OPERATOR_TRIP", "operator": "PytestClient"})
+        self.assertEqual(trip_resp.status_code, 200)
+        self.assertTrue(trip_resp.json()["is_tripped"])
+
+        # 3. Verify tripped state
+        status_resp = self.client.get("/api/execution/kill-switch")
+        self.assertTrue(status_resp.json()["is_tripped"])
+
+        # 4. Reset kill switch
+        reset_resp = self.client.post("/api/execution/kill-switch/reset?operator=PytestClient")
+        self.assertEqual(reset_resp.status_code, 200)
+        self.assertFalse(reset_resp.json()["is_tripped"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
