@@ -1,0 +1,5 @@
+Configuration,BUY Threshold,Dip-Buy Threshold,Full Candidates,Full Entries,Full Net CAGR (%),Full MDD (%),Full Sharpe,Full Turnover (%),Dev Net CAGR (%) [2022-24],Dev MDD (%) [2022-24],Dev Sharpe [2022-24],Holdout Net CAGR (%) [2025-26],Holdout MDD (%) [2025-26],Holdout Sharpe [2025-26]
+Current baseline,60.0,52.0,169,48,39.6,-20.94,1.29,44.2,58.48,-20.94,1.59,11.11,-14.17,0.61
+Test A,58.0,52.0,193,52,37.94,-24.69,1.23,46.4,63.83,-20.91,1.69,1.2,-24.69,0.16
+Test B,56.0,50.0,224,52,34.53,-29.32,1.13,46.4,63.83,-20.91,1.69,-5.63,-29.32,-0.14
+Test C,54.0,48.0,261,52,30.71,-29.32,1.02,46.4,56.65,-26.1,1.53,-5.63,-29.32,-0.14

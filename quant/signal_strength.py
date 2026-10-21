@@ -43,6 +43,8 @@ class SignalStrengthWeights:
     linear_weight_completeness: float = 0.25
     hold_ceiling: float = 0.60
     min_threshold: float = 0.65
+    catalyst_confidence_boost: float = 0.15
+    catalyst_confidence_ceiling: float = 0.85
 
 
 @dataclass
@@ -259,6 +261,7 @@ class SignalStrengthEngine:
         decision: str = "BUY",
         method: CombinationMethod = CombinationMethod.HIERARCHICAL_GATED,
         dispersion_metric: DispersionMetric = DispersionMetric.MAD,
+        is_certified_dip_buy: bool = False,
     ) -> SignalStrengthResult:
         """
         Combines Decisiveness (D), Pillar Agreement (A), and Data Completeness (C).
@@ -324,6 +327,13 @@ class SignalStrengthEngine:
         else:
             raw_signal = 0.50
 
+        # Boost for certified dip-buy dislocation
+        if is_certified_dip_buy:
+            raw_signal = min(
+                raw_signal + self.weights.catalyst_confidence_boost,
+                self.weights.catalyst_confidence_ceiling,
+            )
+
         # Cap neutral / non-directional HOLD signals
         final_signal = raw_signal
         if isinstance(decision, str) and decision.upper() == "HOLD":
@@ -341,6 +351,8 @@ class SignalStrengthEngine:
             "base_signal": round(base_signal, 4),
             "raw_signal": round(raw_signal, 4),
             "final_signal": rounded_signal,
+            "is_certified_dip_buy": is_certified_dip_buy,
+            "catalyst_confidence_boost": self.weights.catalyst_confidence_boost if is_certified_dip_buy else 0.0,
             "weights": asdict(self.weights),
             "combination_method": method.value,
             "dispersion_metric": dispersion_metric.value,
@@ -373,6 +385,7 @@ def calculate_signal_strength(
     weights: Optional[SignalStrengthWeights] = None,
     method: CombinationMethod = CombinationMethod.HIERARCHICAL_GATED,
     dispersion_metric: DispersionMetric = DispersionMetric.MAD,
+    is_certified_dip_buy: bool = False,
 ) -> SignalStrengthResult:
     """Convenience wrapper for SignalStrengthEngine calculation."""
     engine = SignalStrengthEngine(weights)
@@ -383,4 +396,5 @@ def calculate_signal_strength(
         decision=decision,
         method=method,
         dispersion_metric=dispersion_metric,
+        is_certified_dip_buy=is_certified_dip_buy,
     )

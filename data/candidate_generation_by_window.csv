@@ -1,0 +1,21 @@
+Configuration,Year,Net Return (%),SPY Return (%),Excess Return (%),Avg Candidates,Avg Held,Executed Entries,Turnover (%)
+Existing Absolute Baseline (Score >= 60.0),2022,-5.46,-4.69,-0.77,4.5,2.6,22,34.2
+Existing Absolute Baseline (Score >= 60.0),2023,47.25,12.44,34.81,11.8,4.4,24,38.3
+Existing Absolute Baseline (Score >= 60.0),2024,83.77,29.66,54.12,10.2,3.5,24,40.8
+Existing Absolute Baseline (Score >= 60.0),2025,77.42,18.92,58.51,10.8,4.1,28,45.8
+Existing Absolute Baseline (Score >= 60.0),2026,33.91,4.0,29.92,10.4,3.4,15,41.2
+"Pure Relative Ranking (Top 20%, No Floor)",2022,-6.59,-4.69,-1.9,5.0,3.8,31,48.3
+"Pure Relative Ranking (Top 20%, No Floor)",2023,42.57,12.44,30.13,5.0,3.2,20,35.0
+"Pure Relative Ranking (Top 20%, No Floor)",2024,73.79,29.66,44.14,5.0,2.7,20,32.5
+"Pure Relative Ranking (Top 20%, No Floor)",2025,68.27,18.92,49.36,5.0,3.2,24,39.2
+"Pure Relative Ranking (Top 20%, No Floor)",2026,27.94,4.0,23.94,5.0,2.6,14,37.5
+Proposed Dual (Top 20% & Score >= 60.0),2022,-2.36,-4.69,2.33,2.9,2.2,19,29.2
+Proposed Dual (Top 20% & Score >= 60.0),2023,41.36,12.44,28.92,4.8,3.1,20,34.2
+Proposed Dual (Top 20% & Score >= 60.0),2024,73.79,29.66,44.14,5.1,2.7,20,32.5
+Proposed Dual (Top 20% & Score >= 60.0),2025,66.64,18.92,47.72,5.0,3.1,24,39.2
+Proposed Dual (Top 20% & Score >= 60.0),2026,30.13,4.0,26.14,5.0,2.5,13,35.0
+Proposed Dual (Top 20% & Score >= 56.0),2022,-2.67,-4.69,2.02,3.4,2.5,21,32.5
+Proposed Dual (Top 20% & Score >= 56.0),2023,42.59,12.44,30.16,5.0,3.2,20,34.2
+Proposed Dual (Top 20% & Score >= 56.0),2024,73.79,29.66,44.14,5.2,2.7,20,32.5
+Proposed Dual (Top 20% & Score >= 56.0),2025,68.27,18.92,49.36,5.2,3.2,24,39.2
+Proposed Dual (Top 20% & Score >= 56.0),2026,27.94,4.0,23.94,5.5,2.6,14,37.5

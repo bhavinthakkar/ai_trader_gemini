@@ -550,7 +550,7 @@ LATEST SESSION UPDATES (2026-10-16)
    - Test Suite: [`tests/test_mandatory_decision_scenarios.py`](file:///home/bhavin/Desktop/git/ai_trader_gemini/tests/test_mandatory_decision_scenarios.py) (17/17 PASS in 3.18s)
    - Tested 10 mandatory decision scenarios and complete end-to-end integration path:
      1. **Score 59.99 vs 60.00 Floor**: Ordinary BUY with score 59.99 rejected (`COMPOSITE_BELOW_FLOOR` -> `HOLD`); score 60.00 clears floor.
-     2. **Dip-Buy Qualification (Score 52.00)**: Score 52.00 rejected when failing RSI, drawdown, valuation history, or value trap; passes when all dip criteria met.
+     2. **Dip-Buy Qualification (Score 52.00)**: Score 52.00 rejected when failing RSI, drawdown, valuation history, or value trap; passes Gate 1, Gate 2, and Gate 5 when all dip criteria met and certifies BUY without conversion to HOLD (no subsequent universal rule converting score < 60 to HOLD).
      3. **Advisory Proposal RR Gate**: Candidate BUY with $RR < 1.20$ or inverted price ordering (`target <= entry`) rejected and downgraded to `HOLD`.
      4. **Earnings Blackout Active**: Score 85.0 blocked from fresh entry when earnings $\le 3$ sessions (`EARNINGS_BLACKOUT`).
      5. **Existing Long Stop Loss Breach**: Stop breach immediately executes exit policy (`SELL_TO_CLOSE`); Holding-Thesis Guard cannot intercept.

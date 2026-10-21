@@ -32,7 +32,7 @@ flowchart TD
 ### 2.1 Ordinary BUY Branch
 - **Threshold**: Requires deterministic composite quantitative score $S \ge 60.0$ (`policy.scores.buy_minimum`).
 - **Pillar Prerequisite**: At least 3 of the 5 quantitative pillars (Trend, Sector, Alpha, Valuation History, Peer Valuation) must be populated.
-- **Inviolable Invariant**: An LLM advisory `BUY` cannot override a failed score requirement. If $S < 60.0$, the decision is unconditionally downgraded to `HOLD` with reason `COMPOSITE_BELOW_FLOOR`.
+- **Inviolable Invariant**: An LLM advisory `BUY` cannot override a failed score requirement. For standard entries, if $S < 60.0$, the decision is unconditionally downgraded to `HOLD` with reason `COMPOSITE_BELOW_FLOOR`. There is **no subsequent universal rule** that converts every score below 60 to `HOLD`: qualified dip-buys execute on their own validated path.
 
 ### 2.2 Separately Eligible Dip-Buy Branch
 The dip-buy branch represents a distinct investment thesis: buying a temporary adverse-catalyst dislocation in a fundamentally sound, cheap business rather than momentum trend-following.
@@ -151,7 +151,8 @@ Confidence represents the calibrated probability that the signal direction is ac
 
 ### 6.3 Empirically Justified Threshold
 - Directional BUY or SHORT entries require $\text{Confidence} \ge 0.65$ (`policy.trade_quality.min_confidence_threshold`).
-- Setups with confidence $< 0.65$ fail Gate 5 (`CONFIDENCE_TOO_LOW`) and default to `HOLD`.
+- **Dip-Buy Pathway Precedence**: For certified dip-buys ($S \ge 52.0$), the verified dislocation catalyst boost ($+0.15$, ceiling $0.85$) is applied, and the candidate is evaluated against `policy.dip_buy.min_confidence_threshold` ($0.55$). No subsequent universal rule converts a score below 60 to `HOLD`.
+- Setups with confidence failing their respective hurdle default to `HOLD`.
 
 ---
 

@@ -43,6 +43,10 @@ dip_buy:
   # Prohibit dip-buys into confirmed balance sheet value traps
   forbid_value_trap: true
   forbid_collapse: true
+  # Confidence hurdle and catalyst conviction boost for verified dislocation setups
+  min_confidence_threshold: 0.55
+  catalyst_confidence_boost: 0.15
+  catalyst_confidence_ceiling: 0.85
 
 # =============================================================================
 # 3. TRADE QUALITY & SETUP GEOMETRY

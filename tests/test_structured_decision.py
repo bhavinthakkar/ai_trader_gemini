@@ -219,6 +219,34 @@ class TestStructuredDecisionMandatoryGates(unittest.TestCase):
         self.assertIn(StandardReasonCode.DIP_CRITERIA_FAILED, dec.reason_codes)
         self.assertEqual(dec.decision, "HOLD")
 
+    def test_gate_buy_floor_dip_buy_criteria_passed_certifies_buy(self):
+        """Score 52.0 on certified DIP_BUY passes all gates and certifies BUY (no subsequent universal HOLD rule)."""
+        dec = self.engine.evaluate(
+            ticker="DIP",
+            candidate_decision="BUY",
+            composite_score=52.0,
+            current_price=100.0,
+            stop_loss=95.0,
+            target_price=115.0,
+            atr=1.0,
+            catalyst_path="DIP_BUY",
+            rsi14=35.0,  # Within [30, 45]
+            drawdown_5d_pct=8.0,  # Within [5%, 15%]
+            valuation_history_score=65.0,  # >= 60.0
+            is_value_trap=False,
+            days_to_earnings=45,
+            rvol_20d=1.5,
+            avg_dollar_volume_20d=50_000_000.0,
+            pillar_scores={"trend": 52.0, "sector": 52.0, "alpha": 52.0, "valuation_history": 65.0, "peer_valuation": 55.0},
+            data_completeness=1.0,
+        )
+        self.assertEqual(dec.decision, "BUY")
+        self.assertEqual(dec.position_action, PositionAction.OPEN_LONG.value)
+        self.assertIn(StandardReasonCode.BUY_ORDER_CERTIFIED, dec.reason_codes)
+        self.assertIn(StandardGateName.BUY_FLOOR, dec.passed_gates)
+        self.assertIn(StandardGateName.CONFIDENCE_HURDLE, dec.passed_gates)
+        self.assertEqual(dec.failed_gates, [])
+
     def test_gate_buy_floor_value_trap_confirmed(self):
         """Confirmed Value Trap fails BUY_FLOOR with VALUE_TRAP_DETECTED."""
         dec = self.engine.evaluate(

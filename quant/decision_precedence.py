@@ -673,6 +673,8 @@ class DecisionPrecedenceEngine:
                         stage_audit_log=audit_log,
                     )
 
+            is_certified_dip_buy = bool(g1_res.metrics.get("dip_certified", False))
+
             # 3. Gate 5: Gated Confidence
             g5_res = GatedConfidenceGate.evaluate(
                 candidate_decision="BUY",
@@ -680,6 +682,7 @@ class DecisionPrecedenceEngine:
                 pillar_scores=pillar_scores,
                 data_completeness=data_completeness,
                 policy=self.policy,
+                is_certified_dip_buy=is_certified_dip_buy,
             )
             if not g5_res.passed:
                 audit_log.append({"stage_5_gate": "Gate 5", "passed": False, "reason": g5_res.reason_code})

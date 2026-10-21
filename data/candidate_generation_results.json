@@ -1,0 +1,282 @@
+{
+  "Existing Absolute Baseline (Score >= 60.0)": {
+    "mode": "absolute_only",
+    "top_pct": 0.2,
+    "min_abs_score": 60.0,
+    "dip_threshold": 52.0,
+    "top_k": 5,
+    "max_stocks_per_sector": 2,
+    "n_candidates": 531,
+    "executed_entries": 113,
+    "full_cagr": 47.22,
+    "cum_net_return": 507.86,
+    "full_mdd": -18.95,
+    "full_sharpe": 1.57,
+    "full_sortino": 3.78,
+    "full_calmar": 2.49,
+    "mean_turnover": 40.0,
+    "dev_cagr": 36.77,
+    "dev_mdd": -18.95,
+    "dev_sharpe": 1.42,
+    "holdout_cagr": 68.08,
+    "holdout_mdd": -11.02,
+    "holdout_sharpe": 1.8,
+    "window_stats": {
+      "2022": {
+        "net_return": -5.46,
+        "spy_return": -4.69,
+        "excess_return": -0.77,
+        "avg_candidates": 4.5,
+        "avg_held": 2.6,
+        "executed_entries": 22,
+        "turnover": 34.2
+      },
+      "2023": {
+        "net_return": 47.25,
+        "spy_return": 12.44,
+        "excess_return": 34.81,
+        "avg_candidates": 11.8,
+        "avg_held": 4.4,
+        "executed_entries": 24,
+        "turnover": 38.3
+      },
+      "2024": {
+        "net_return": 83.77,
+        "spy_return": 29.66,
+        "excess_return": 54.12,
+        "avg_candidates": 10.2,
+        "avg_held": 3.5,
+        "executed_entries": 24,
+        "turnover": 40.8
+      },
+      "2025": {
+        "net_return": 77.42,
+        "spy_return": 18.92,
+        "excess_return": 58.51,
+        "avg_candidates": 10.8,
+        "avg_held": 4.1,
+        "executed_entries": 28,
+        "turnover": 45.8
+      },
+      "2026": {
+        "net_return": 33.91,
+        "spy_return": 4.0,
+        "excess_return": 29.92,
+        "avg_candidates": 10.4,
+        "avg_held": 3.4,
+        "executed_entries": 15,
+        "turnover": 41.2
+      }
+    }
+  },
+  "Pure Relative Ranking (Top 20%, No Floor)": {
+    "mode": "relative_only",
+    "top_pct": 0.2,
+    "min_abs_score": 0.0,
+    "dip_threshold": 0.0,
+    "top_k": 5,
+    "max_stocks_per_sector": 2,
+    "n_candidates": 280,
+    "executed_entries": 109,
+    "full_cagr": 41.08,
+    "cum_net_return": 398.27,
+    "full_mdd": -22.75,
+    "full_sharpe": 1.46,
+    "full_sortino": 3.04,
+    "full_calmar": 1.81,
+    "mean_turnover": 38.6,
+    "dev_cagr": 32.28,
+    "dev_mdd": -22.75,
+    "dev_sharpe": 1.28,
+    "holdout_cagr": 58.42,
+    "holdout_mdd": -11.14,
+    "holdout_sharpe": 1.71,
+    "window_stats": {
+      "2022": {
+        "net_return": -6.59,
+        "spy_return": -4.69,
+        "excess_return": -1.9,
+        "avg_candidates": 5.0,
+        "avg_held": 3.8,
+        "executed_entries": 31,
+        "turnover": 48.3
+      },
+      "2023": {
+        "net_return": 42.57,
+        "spy_return": 12.44,
+        "excess_return": 30.13,
+        "avg_candidates": 5.0,
+        "avg_held": 3.2,
+        "executed_entries": 20,
+        "turnover": 35.0
+      },
+      "2024": {
+        "net_return": 73.79,
+        "spy_return": 29.66,
+        "excess_return": 44.14,
+        "avg_candidates": 5.0,
+        "avg_held": 2.7,
+        "executed_entries": 20,
+        "turnover": 32.5
+      },
+      "2025": {
+        "net_return": 68.27,
+        "spy_return": 18.92,
+        "excess_return": 49.36,
+        "avg_candidates": 5.0,
+        "avg_held": 3.2,
+        "executed_entries": 24,
+        "turnover": 39.2
+      },
+      "2026": {
+        "net_return": 27.94,
+        "spy_return": 4.0,
+        "excess_return": 23.94,
+        "avg_candidates": 5.0,
+        "avg_held": 2.6,
+        "executed_entries": 14,
+        "turnover": 37.5
+      }
+    }
+  },
+  "Proposed Dual (Top 20% & Score >= 60.0)": {
+    "mode": "dual",
+    "top_pct": 0.2,
+    "min_abs_score": 60.0,
+    "dip_threshold": 52.0,
+    "top_k": 5,
+    "max_stocks_per_sector": 2,
+    "n_candidates": 253,
+    "executed_entries": 96,
+    "full_cagr": 42.38,
+    "cum_net_return": 420.18,
+    "full_mdd": -16.31,
+    "full_sharpe": 1.55,
+    "full_sortino": 3.32,
+    "full_calmar": 2.6,
+    "mean_turnover": 33.9,
+    "dev_cagr": 33.86,
+    "dev_mdd": -16.31,
+    "dev_sharpe": 1.44,
+    "holdout_cagr": 59.11,
+    "holdout_mdd": -11.14,
+    "holdout_sharpe": 1.72,
+    "window_stats": {
+      "2022": {
+        "net_return": -2.36,
+        "spy_return": -4.69,
+        "excess_return": 2.33,
+        "avg_candidates": 2.9,
+        "avg_held": 2.2,
+        "executed_entries": 19,
+        "turnover": 29.2
+      },
+      "2023": {
+        "net_return": 41.36,
+        "spy_return": 12.44,
+        "excess_return": 28.92,
+        "avg_candidates": 4.8,
+        "avg_held": 3.1,
+        "executed_entries": 20,
+        "turnover": 34.2
+      },
+      "2024": {
+        "net_return": 73.79,
+        "spy_return": 29.66,
+        "excess_return": 44.14,
+        "avg_candidates": 5.1,
+        "avg_held": 2.7,
+        "executed_entries": 20,
+        "turnover": 32.5
+      },
+      "2025": {
+        "net_return": 66.64,
+        "spy_return": 18.92,
+        "excess_return": 47.72,
+        "avg_candidates": 5.0,
+        "avg_held": 3.1,
+        "executed_entries": 24,
+        "turnover": 39.2
+      },
+      "2026": {
+        "net_return": 30.13,
+        "spy_return": 4.0,
+        "excess_return": 26.14,
+        "avg_candidates": 5.0,
+        "avg_held": 2.5,
+        "executed_entries": 13,
+        "turnover": 35.0
+      }
+    }
+  },
+  "Proposed Dual (Top 20% & Score >= 56.0)": {
+    "mode": "dual",
+    "top_pct": 0.2,
+    "min_abs_score": 56.0,
+    "dip_threshold": 50.0,
+    "top_k": 5,
+    "max_stocks_per_sector": 2,
+    "n_candidates": 269,
+    "executed_entries": 99,
+    "full_cagr": 42.33,
+    "cum_net_return": 419.29,
+    "full_mdd": -18.0,
+    "full_sharpe": 1.54,
+    "full_sortino": 3.37,
+    "full_calmar": 2.35,
+    "mean_turnover": 35.0,
+    "dev_cagr": 34.11,
+    "dev_mdd": -18.0,
+    "dev_sharpe": 1.44,
+    "holdout_cagr": 58.42,
+    "holdout_mdd": -11.14,
+    "holdout_sharpe": 1.71,
+    "window_stats": {
+      "2022": {
+        "net_return": -2.67,
+        "spy_return": -4.69,
+        "excess_return": 2.02,
+        "avg_candidates": 3.4,
+        "avg_held": 2.5,
+        "executed_entries": 21,
+        "turnover": 32.5
+      },
+      "2023": {
+        "net_return": 42.59,
+        "spy_return": 12.44,
+        "excess_return": 30.16,
+        "avg_candidates": 5.0,
+        "avg_held": 3.2,
+        "executed_entries": 20,
+        "turnover": 34.2
+      },
+      "2024": {
+        "net_return": 73.79,
+        "spy_return": 29.66,
+        "excess_return": 44.14,
+        "avg_candidates": 5.2,
+        "avg_held": 2.7,
+        "executed_entries": 20,
+        "turnover": 32.5
+      },
+      "2025": {
+        "net_return": 68.27,
+        "spy_return": 18.92,
+        "excess_return": 49.36,
+        "avg_candidates": 5.2,
+        "avg_held": 3.2,
+        "executed_entries": 24,
+        "turnover": 39.2
+      },
+      "2026": {
+        "net_return": 27.94,
+        "spy_return": 4.0,
+        "excess_return": 23.94,
+        "avg_candidates": 5.5,
+        "avg_held": 2.6,
+        "executed_entries": 14,
+        "turnover": 37.5
+      }
+    }
+  }
+}

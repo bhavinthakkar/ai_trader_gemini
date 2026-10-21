@@ -59,12 +59,17 @@ class DipBuyConfig:
     max_catalyst_age_days: int = 3
     forbid_value_trap: bool = True
     forbid_collapse: bool = True
+    min_confidence_threshold: float = 0.55
+    catalyst_confidence_boost: float = 0.15
+    catalyst_confidence_ceiling: float = 0.85
 
     def validate(self) -> None:
         if self.min_drop_pct_5d > self.max_drop_pct_5d:
             raise ValueError(f"Invalid dip-buy drop bounds: min {self.min_drop_pct_5d}% > max {self.max_drop_pct_5d}%")
         if self.min_rsi > self.max_rsi:
             raise ValueError(f"Invalid dip-buy RSI bounds: min {self.min_rsi} > max {self.max_rsi}")
+        if self.min_confidence_threshold < 0.0 or self.min_confidence_threshold > 1.0:
+            raise ValueError(f"Invalid dip-buy confidence threshold: {self.min_confidence_threshold}")
 
 
 @dataclass
@@ -358,14 +363,15 @@ class TradingPolicy:
     # -------------------------------------------------------------------------
     # Precedence & Conflict Resolution Helpers
     # -------------------------------------------------------------------------
-    def resolve_buy_score_floor(self, is_certified_dip_buy: bool) -> Tuple[float, str]:
+    def resolve_buy_score_floor(self, is_certified_dip_buy: Union[bool, str]) -> Tuple[float, str]:
         """
         Resolves the precedence between standard BUY floor (60.0) and Dip-Buy floor (52.0).
 
         Returns:
             (effective_floor, rule_name)
         """
-        if is_certified_dip_buy and self.dip_buy.enabled:
+        is_dip = bool(is_certified_dip_buy) if not isinstance(is_certified_dip_buy, str) else (is_certified_dip_buy.upper() == "DIP_BUY")
+        if is_dip and self.dip_buy.enabled:
             return self.dip_buy.score_minimum, "RULE_DIP_BUY_DISCOUNT_FLOOR"
         return self.scores.buy_minimum, "RULE_STANDARD_BUY_FLOOR"
 

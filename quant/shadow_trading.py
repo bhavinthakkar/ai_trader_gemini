@@ -36,6 +36,7 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 from quant.policy_config import TradingPolicy, get_default_policy
+from quant.compliance_gates import BuyFloorGate
 from quant.portfolio_controls import PortfolioSnapshot, Position
 from quant.position_sizing import calculate_risk_based_position_size
 from quant.order_execution import (
@@ -367,6 +368,11 @@ class ShadowTradingEngine:
         run_id: Optional[str] = None,
         persist_db: bool = False,
         db_path: Optional[str] = None,
+        catalyst_path: Optional[str] = None,
+        rsi14: Optional[float] = None,
+        drawdown_5d_pct: Optional[float] = None,
+        valuation_history_score: Optional[float] = None,
+        is_value_trap: bool = False,
     ) -> ShadowDecisionRecord:
         """
         Executes an end-to-end shadow trading decision:
@@ -425,11 +431,26 @@ class ShadowTradingEngine:
 
         # Gate Evaluation
         if candidate_decision == "BUY":
-            if composite_score is not None and composite_score >= self.policy.scores.buy_minimum:
+            effective_rsi = rsi14 if rsi14 is not None else (features.get("rsi14") if features else None)
+            effective_val_hist = valuation_history_score
+            if effective_val_hist is None and pillar_scores:
+                effective_val_hist = pillar_scores.get("valuation_history")
+
+            g1 = BuyFloorGate.evaluate(
+                candidate_decision="BUY",
+                composite_score=composite_score,
+                catalyst_path=catalyst_path,
+                rsi14=effective_rsi,
+                drawdown_5d_pct=drawdown_5d_pct,
+                valuation_history_score=effective_val_hist,
+                is_value_trap=is_value_trap,
+                policy=self.policy,
+            )
+            if g1.passed:
                 passed_gates.append("BUY_FLOOR")
             else:
                 failed_gates.append("BUY_FLOOR")
-                reason_codes.append("COMPOSITE_BELOW_FLOOR")
+                reason_codes.append(g1.reason_code or "COMPOSITE_BELOW_FLOOR")
                 final_decision = "HOLD"
 
             rr = (target_p - est_entry) / max(0.01, est_entry - stop_p)

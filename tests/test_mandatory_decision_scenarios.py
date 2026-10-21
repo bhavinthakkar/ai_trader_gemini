@@ -178,7 +178,7 @@ class TestMandatoryDecisionScenarios(unittest.TestCase):
         self.assertEqual(prec_res.reason_code, "COMPOSITE_BELOW_FLOOR")
 
     def test_scenario_2_dip_buy_score_52_passes_when_all_criteria_met(self):
-        """Score 52.00 passes Gate 1 when all dip-buy conditions are met."""
+        """Score 52.00 passes Gate 1 when all dip-buy conditions are met and certifies BUY without HOLD conversion."""
         g1_pass = BuyFloorGate.evaluate(
             candidate_decision="BUY",
             composite_score=52.00,
@@ -191,6 +191,29 @@ class TestMandatoryDecisionScenarios(unittest.TestCase):
         )
         self.assertTrue(g1_pass.passed)
         self.assertEqual(g1_pass.status, GateStatus.PASS)
+
+        # Full engine verification: No subsequent universal rule converts score 52.00 to HOLD
+        prec_res = self.engine.evaluate(
+            candidate_decision="BUY",
+            position_state=PositionState.FLAT,
+            current_price=100.0,
+            stop_loss=90.0,
+            target_price=120.0,
+            atr=2.0,
+            composite_score=52.00,
+            catalyst_path="DIP_BUY",
+            rsi14=36.0,
+            drawdown_5d_pct=7.5,
+            valuation_history_score=65.0,
+            is_value_trap=False,
+            avg_dollar_volume_20d=10_000_000.0,
+            rvol_20d=1.5,
+            pillar_scores={"trend": 52.0, "sector": 52.0, "alpha": 52.0, "valuation_history": 65.0, "peer_valuation": 55.0},
+            data_completeness=1.0,
+        )
+        self.assertEqual(prec_res.internal_action, InternalActionType.BUY)
+        self.assertEqual(prec_res.external_decision, "BUY")
+        self.assertEqual(prec_res.reason_code, "BUY_ORDER_CERTIFIED")
 
     # -------------------------------------------------------------------------
     # Scenario 3: LLM proposes BUY but reward-to-risk fails -> Do not BUY

@@ -1,0 +1,5 @@
+Configuration,Mode,Top Pct,Min Abs Score,Dip-Buy Floor,Total Candidates,Executed Entries,Full Net CAGR (%),Full MDD (%),Full Sharpe,Full Calmar,Mean Turnover (%),Dev Net CAGR (%) [2022-24],Dev MDD (%) [2022-24],Dev Sharpe [2022-24],Holdout Net CAGR (%) [2025-26],Holdout MDD (%) [2025-26],Holdout Sharpe [2025-26]
+Existing Absolute Baseline (Score >= 60.0),absolute_only,20%,60.0,52.0,531,113,47.22,-18.95,1.57,2.49,40.0,36.77,-18.95,1.42,68.08,-11.02,1.8
+"Pure Relative Ranking (Top 20%, No Floor)",relative_only,20%,0.0,0.0,280,109,41.08,-22.75,1.46,1.81,38.6,32.28,-22.75,1.28,58.42,-11.14,1.71
+Proposed Dual (Top 20% & Score >= 60.0),dual,20%,60.0,52.0,253,96,42.38,-16.31,1.55,2.6,33.9,33.86,-16.31,1.44,59.11,-11.14,1.72
+Proposed Dual (Top 20% & Score >= 56.0),dual,20%,56.0,50.0,269,99,42.33,-18.0,1.54,2.35,35.0,34.11,-18.0,1.44,58.42,-11.14,1.71

@@ -80,6 +80,7 @@ class BuyFloorGate:
         rsi14: Optional[float] = None,
         drawdown_5d_pct: Optional[float] = None,
         valuation_history_score: Optional[float] = None,
+        peer_valuation_score: Optional[float] = None,
         is_value_trap: bool = False,
         policy: Optional[TradingPolicy] = None,
     ) -> GateResult:
@@ -104,9 +105,10 @@ class BuyFloorGate:
                 dip_rejection_reasons.append(
                     f"RSI {rsi14} outside [{active_policy.dip_buy.min_rsi}, {active_policy.dip_buy.max_rsi}]"
                 )
-            # Drawdown bounds
-            if drawdown_5d_pct is None or not (
-                active_policy.dip_buy.min_drop_pct_5d <= drawdown_5d_pct <= active_policy.dip_buy.max_drop_pct_5d
+            # Drawdown bounds (supports both positive magnitude e.g. 7.5% and signed drop e.g. -7.5%)
+            dd_pct = abs(drawdown_5d_pct) if drawdown_5d_pct is not None else None
+            if dd_pct is None or not (
+                active_policy.dip_buy.min_drop_pct_5d <= dd_pct <= active_policy.dip_buy.max_drop_pct_5d
             ):
                 dip_rejection_reasons.append(
                     f"5d drawdown {drawdown_5d_pct}% outside [{active_policy.dip_buy.min_drop_pct_5d}%, {active_policy.dip_buy.max_drop_pct_5d}%]"
@@ -115,6 +117,11 @@ class BuyFloorGate:
             if valuation_history_score is None or valuation_history_score < active_policy.dip_buy.min_valuation_history:
                 dip_rejection_reasons.append(
                     f"valuation history {valuation_history_score} < {active_policy.dip_buy.min_valuation_history}"
+                )
+            # Peer valuation anchor (if provided)
+            if peer_valuation_score is not None and peer_valuation_score < active_policy.dip_buy.min_peer_valuation:
+                dip_rejection_reasons.append(
+                    f"peer valuation {peer_valuation_score} < {active_policy.dip_buy.min_peer_valuation}"
                 )
             # Value trap prohibition
             if is_value_trap and active_policy.dip_buy.forbid_value_trap:
@@ -729,6 +736,7 @@ class GatedConfidenceGate:
         data_completeness: float,
         decision: str = "BUY",
         policy: Optional[TradingPolicy] = None,
+        is_certified_dip_buy: bool = False,
     ) -> Tuple[float, Dict[str, Any]]:
         active_policy = policy or get_default_policy()
         weights = SignalStrengthWeights(
@@ -740,6 +748,8 @@ class GatedConfidenceGate:
             linear_weight_completeness=active_policy.signal_strength.linear_weight_completeness,
             hold_ceiling=active_policy.signal_strength.hold_ceiling,
             min_threshold=active_policy.signal_strength.min_signal_strength_threshold,
+            catalyst_confidence_boost=active_policy.dip_buy.catalyst_confidence_boost,
+            catalyst_confidence_ceiling=active_policy.dip_buy.catalyst_confidence_ceiling,
         )
         res = calculate_signal_strength(
             composite_score=composite_score,
@@ -749,6 +759,7 @@ class GatedConfidenceGate:
             weights=weights,
             method=CombinationMethod(active_policy.signal_strength.combination_method),
             dispersion_metric=DispersionMetric(active_policy.signal_strength.dispersion_metric),
+            is_certified_dip_buy=is_certified_dip_buy,
         )
         meta = {
             "composite": float(composite_score) if composite_score is not None else 50.0,
@@ -764,6 +775,7 @@ class GatedConfidenceGate:
             "is_calibrated_probability": res.is_calibrated_probability,
             "label": res.label,
             "calibration_status": res.calibration_status,
+            "is_certified_dip_buy": is_certified_dip_buy,
         }
         return res.signal_strength, meta
 
@@ -775,19 +787,27 @@ class GatedConfidenceGate:
         pillar_scores: Optional[Dict[str, Optional[float]]],
         data_completeness: float,
         policy: Optional[TradingPolicy] = None,
+        is_certified_dip_buy: bool = False,
     ) -> GateResult:
         active_policy = policy or get_default_policy()
-        min_thresh = active_policy.trade_quality.min_confidence_threshold
+        min_thresh = (
+            active_policy.dip_buy.min_confidence_threshold
+            if is_certified_dip_buy
+            else active_policy.trade_quality.min_confidence_threshold
+        )
 
         conf, meta = cls.calculate_confidence(
             composite_score=composite_score,
             pillar_scores=pillar_scores,
             data_completeness=data_completeness,
             decision=candidate_decision,
+            policy=active_policy,
+            is_certified_dip_buy=is_certified_dip_buy,
         )
 
         metrics = dict(meta)
         metrics["confidence_threshold"] = min_thresh
+        metrics["is_certified_dip_buy"] = is_certified_dip_buy
 
         # Neutral HOLD is always acceptable
         if candidate_decision.upper() == "HOLD":
@@ -962,12 +982,14 @@ class CompliancePolicyEngine:
         )
 
         # Gate 5: Gated Confidence
+        is_certified_dip_buy = bool(g1.metrics.get("dip_certified", False))
         g5 = GatedConfidenceGate.evaluate(
             candidate_decision=candidate_decision,
             composite_score=composite_score,
             pillar_scores=pillar_scores,
             data_completeness=data_completeness,
             policy=self.policy,
+            is_certified_dip_buy=is_certified_dip_buy,
         )
 
         all_gates = [g1, g2, g3, g4, g5]

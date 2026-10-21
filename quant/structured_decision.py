@@ -755,6 +755,8 @@ class StructuredDecisionEngine:
                     )
                 passed_gates.append(StandardGateName.REWARD_TO_RISK)
 
+            is_certified_dip_buy = bool(g1.metrics.get("dip_certified", False))
+
             # 3. Gate 5: Gated Confidence
             g5 = GatedConfidenceGate.evaluate(
                 candidate_decision="BUY",
@@ -762,6 +764,7 @@ class StructuredDecisionEngine:
                 pillar_scores=pillar_scores,
                 data_completeness=data_completeness,
                 policy=self.policy,
+                is_certified_dip_buy=is_certified_dip_buy,
             )
             if not g5.passed:
                 failed_gates.append(StandardGateName.CONFIDENCE_HURDLE)

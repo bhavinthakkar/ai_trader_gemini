@@ -1,0 +1,4 @@
+Volatility Treatment,Max ATR Cap,Sizing Mechanism,Total Candidates,Executed Entries,Full Net CAGR (%),Full MDD (%),Full Sharpe,Holdout Net CAGR (%) [2025-26],Holdout MDD (%) [2025-26],Holdout Sharpe [2025-26],Mean Turnover (%)
+"Hard Rejection Filter (Reject ATR% > 6.0%, Equal Sizing)",6.0%,equal,230,97,40.79,-14.25,1.56,50.27,-9.18,1.57,34.3
+"Directional Inclusion (Admit All ATR, Equal Sizing)",None,equal,253,96,42.38,-16.31,1.55,59.11,-11.14,1.72,33.9
+"Volatility-Adjusted Sizing (Inverse-ATR Risk Parity, No Hard Cap)",None,volatility_adjusted,253,96,37.06,-13.57,1.49,42.57,-10.84,1.46,34.5

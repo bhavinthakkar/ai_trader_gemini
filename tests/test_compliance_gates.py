@@ -504,7 +504,7 @@ class TestComplianceGatesSemantics(unittest.TestCase):
         self.assertEqual(report_pass.final_decision, "BUY")
         self.assertIsNone(report_pass.no_trade_reason)
 
-        # Setup failing Gate 1 (composite 55.0 < 60.0)
+        # Setup failing Gate 1 (composite 55.0 < 60.0) without dip-buy catalyst
         report_fail_g1 = self.engine.evaluate_setup(
             candidate_decision="BUY",
             is_holding=False,
@@ -512,7 +512,7 @@ class TestComplianceGatesSemantics(unittest.TestCase):
             stop_loss=90.0,
             target_price=115.0,
             atr=2.5,
-            composite_score=55.0,  # Sub-floor!
+            composite_score=55.0,  # Sub-floor for ordinary BUY!
             pillar_scores={
                 "trend": 55.0,
                 "sector": 55.0,
@@ -528,6 +528,35 @@ class TestComplianceGatesSemantics(unittest.TestCase):
         self.assertEqual(report_fail_g1.final_decision, "HOLD")
         self.assertEqual(report_fail_g1.no_trade_reason, "COMPOSITE_BELOW_FLOOR")
         self.assertEqual(report_fail_g1.veto_gate, "1. BUY Floor")
+
+        # Certified Dip-Buy setup with composite 55.0 (< 60.0) passes all gates (no universal HOLD downgrade)
+        report_pass_dip = self.engine.evaluate_setup(
+            candidate_decision="BUY",
+            is_holding=False,
+            current_price=100.0,
+            stop_loss=90.0,
+            target_price=120.0,
+            atr=2.5,
+            composite_score=55.0,
+            catalyst_path="DIP_BUY",
+            rsi14=36.0,
+            drawdown_5d_pct=7.5,
+            valuation_history_score=65.0,
+            is_value_trap=False,
+            pillar_scores={
+                "trend": 52.0,
+                "sector": 52.0,
+                "alpha": 52.0,
+                "valuation_history": 65.0,
+                "peer_valuation": 55.0,
+            },
+            data_completeness=1.0,
+            days_to_earnings=45,
+            avg_dollar_volume_20d=50_000_000.0,
+        )
+        self.assertTrue(report_pass_dip.all_passed)
+        self.assertEqual(report_pass_dip.final_decision, "BUY")
+        self.assertIsNone(report_pass_dip.no_trade_reason)
 
 
 if __name__ == "__main__":

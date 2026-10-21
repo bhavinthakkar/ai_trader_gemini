@@ -279,9 +279,9 @@ In `main.py` (`normalize_master_trader_json`), the LLM Master Trader proposes ca
 #### Gate 1: The BUY Floor (`BUY_COMPOSITE_FLOOR = 60.0`)
 If the LLM recommends `BUY`, the engine checks:
 $$\text{Decision Composite} \ge 60.0$$
-* **If $\text{Composite} < 60.0$**: The system **vetoes the LLM** and automatically downgrades the decision to **`HOLD`** with reason:
+* **For Standard Entries ($S < 60.0$)**: The system **vetoes the LLM** and automatically downgrades ordinary candidates to **`HOLD`** with reason:
   `"BUY downgraded to HOLD: deterministic composite 54.2/100 < 60"`.
-* *(Exception: Certified catalyst dip-buys have an adjusted floor of 52.0 if validated by strict structural oversold checks).*
+* **Dip-Buy Pathway Invariant**: There is **no subsequent universal rule** that converts every score below 60 to `HOLD`. Certified catalyst dip-buys operate on a distinct floor of $52.0$ with strictly validated eligibility conditions (RSI $\in [30, 45]$, 5-day drop $\in [5\%, 15\%]$, valuation history $\ge 60.0$, value-trap veto) and dedicated confidence evaluation.
 
 #### Gate 2: Setup Geometry & Reward-to-Risk (`MIN_REWARD_RISK_RATIO = 1.20`)
 $$\text{Reward-to-Risk} = \frac{\text{Target Price} - \text{Entry Price}}{\text{Entry Price} - \text{Stop Loss}} \ge 1.20$$
