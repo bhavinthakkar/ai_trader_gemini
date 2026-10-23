@@ -63,29 +63,35 @@ def _collect_sse_content(response, label, deadline, progress_interval, total_bud
 
 
 MODEL_REGISTRY = {
-    "flint": {
+    "xingchen": {
         "provider": "openrouter",
-        "model": "recursive/flint-v1.0:free",
+        "model": "xingchen-agi/xing4.0-29b-a4b:free",
         "fallbacks": ["openrouter/free"],
-        "label": "Recursive: Flint v1.0 (OpenRouter, free)"
+        "label": "XingChen: Xing4.0 29B A4B (OpenRouter, free)"
     },
-    "recursive/flint-v1.0:free": {
+    "xingchen-agi/xing4.0-29b-a4b:free": {
         "provider": "openrouter",
-        "model": "recursive/flint-v1.0:free",
+        "model": "xingchen-agi/xing4.0-29b-a4b:free",
         "fallbacks": ["openrouter/free"],
-        "label": "Recursive: Flint v1.0 (OpenRouter, free)"
+        "label": "XingChen: Xing4.0 29B A4B (OpenRouter, free)"
     },
     "openrouter": {
         "provider": "openrouter",
-        "model": "recursive/flint-v1.0:free",
+        "model": "xingchen-agi/xing4.0-29b-a4b:free",
         "fallbacks": ["openrouter/free"],
-        "label": "Recursive: Flint v1.0 (OpenRouter, free)"
+        "label": "XingChen: Xing4.0 29B A4B (OpenRouter, free)"
     },
     "free": {
         "provider": "openrouter",
-        "model": "recursive/flint-v1.0:free",
+        "model": "xingchen-agi/xing4.0-29b-a4b:free",
         "fallbacks": ["openrouter/free"],
-        "label": "Recursive: Flint v1.0 (OpenRouter, free)"
+        "label": "XingChen: Xing4.0 29B A4B (OpenRouter, free)"
+    },
+    "flint": {
+        "provider": "openrouter",
+        "model": "xingchen-agi/xing4.0-29b-a4b:free",
+        "fallbacks": ["openrouter/free"],
+        "label": "XingChen: Xing4.0 29B A4B (OpenRouter, free)"
     },
 }
 
@@ -181,21 +187,23 @@ def extract_json(text: str):
 
 def normalize_model_key(model_choice: str) -> str:
     if not model_choice:
-        return "flint"
+        return "xingchen"
     key = str(model_choice).strip().lower()
-    if key in ["flint", "flint-v1.0", "recursive/flint-v1.0:free"]:
-        return "flint"
-    if key in ["openrouter", "openrouter/free", "or", "free"]:
-        return "flint"
-    # Gracefully redirect any other model request to flint
-    return "flint"
+    if key in [
+        "xingchen", "xing", "xing4", "xingchen-agi/xing4.0-29b-a4b:free",
+        "flint", "flint-v1.0", "recursive/flint-v1.0:free",
+        "openrouter", "openrouter/free", "or", "free"
+    ]:
+        return "xingchen"
+    # Gracefully redirect any other model request to xingchen
+    return "xingchen"
 
 
 def get_model_label(model_choice: str) -> str:
     key = normalize_model_key(model_choice)
     if key in MODEL_REGISTRY:
         return MODEL_REGISTRY[key]["label"]
-    return "Recursive: Flint v1.0 (OpenRouter, free)"
+    return "XingChen: Xing4.0 29B A4B (OpenRouter, free)"
 
 
 def uses_compact_prompt_profile(model_choice: str) -> bool:
@@ -207,16 +215,16 @@ def uses_compact_prompt_profile(model_choice: str) -> bool:
 def query_llm(
     system_instruction: str,
     user_prompt: str,
-    model_choice: str = "flint",
+    model_choice: str = "xingchen",
     temperature: float = None,
     reasoning_budget: int = None,
     reasoning_effort: str = None
 ) -> str:
     """
-    Executes an LLM chat query using Recursive: Flint v1.0 via OpenRouter.
+    Executes an LLM chat query using XingChen: Xing4.0 29B A4B via OpenRouter.
     """
-    key = normalize_model_key(model_choice or "flint")
-    config = MODEL_REGISTRY.get(key, MODEL_REGISTRY["flint"])
+    key = normalize_model_key(model_choice or "xingchen")
+    config = MODEL_REGISTRY.get(key, MODEL_REGISTRY["xingchen"])
     provider = config.get("provider", "openrouter")
 
     api_key = os.getenv("OPENROUTER_API_KEY")

@@ -85,12 +85,12 @@ RUNNING_JOBS: Dict[str, Dict[str, Any]] = {}
 
 class AnalyzeRequest(BaseModel):
     symbol: str = Field(..., description="Stock symbol or European ISIN (e.g. NVDA, US67066G1040, NVD.DE)")
-    model: str = Field(default="flint", description="AI Model to run (Recursive: Flint v1.0 via OpenRouter)")
+    model: str = Field(default="xingchen", description="AI Model to run (XingChen: Xing4.0 29B A4B via OpenRouter)")
     is_eu: bool = Field(default=False, description="Flag for European gettex/XETRA tickers")
 
 
 class MasterRunRequest(BaseModel):
-    model: str = Field(default="flint", description="AI Model to run across top active stocks")
+    model: str = Field(default="xingchen", description="AI Model to run across top active stocks")
     limit: int = Field(default=5, ge=1, le=25, description="Number of top active stocks to analyze")
     dashboard_limit: int = Field(default=10, ge=1, le=50, description="Number of active stocks to screen")
     market: str = Field(default="US", description="Market to scan: 'US' or 'EU'")
@@ -263,7 +263,7 @@ def _run_single_analysis_job(job_id: str, symbol: str, model: str, is_eu: bool):
     RUNNING_JOBS[job_id]["status"] = "running"
     RUNNING_JOBS[job_id]["started_at"] = datetime.now(timezone.utc).isoformat()
 
-    effective_model = "flint"
+    effective_model = "xingchen"
 
     main_script = BASE_DIR / "main.py"
     cmd = [sys.executable, str(main_script), effective_model, symbol]
@@ -303,7 +303,7 @@ def trigger_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks):
         resolved = resolve_symbol(clean_sym, prefer_exchange="AUTO", force_european=False)
         target_symbol = resolved["symbol"]
 
-    req_model = "flint"
+    req_model = "xingchen"
 
     job_id = f"job_{target_symbol}_{int(datetime.now().timestamp())}"
 

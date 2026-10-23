@@ -553,10 +553,10 @@ with tab2:
         )
 
         if analyze_isin_btn:
-            with st.status(f"🚀 Running 6-Agent AI Swing Synthesis on {res_sym} via Flint v1.0...", expanded=True) as status_box:
+            with st.status(f"🚀 Running 6-Agent AI Swing Synthesis on {res_sym} via XingChen 4.0...", expanded=True) as status_box:
                 st.write(f"Launching main.py for {res_sym}...")
                 main_script = os.path.join(BASE_DIR, "main.py")
-                cmd = [sys.executable, main_script, "flint", res_sym, "--eu"]
+                cmd = [sys.executable, main_script, "xingchen", res_sym, "--eu"]
                 try:
                     proc = subprocess.run(cmd, cwd=BASE_DIR, capture_output=True, text=True)
                     if proc.returncode == 0:
@@ -1019,10 +1019,10 @@ with tab4:
     with top_ctrl2:
         limit_val = st.selectbox("Number of Active Stocks:", options=[10, 15, 20, 25], index=0)
         analyse_count = st.selectbox(
-            "AI Analysis Count (Flint v1.0):",
+            "AI Analysis Count (XingChen 4.0):",
             options=[3, 5, 10],
             index=1,
-            help="Number of top active stocks to sequentially analyze with main.py using Recursive: Flint v1.0 ('flint')"
+            help="Number of top active stocks to sequentially analyze with main.py using XingChen: Xing4.0 29B A4B ('xingchen')"
         )
     with top_ctrl3:
         if st.button("🔄 Refresh Active Data", key="refresh_active_stocks", use_container_width=True):
@@ -1032,7 +1032,7 @@ with tab4:
         run_analyse = st.button(
             "🚀 Refresh active data & Analyse",
             key="refresh_and_analyse_stocks",
-            help="Refreshes active stocks data and executes master.py using Recursive: Flint v1.0 (flint)",
+            help="Refreshes active stocks data and executes master.py using XingChen: Xing4.0 29B A4B (xingchen)",
             use_container_width=True,
             type="primary"
         )
@@ -1043,7 +1043,7 @@ with tab4:
         cmd = [
             sys.executable,
             master_script,
-            "flint",
+            "xingchen",
             "--limit", str(analyse_count),
             "--dashboard-limit", str(limit_val),
             "--market", selected_market,
@@ -1051,7 +1051,7 @@ with tab4:
             "--no-streamlit",
         ]
         status_market_label = f"Europe (gettex / XETRA: {selected_exchange})" if is_eu else "US Markets"
-        with st.status(f"🚀 Running Gloomberb Master Orchestration ({status_market_label} | Model: flint, Limit: {analyse_count})...", expanded=True) as status_box:
+        with st.status(f"🚀 Running Gloomberb Master Orchestration ({status_market_label} | Model: xingchen, Limit: {analyse_count})...", expanded=True) as status_box:
             st.write(f"Initializing active volume screener [{selected_market}] & launching 6-agent AI swing analysis...")
             log_box = st.empty()
             logs = []

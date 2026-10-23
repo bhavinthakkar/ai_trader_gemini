@@ -29,33 +29,33 @@ def stream_response(pieces=(), reasoning=(), status=200, text=""):
 
 
 class OpenRouterRoutingTests(unittest.TestCase):
-    def test_existing_openrouter_aliases_resolve_to_flint(self):
+    def test_existing_openrouter_aliases_resolve_to_xingchen(self):
         for alias in ("openrouter", "openrouter/free", "or", "minimax", "m3"):
-            self.assertEqual(normalize_model_key(alias), "flint")
+            self.assertEqual(normalize_model_key(alias), "xingchen")
 
     def test_openrouter_targets_the_model_via_openrouter(self):
         config = MODEL_REGISTRY["openrouter"]
         self.assertEqual(config["provider"], "openrouter")
-        self.assertEqual(config["model"], "recursive/flint-v1.0:free")
+        self.assertEqual(config["model"], "xingchen-agi/xing4.0-29b-a4b:free")
         self.assertIsNone(config.get("default_reasoning_effort"))
 
     def test_openrouter_label_mentions_free(self):
         self.assertIn("free", get_model_label("openrouter").lower())
 
-    def test_flint_aliases_resolve_to_flint(self):
-        for alias in ("flint", "flint-v1.0", "recursive/flint-v1.0:free", "ling", "kimi", "nemotron"):
-            self.assertEqual(normalize_model_key(alias), "flint")
+    def test_xingchen_aliases_resolve_to_xingchen(self):
+        for alias in ("xingchen", "xing", "xing4", "xingchen-agi/xing4.0-29b-a4b:free", "flint", "ling", "kimi", "nemotron"):
+            self.assertEqual(normalize_model_key(alias), "xingchen")
 
-    def test_flint_targets_recursive_flint_via_openrouter(self):
-        config = MODEL_REGISTRY["flint"]
+    def test_xingchen_targets_model_via_openrouter(self):
+        config = MODEL_REGISTRY["xingchen"]
         self.assertEqual(config["provider"], "openrouter")
-        self.assertEqual(config["model"], "recursive/flint-v1.0:free")
+        self.assertEqual(config["model"], "xingchen-agi/xing4.0-29b-a4b:free")
         self.assertIn("openrouter/free", config.get("fallbacks", []))
 
-    def test_bunny_redirects_to_flint(self):
+    def test_bunny_redirects_to_xingchen(self):
         for alias in ("bunny", "space-bunny", "space-bunny-alpha", "SPACE-BUNNY-ALPHA", "sb", "stealth/space-bunny-alpha"):
             self.assertNotIn(alias, MODEL_REGISTRY)
-            self.assertEqual(normalize_model_key(alias), "flint")
+            self.assertEqual(normalize_model_key(alias), "xingchen")
 
 
 @patch.dict(__import__("os").environ, {"OPENROUTER_API_KEY": "test-key"}, clear=False)
@@ -74,7 +74,7 @@ class OpenRouterRequestTests(unittest.TestCase):
             return stream_response(['{"decision": "HOLD"}'])
 
         self.call(responder)
-        self.assertEqual(seen["model"], "recursive/flint-v1.0:free")
+        self.assertEqual(seen["model"], "xingchen-agi/xing4.0-29b-a4b:free")
         self.assertNotIn("reasoning_effort", seen)
         self.assertIs(seen["stream"], True)
         self.assertEqual(seen["response_format"], {"type": "json_object"})
@@ -131,39 +131,39 @@ class OpenRouterRequestTests(unittest.TestCase):
 
         def responder(url, headers=None, json=None, timeout=None, stream=None):
             calls.append(json["model"])
-            if json["model"] == "recursive/flint-v1.0:free":
+            if json["model"] == "xingchen-agi/xing4.0-29b-a4b:free":
                 return stream_response(["not json at all"])
             return stream_response(['{"decision": "HOLD"}'])
 
-        with patch.dict(MODEL_REGISTRY["flint"], {"fallbacks": ["vendor/other"]}, clear=False):
+        with patch.dict(MODEL_REGISTRY["xingchen"], {"fallbacks": ["vendor/other"]}, clear=False):
             out, _ = self.call(responder)
         self.assertEqual(out, '{"decision": "HOLD"}')
-        self.assertEqual(calls, ["recursive/flint-v1.0:free", "vendor/other"])
+        self.assertEqual(calls, ["xingchen-agi/xing4.0-29b-a4b:free", "vendor/other"])
 
     def test_read_timeout_moves_to_next_candidate(self):
         calls = []
 
         def responder(url, headers=None, json=None, timeout=None, stream=None):
             calls.append(json["model"])
-            if json["model"] == "recursive/flint-v1.0:free":
+            if json["model"] == "xingchen-agi/xing4.0-29b-a4b:free":
                 raise requests.exceptions.ReadTimeout("read timed out")
             return stream_response(['{"decision": "HOLD"}'])
 
-        with patch.dict(MODEL_REGISTRY["flint"], {"fallbacks": ["vendor/other"]}, clear=False):
+        with patch.dict(MODEL_REGISTRY["xingchen"], {"fallbacks": ["vendor/other"]}, clear=False):
             out, _ = self.call(responder)
         self.assertEqual(out, '{"decision": "HOLD"}')
-        self.assertEqual(calls, ["recursive/flint-v1.0:free", "vendor/other"])
+        self.assertEqual(calls, ["xingchen-agi/xing4.0-29b-a4b:free", "vendor/other"])
 
     def test_rate_limit_moves_to_next_candidate(self):
         calls = []
 
         def responder(url, headers=None, json=None, timeout=None, stream=None):
             calls.append(json["model"])
-            if json["model"] == "recursive/flint-v1.0:free":
+            if json["model"] == "xingchen-agi/xing4.0-29b-a4b:free":
                 return stream_response(status=429, text="rate limited")
             return stream_response(['{"decision": "HOLD"}'])
 
-        with patch.dict(MODEL_REGISTRY["flint"], {"fallbacks": ["vendor/other"]}, clear=False):
+        with patch.dict(MODEL_REGISTRY["xingchen"], {"fallbacks": ["vendor/other"]}, clear=False):
             out, _ = self.call(responder)
         self.assertEqual(out, '{"decision": "HOLD"}')
 

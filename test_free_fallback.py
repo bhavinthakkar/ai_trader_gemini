@@ -11,7 +11,8 @@ import requests
 import llm_service
 from llm_service import MODEL_REGISTRY, get_model_label, normalize_model_key, query_llm
 
-FLINT = "recursive/flint-v1.0:free"
+XINGCHEN = "xingchen-agi/xing4.0-29b-a4b:free"
+FLINT = XINGCHEN
 FALLBACK = "openrouter/free"
 
 
@@ -37,30 +38,30 @@ def ok_response(content='{"decision": "HOLD"}'):
 
 
 class FreeRoutingTests(unittest.TestCase):
-    def test_free_is_aliased_to_flint(self):
-        self.assertEqual(normalize_model_key("free"), "flint")
+    def test_free_is_aliased_to_xingchen(self):
+        self.assertEqual(normalize_model_key("free"), "xingchen")
 
-    def test_free_targets_flint_then_fallback(self):
+    def test_free_targets_xingchen_then_fallback(self):
         config = MODEL_REGISTRY["free"]
         self.assertEqual(config["provider"], "openrouter")
-        self.assertEqual(config["model"], FLINT)
+        self.assertEqual(config["model"], XINGCHEN)
         self.assertEqual(config["fallbacks"], [FALLBACK])
 
-    def test_free_label_advertises_flint(self):
-        self.assertIn("Flint", get_model_label("free"))
+    def test_free_label_advertises_xingchen(self):
+        self.assertIn("XingChen", get_model_label("free"))
 
-    def test_openrouter_aliases_redirect_to_flint(self):
+    def test_openrouter_aliases_redirect_to_xingchen(self):
         for alias in ("openrouter", "openrouter/free", "minimax", "minimax-m3", "m3", "or"):
-            self.assertEqual(normalize_model_key(alias), "flint")
+            self.assertEqual(normalize_model_key(alias), "xingchen")
             self.assertEqual(MODEL_REGISTRY[normalize_model_key(alias)]["provider"], "openrouter")
 
-    def test_other_legacy_aliases_redirect_to_flint(self):
-        for alias in ("ultra", "kimi", "ling", "nemotron", "gemini", "qwen"):
-            self.assertEqual(normalize_model_key(alias), "flint")
+    def test_other_legacy_aliases_redirect_to_xingchen(self):
+        for alias in ("ultra", "kimi", "ling", "nemotron", "gemini", "qwen", "flint"):
+            self.assertEqual(normalize_model_key(alias), "xingchen")
             self.assertEqual(MODEL_REGISTRY[normalize_model_key(alias)]["provider"], "openrouter")
 
     def test_free_case_insensitive(self):
-        self.assertEqual(normalize_model_key("FREE"), "flint")
+        self.assertEqual(normalize_model_key("FREE"), "xingchen")
 
 
 @patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}, clear=False)
@@ -95,31 +96,31 @@ class ReadTimeoutFallbackTests(unittest.TestCase):
 
         with self.assertRaises(requests.exceptions.ReadTimeout):
             self.call(responder)
-        self.assertEqual(calls, [FLINT, FALLBACK])
+        self.assertEqual(calls, [XINGCHEN, FALLBACK])
 
-    def test_flint_success_does_not_touch_fallback(self):
+    def test_xingchen_success_does_not_touch_fallback(self):
         calls = []
 
         def responder(url, headers=None, json=None, timeout=None, stream=None):
             calls.append(json["model"])
-            return ok_response('{"decision": "from flint"}')
+            return ok_response('{"decision": "from xingchen"}')
 
         out, _ = self.call(responder)
-        self.assertEqual(out, '{"decision": "from flint"}')
-        self.assertEqual(calls, [FLINT])
+        self.assertEqual(out, '{"decision": "from xingchen"}')
+        self.assertEqual(calls, [XINGCHEN])
 
     def test_generic_connection_error_advances_to_fallback(self):
         calls = []
 
         def responder(url, headers=None, json=None, timeout=None, stream=None):
             calls.append(json["model"])
-            if json["model"] == FLINT:
+            if json["model"] == XINGCHEN:
                 raise requests.exceptions.ConnectionError("reset")
             return ok_response('{"decision": "recovered"}')
 
         out, _ = self.call(responder)
         self.assertEqual(out, '{"decision": "recovered"}')
-        self.assertEqual(calls, [FLINT, FALLBACK])
+        self.assertEqual(calls, [XINGCHEN, FALLBACK])
 
     def test_rate_limit_still_advances_to_fallback(self):
         calls = []
@@ -294,7 +295,7 @@ class ReadTimeoutFallbackTests(unittest.TestCase):
         response.iter_lines.side_effect = lambda: iter([b": ping"] * 1000)
         with self.assertRaises(llm_service.TimeBudgetExceeded):
             llm_service._collect_sse_content(
-                response, FLINT, time.monotonic() - 1, 0, 600)
+                response, XINGCHEN, time.monotonic() - 1, 0, 600)
 
     def test_progress_is_reported_while_streaming(self):
         def responder(url, headers=None, json=None, timeout=None, stream=None):

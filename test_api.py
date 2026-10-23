@@ -69,7 +69,7 @@ class TestAPI(unittest.TestCase):
     @unittest.mock.patch("api._run_single_analysis_job")
     def test_analyze_trigger(self, mock_job):
         # Test queuing endpoint (mocking background task)
-        resp = self.client.post("/api/analyze", json={"symbol": "AAPL", "model": "flint", "is_eu": False})
+        resp = self.client.post("/api/analyze", json={"symbol": "AAPL", "model": "xingchen", "is_eu": False})
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["status"], "queued")
@@ -80,7 +80,7 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(job_resp.status_code, 200)
         job_data = job_resp.json()
         self.assertEqual(job_data["target_symbol"], "AAPL")
-        self.assertEqual(job_data["model"], "flint")
+        self.assertEqual(job_data["model"], "xingchen")
         mock_job.assert_called_once()
 
     @unittest.mock.patch("api._run_single_analysis_job")
@@ -88,22 +88,22 @@ class TestAPI(unittest.TestCase):
         resp = self.client.post("/api/analyze", json={"symbol": "NVDA"})
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
-        self.assertEqual(data["model"], "flint")
+        self.assertEqual(data["model"], "xingchen")
 
         job_resp = self.client.get(f"/api/jobs/{data['job_id']}")
         self.assertEqual(job_resp.status_code, 200)
-        self.assertEqual(job_resp.json()["model"], "flint")
+        self.assertEqual(job_resp.json()["model"], "xingchen")
 
     @unittest.mock.patch("api._run_single_analysis_job")
     def test_analyze_trigger_redirects_bunny_to_ling(self, mock_job):
         resp = self.client.post("/api/analyze", json={"symbol": "NVDA", "model": "bunny"})
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
-        self.assertEqual(data["model"], "flint")
+        self.assertEqual(data["model"], "xingchen")
 
         job_resp = self.client.get(f"/api/jobs/{data['job_id']}")
         self.assertEqual(job_resp.status_code, 200)
-        self.assertEqual(job_resp.json()["model"], "flint")
+        self.assertEqual(job_resp.json()["model"], "xingchen")
 
     def test_ml_context_available(self):
         resp = self.client.get("/api/ml/context/MRVL")
