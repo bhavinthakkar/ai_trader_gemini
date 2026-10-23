@@ -11,11 +11,26 @@ import {
   SafeAreaView,
   Modal,
   Alert,
+  NativeModules,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 
-// Default backend API URL (Workstation Local Area Network IP)
-const DEFAULT_API_URL = 'http://192.168.0.94:8000';
+// Auto-detect backend API host from Metro bundler or fallback to Raspberry Pi
+const getAutoApiUrl = () => {
+  try {
+    const scriptURL = NativeModules?.SourceCode?.scriptURL;
+    if (scriptURL) {
+      const match = scriptURL.match(/^https?:\/\/([^/:]+)/);
+      if (match && match[1] && match[1] !== 'localhost' && match[1] !== '127.0.0.1') {
+        return `http://${match[1]}:8000`;
+      }
+    }
+  } catch (e) {}
+  return 'http://192.168.0.92:8000';
+};
+
+// Default backend API URL
+const DEFAULT_API_URL = getAutoApiUrl();
 
 // Pre-curated Stock / Company Names Map (US & European Dual-Listings)
 const STOCK_NAMES = {
@@ -1834,6 +1849,34 @@ export default function App() {
                 placeholderTextColor="#64748B"
                 autoCapitalize="none"
               />
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginVertical: 8 }}>
+                {[
+                  { label: '🍓 Raspberry Pi', url: 'http://192.168.0.92:8000' },
+                  { label: '💻 Workstation', url: 'http://192.168.0.241:8000' },
+                  { label: '📱 Localhost', url: 'http://127.0.0.1:8000' },
+                ].map((preset) => (
+                  <TouchableOpacity
+                    key={preset.url}
+                    style={[
+                      styles.filterChip,
+                      apiUrl === preset.url && styles.filterChipActive,
+                      { paddingHorizontal: 10, paddingVertical: 6 },
+                    ]}
+                    onPress={() => {
+                      setApiUrl(preset.url);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        apiUrl === preset.url && styles.filterChipTextActive,
+                      ]}
+                    >
+                      {preset.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
               <TouchableOpacity
                 style={styles.actionBtn}
                 onPress={async () => {
@@ -1842,6 +1885,7 @@ export default function App() {
                     const data = await res.json();
                     if (res.ok) {
                       setConnected(true);
+                      await loadSignalsData();
                       Alert.alert('✅ Connected!', `API reachable at ${apiUrl} (${data.version})`);
                     }
                   } catch (e) {
@@ -1850,7 +1894,7 @@ export default function App() {
                   }
                 }}
               >
-                <Text style={styles.actionBtnText}>Test Server Connection</Text>
+                <Text style={styles.actionBtnText}>Test Server Connection & Refresh</Text>
               </TouchableOpacity>
             </View>
 

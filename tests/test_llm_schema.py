@@ -381,6 +381,19 @@ class TestLLMEvidenceSchema(unittest.TestCase):
         self.assertEqual(norm_fb, {})
         self.assertTrue(any("prohibited broker command" in e.lower() for e in errors_fb))
 
+        # D. Traditional signal containing catalysts and risk_flags does not falsely trigger evidence schema
+        trad_with_catalysts = dict(trad_payload)
+        trad_with_catalysts["catalysts"] = [{"rank": 1, "catalyst": "Strong cloud backlog"}]
+        trad_with_catalysts["risk_flags"] = [{"risk": "Foreign exchange headwind"}]
+        norm_cat, errors_cat = validate_signal_json(
+            trad_with_catalysts,
+            required_horizon_sessions=20,
+            require_forecast_20d=True,
+            expected_ticker="MSFT",
+        )
+        self.assertEqual(errors_cat, [])
+        self.assertEqual(norm_cat["decision"], "BUY")
+
 
 if __name__ == "__main__":
     unittest.main()

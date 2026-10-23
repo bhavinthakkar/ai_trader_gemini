@@ -88,8 +88,11 @@ def validate_signal_json(
     if forbidden:
         return {}, [f"prohibited broker command fields detected: {forbidden}. Output must not contain broker execution instructions."]
 
-    # Step 4.2: Detect if object is structured under the strict LLMEvidenceAnalysis contract
-    is_evidence_obj = any(k in obj for k in ("as_of", "analysis_status", "catalysts", "risk_flags", "advisory_action"))
+    # Step 4.2: Detect if object is structured under the strict LLMEvidenceAnalysis contract.
+    # An evidence contract object specifies advisory_action or analysis_status without traditional decision authority.
+    is_evidence_obj = ("advisory_action" in obj) or (
+        "analysis_status" in obj and "decision" not in obj and "buy_score" not in obj
+    )
     if is_evidence_obj:
         model, evidence_errors = validate_llm_evidence_response(
             obj,
