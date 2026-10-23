@@ -19,7 +19,7 @@ import os
 import re
 import sys
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 # Ensure repo root is on sys.path
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
