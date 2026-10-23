@@ -81,13 +81,14 @@ def make_data(**overrides):
 GOOD_CATALYST = [news("Nvidia slips as China weighs export limits", summary="NVDA guidance")]
 
 
-def run(data=None, m_data=None, news_items=None, symbol="NVDA"):
+def run(data=None, m_data=None, news_items=None, symbol="NVDA", policy=None):
     return normalize_master_trader_json(
         data if data is not None else make_data(),
         symbol,
         m_data if m_data is not None else make_m_data(),
         {},
         {"news": GOOD_CATALYST if news_items is None else news_items},
+        policy=policy,
     )
 
 
@@ -186,9 +187,12 @@ class CatalystUnlocksTests(unittest.TestCase):
         self.assertEqual(out["decision"], "HOLD")
 
     def test_earnings_blackout_still_blocks(self):
+        from quant.policy_config import load_policy_config
+        pol = load_policy_config()
+        pol.events.allow_pre_earnings_trading = False
         m_data = make_m_data()
         m_data["days_to_earnings"] = 1
-        out = run(m_data=m_data)
+        out = run(m_data=m_data, policy=pol)
         self.assertEqual(out["decision"], "HOLD")
 
     def test_liquidity_still_blocks(self):

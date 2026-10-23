@@ -63,35 +63,65 @@ def _collect_sse_content(response, label, deadline, progress_interval, total_bud
 
 
 MODEL_REGISTRY = {
-    "xingchen": {
+    "openrouter/free": {
         "provider": "openrouter",
-        "model": "xingchen-agi/xing4.0-29b-a4b:free",
-        "fallbacks": ["openrouter/free"],
-        "label": "XingChen: Xing4.0 29B A4B (OpenRouter, free)"
-    },
-    "xingchen-agi/xing4.0-29b-a4b:free": {
-        "provider": "openrouter",
-        "model": "xingchen-agi/xing4.0-29b-a4b:free",
-        "fallbacks": ["openrouter/free"],
-        "label": "XingChen: Xing4.0 29B A4B (OpenRouter, free)"
-    },
-    "openrouter": {
-        "provider": "openrouter",
-        "model": "xingchen-agi/xing4.0-29b-a4b:free",
-        "fallbacks": ["openrouter/free"],
-        "label": "XingChen: Xing4.0 29B A4B (OpenRouter, free)"
+        "model": "openrouter/free",
+        "fallbacks": [
+            "recursive/flint-v1.0:free",
+            "xingchen-agi/xing4.0-29b-a4b:free",
+            "liquid/lfm-2.5-2.6b:free",
+        ],
+        "label": "OpenRouter Free (Auto-routed, free)"
     },
     "free": {
         "provider": "openrouter",
-        "model": "xingchen-agi/xing4.0-29b-a4b:free",
-        "fallbacks": ["openrouter/free"],
-        "label": "XingChen: Xing4.0 29B A4B (OpenRouter, free)"
+        "model": "openrouter/free",
+        "fallbacks": [
+            "recursive/flint-v1.0:free",
+            "xingchen-agi/xing4.0-29b-a4b:free",
+            "liquid/lfm-2.5-2.6b:free",
+        ],
+        "label": "OpenRouter Free (Auto-routed, free)"
+    },
+    "openrouter": {
+        "provider": "openrouter",
+        "model": "openrouter/free",
+        "fallbacks": [
+            "recursive/flint-v1.0:free",
+            "xingchen-agi/xing4.0-29b-a4b:free",
+            "liquid/lfm-2.5-2.6b:free",
+        ],
+        "label": "OpenRouter Free (Auto-routed, free)"
+    },
+    "xingchen": {
+        "provider": "openrouter",
+        "model": "openrouter/free",
+        "fallbacks": [
+            "recursive/flint-v1.0:free",
+            "xingchen-agi/xing4.0-29b-a4b:free",
+            "liquid/lfm-2.5-2.6b:free",
+        ],
+        "label": "OpenRouter Free (Auto-routed, free)"
+    },
+    "xingchen-agi/xing4.0-29b-a4b:free": {
+        "provider": "openrouter",
+        "model": "openrouter/free",
+        "fallbacks": [
+            "recursive/flint-v1.0:free",
+            "xingchen-agi/xing4.0-29b-a4b:free",
+            "liquid/lfm-2.5-2.6b:free",
+        ],
+        "label": "OpenRouter Free (Auto-routed, free)"
     },
     "flint": {
         "provider": "openrouter",
-        "model": "xingchen-agi/xing4.0-29b-a4b:free",
-        "fallbacks": ["openrouter/free"],
-        "label": "XingChen: Xing4.0 29B A4B (OpenRouter, free)"
+        "model": "openrouter/free",
+        "fallbacks": [
+            "recursive/flint-v1.0:free",
+            "xingchen-agi/xing4.0-29b-a4b:free",
+            "liquid/lfm-2.5-2.6b:free",
+        ],
+        "label": "OpenRouter Free (Auto-routed, free)"
     },
 }
 
@@ -187,23 +217,23 @@ def extract_json(text: str):
 
 def normalize_model_key(model_choice: str) -> str:
     if not model_choice:
-        return "xingchen"
+        return "openrouter/free"
     key = str(model_choice).strip().lower()
     if key in [
+        "openrouter/free", "free", "openrouter", "auto", "or",
         "xingchen", "xing", "xing4", "xingchen-agi/xing4.0-29b-a4b:free",
         "flint", "flint-v1.0", "recursive/flint-v1.0:free",
-        "openrouter", "openrouter/free", "or", "free"
     ]:
-        return "xingchen"
-    # Gracefully redirect any other model request to xingchen
-    return "xingchen"
+        return "openrouter/free"
+    # Gracefully redirect any other model request to openrouter/free
+    return "openrouter/free"
 
 
 def get_model_label(model_choice: str) -> str:
     key = normalize_model_key(model_choice)
     if key in MODEL_REGISTRY:
         return MODEL_REGISTRY[key]["label"]
-    return "XingChen: Xing4.0 29B A4B (OpenRouter, free)"
+    return "OpenRouter Free (Auto-routed, free)"
 
 
 def uses_compact_prompt_profile(model_choice: str) -> bool:
@@ -215,16 +245,16 @@ def uses_compact_prompt_profile(model_choice: str) -> bool:
 def query_llm(
     system_instruction: str,
     user_prompt: str,
-    model_choice: str = "xingchen",
+    model_choice: str = "openrouter/free",
     temperature: float = None,
     reasoning_budget: int = None,
     reasoning_effort: str = None
 ) -> str:
     """
-    Executes an LLM chat query using XingChen: Xing4.0 29B A4B via OpenRouter.
+    Executes an LLM chat query using OpenRouter Free auto-routing.
     """
-    key = normalize_model_key(model_choice or "xingchen")
-    config = MODEL_REGISTRY.get(key, MODEL_REGISTRY["xingchen"])
+    key = normalize_model_key(model_choice or "openrouter/free")
+    config = MODEL_REGISTRY.get(key, MODEL_REGISTRY["openrouter/free"])
     provider = config.get("provider", "openrouter")
 
     api_key = os.getenv("OPENROUTER_API_KEY")

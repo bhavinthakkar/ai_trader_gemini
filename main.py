@@ -1234,14 +1234,14 @@ def run_portfolio_review(llm_choice: str, temperature: float = None, reasoning_b
 
 def main():
     parser = argparse.ArgumentParser(
-        description="6-Agent Stock Swing Trading Analysis Pipeline (Powered by XingChen: Xing4.0 29B A4B via OpenRouter)",
-        usage="python main.py [xingchen] [ticker] | python main.py portfolio"
+        description="6-Agent Stock Swing Trading Analysis Pipeline (Powered by OpenRouter Free auto-router)",
+        usage="python main.py [free] [ticker] | python main.py portfolio"
     )
     parser.add_argument(
         "model_arg",
         nargs="?",
         default=None,
-        help="Model short name (default: 'xingchen') or stock ticker symbol"
+        help="Model short name (default: 'free') or stock ticker symbol"
     )
     parser.add_argument(
         "ticker_arg",
@@ -1253,7 +1253,7 @@ def main():
         "--model", "-m",
         dest="model_opt",
         default=None,
-        help="Model short name (default: 'xingchen')"
+        help="Model short name (default: 'free')"
     )
     parser.add_argument(
         "--ticker", "-t",
@@ -1306,7 +1306,7 @@ def main():
 
     # If first argument is 'portfolio', run portfolio review
     if (raw_first and raw_first.lower() == "portfolio") or (raw_model_opt and raw_model_opt.lower() == "portfolio"):
-        llm_choice = "xingchen"
+        llm_choice = "free"
         with managed_llamacpp_server(llm_choice):
             run_portfolio_review(
                 llm_choice,
@@ -1317,33 +1317,33 @@ def main():
         return
 
     known_model_names = {
+        "free", "openrouter/free", "openrouter", "auto", "or",
         "xingchen", "xing", "xing4", "xingchen-agi/xing4.0-29b-a4b:free",
         "flint", "flint-v1.0", "recursive/flint-v1.0:free",
-        "openrouter", "openrouter/free", "free", "or",
         "kimi", "kimi-k3", "nemotron", "ultra", "super",
         "gemini", "ling", "qwen", "llamacpp"
     }
 
     if raw_first and raw_second:
-        # e.g. python main.py xingchen AAPL
-        model_choice = "xingchen"
+        # e.g. python main.py free AAPL
+        model_choice = "free"
         raw_ticker = raw_ticker_opt or raw_second
     elif raw_first and not raw_second:
         if raw_first.lower() in known_model_names:
-            model_choice = "xingchen"
+            model_choice = "free"
             raw_ticker = raw_ticker_opt
         else:
             # e.g. python main.py AAPL
-            model_choice = "xingchen"
+            model_choice = "free"
             raw_ticker = raw_first
     else:
-        model_choice = "xingchen"
+        model_choice = "free"
         raw_ticker = raw_ticker_opt
 
     if not raw_ticker:
-        print("\nUsage: python main.py [xingchen] <TICKER> (e.g. python main.py AAPL)")
+        print("\nUsage: python main.py [free] <TICKER> (e.g. python main.py AAPL)")
         print("       python main.py portfolio")
-        print("Model: XingChen: Xing4.0 29B A4B (xingchen-agi/xing4.0-29b-a4b:free via OpenRouter)\n")
+        print("Model: OpenRouter Free (openrouter/free via OpenRouter)\n")
         sys.exit(1)
 
     market = "EU" if args.eu else args.market.upper()

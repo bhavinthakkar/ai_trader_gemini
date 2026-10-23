@@ -602,7 +602,7 @@ Examples:
         "model_arg",
         nargs="?",
         default=None,
-        help="LLM model choice for main.py (default: 'xingchen' - XingChen: Xing4.0 29B A4B via OpenRouter)"
+        help="LLM model choice for main.py (default: 'free' - OpenRouter Free auto-router)"
     )
     parser.add_argument(
         "--model", "-m",
@@ -734,7 +734,7 @@ Examples:
     args = parser.parse_args()
 
     # Determine model choice
-    raw_model = args.model_opt or args.model_arg or "xingchen"
+    raw_model = args.model_opt or args.model_arg or "free"
     model_choice = str(raw_model).strip().lower()
     if model_choice in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
         print("[master] Notice: Space Bunny Alpha ('bunny') is no longer available on OpenRouter; automatically redirecting to 'ling' (inclusionAI: Ling 3.1 Flash).")

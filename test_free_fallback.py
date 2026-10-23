@@ -11,9 +11,10 @@ import requests
 import llm_service
 from llm_service import MODEL_REGISTRY, get_model_label, normalize_model_key, query_llm
 
-XINGCHEN = "xingchen-agi/xing4.0-29b-a4b:free"
-FLINT = XINGCHEN
-FALLBACK = "openrouter/free"
+PRIMARY = "openrouter/free"
+FLINT = PRIMARY
+XINGCHEN = PRIMARY
+FALLBACK = "recursive/flint-v1.0:free"
 
 
 def _sse(obj):
@@ -38,30 +39,30 @@ def ok_response(content='{"decision": "HOLD"}'):
 
 
 class FreeRoutingTests(unittest.TestCase):
-    def test_free_is_aliased_to_xingchen(self):
-        self.assertEqual(normalize_model_key("free"), "xingchen")
+    def test_free_is_aliased_to_openrouter_free(self):
+        self.assertEqual(normalize_model_key("free"), "openrouter/free")
 
-    def test_free_targets_xingchen_then_fallback(self):
+    def test_free_targets_openrouter_free_then_fallback(self):
         config = MODEL_REGISTRY["free"]
         self.assertEqual(config["provider"], "openrouter")
-        self.assertEqual(config["model"], XINGCHEN)
-        self.assertEqual(config["fallbacks"], [FALLBACK])
+        self.assertEqual(config["model"], "openrouter/free")
+        self.assertIn(FALLBACK, config["fallbacks"])
 
-    def test_free_label_advertises_xingchen(self):
-        self.assertIn("XingChen", get_model_label("free"))
+    def test_free_label_advertises_openrouter_free(self):
+        self.assertIn("OpenRouter Free", get_model_label("free"))
 
-    def test_openrouter_aliases_redirect_to_xingchen(self):
+    def test_openrouter_aliases_redirect_to_openrouter_free(self):
         for alias in ("openrouter", "openrouter/free", "minimax", "minimax-m3", "m3", "or"):
-            self.assertEqual(normalize_model_key(alias), "xingchen")
+            self.assertEqual(normalize_model_key(alias), "openrouter/free")
             self.assertEqual(MODEL_REGISTRY[normalize_model_key(alias)]["provider"], "openrouter")
 
-    def test_other_legacy_aliases_redirect_to_xingchen(self):
-        for alias in ("ultra", "kimi", "ling", "nemotron", "gemini", "qwen", "flint"):
-            self.assertEqual(normalize_model_key(alias), "xingchen")
+    def test_other_legacy_aliases_redirect_to_openrouter_free(self):
+        for alias in ("ultra", "kimi", "ling", "nemotron", "gemini", "qwen", "flint", "xingchen"):
+            self.assertEqual(normalize_model_key(alias), "openrouter/free")
             self.assertEqual(MODEL_REGISTRY[normalize_model_key(alias)]["provider"], "openrouter")
 
     def test_free_case_insensitive(self):
-        self.assertEqual(normalize_model_key("FREE"), "xingchen")
+        self.assertEqual(normalize_model_key("FREE"), "openrouter/free")
 
 
 @patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}, clear=False)
@@ -96,7 +97,7 @@ class ReadTimeoutFallbackTests(unittest.TestCase):
 
         with self.assertRaises(requests.exceptions.ReadTimeout):
             self.call(responder)
-        self.assertEqual(calls, [XINGCHEN, FALLBACK])
+        self.assertEqual(calls, [PRIMARY] + MODEL_REGISTRY["free"]["fallbacks"])
 
     def test_xingchen_success_does_not_touch_fallback(self):
         calls = []

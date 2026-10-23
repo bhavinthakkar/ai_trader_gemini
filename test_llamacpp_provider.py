@@ -167,15 +167,15 @@ def load_config_from_values(**overrides):
 
 
 class ModelRegistryTests(unittest.TestCase):
-    def test_registry_targets_xingchen_openrouter(self):
+    def test_registry_targets_openrouter_free(self):
         for key in MODEL_REGISTRY:
             self.assertEqual(MODEL_REGISTRY[key]["provider"], "openrouter")
-            self.assertEqual(MODEL_REGISTRY[key]["model"], "xingchen-agi/xing4.0-29b-a4b:free")
-        self.assertIn("xingchen", MODEL_REGISTRY)
+            self.assertEqual(MODEL_REGISTRY[key]["model"], "openrouter/free")
+        self.assertIn("free", MODEL_REGISTRY)
 
-    def test_query_llm_routes_qwen_to_xingchen(self):
-        self.assertEqual(normalize_model_key("qwen"), "xingchen")
-        self.assertIn("xingchen", get_model_label("qwen").lower())
+    def test_query_llm_routes_qwen_to_free(self):
+        self.assertEqual(normalize_model_key("qwen"), "openrouter/free")
+        self.assertIn("openrouter free", get_model_label("qwen").lower())
 
 
 if __name__ == "__main__":

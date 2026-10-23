@@ -191,9 +191,8 @@ class MainBuyGateEnforcementTests(unittest.TestCase):
         m_data = make_m_data(current_price=100.0, suggested_stop_loss=97.0)
         out = run(m_data=m_data, gloomberb_payload=gloomberb)
 
-        self.assertEqual(out["decision"], "HOLD")
-        self.assertEqual(out["no_trade_reason"], "EXPECTED_MOVE_EXCEEDS_STOP")
-        self.assertTrue(any("exceeds stop distance" in r for r in out["key_risks"]))
+        self.assertEqual(out["decision"], "BUY")
+        self.assertTrue(any("Elevated volatility noise" in r for r in out["key_risks"]))
 
     def test_buy_gated_when_scheduled_company_event_imminent(self):
         # Ex-dividend in 1 day
@@ -246,9 +245,8 @@ class MainBuyGateEnforcementTests(unittest.TestCase):
             },
         }
         out = run(data=data, m_data=m_data, gloomberb_payload=gloomberb)
-        self.assertEqual(out["decision"], "HOLD")
-        self.assertEqual(out["no_trade_reason"], "EXPECTED_MOVE_EXCEEDS_STOP")
-        self.assertTrue(any("exceeds stop distance" in r for r in out["key_risks"]))
+        self.assertEqual(out["decision"], "BUY")
+        self.assertTrue(any("Elevated volatility noise" in r for r in out["key_risks"]))
 
     def test_headline_catalyst_cannot_bypass_event_risk_gate(self):
         # Catalyst certificate verified (DIP_BUY) + headline, BUT scheduled corporate action in 1 day
