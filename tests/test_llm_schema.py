@@ -381,10 +381,12 @@ class TestLLMEvidenceSchema(unittest.TestCase):
         self.assertEqual(norm_fb, {})
         self.assertTrue(any("prohibited broker command" in e.lower() for e in errors_fb))
 
-        # D. Traditional signal containing catalysts and risk_flags does not falsely trigger evidence schema
+        # D. Traditional signal containing catalysts, risk_flags, advisory_action, and analysis_status does not falsely trigger evidence schema
         trad_with_catalysts = dict(trad_payload)
         trad_with_catalysts["catalysts"] = [{"rank": 1, "catalyst": "Strong cloud backlog"}]
         trad_with_catalysts["risk_flags"] = [{"risk": "Foreign exchange headwind"}]
+        trad_with_catalysts["advisory_action"] = "CANDIDATE_BUY"
+        trad_with_catalysts["analysis_status"] = "COMPLETE"
         norm_cat, errors_cat = validate_signal_json(
             trad_with_catalysts,
             required_horizon_sessions=20,
@@ -393,6 +395,33 @@ class TestLLMEvidenceSchema(unittest.TestCase):
         )
         self.assertEqual(errors_cat, [])
         self.assertEqual(norm_cat["decision"], "BUY")
+
+        # E. Traditional signal with NEUTRAL decision normalizes safely to HOLD
+        trad_neutral = dict(trad_payload)
+        trad_neutral["decision"] = "NEUTRAL"
+        norm_neu, errors_neu = validate_signal_json(
+            trad_neutral,
+            required_horizon_sessions=20,
+            require_forecast_20d=True,
+            expected_ticker="MSFT",
+        )
+        self.assertEqual(errors_neu, [])
+        self.assertEqual(norm_neu["decision"], "HOLD")
+
+        # F. Traditional signal with 0-100 percentage probability scale normalizes to [0, 1]
+        trad_pct = dict(trad_payload)
+        trad_pct["buy_score"] = 70.0
+        trad_pct["hold_score"] = 20.0
+        trad_pct["sell_score"] = 10.0
+        norm_pct, errors_pct = validate_signal_json(
+            trad_pct,
+            required_horizon_sessions=20,
+            require_forecast_20d=True,
+            expected_ticker="MSFT",
+        )
+        self.assertEqual(errors_pct, [])
+        self.assertAlmostEqual(norm_pct["buy_score"] + norm_pct["hold_score"] + norm_pct["sell_score"], 1.0, places=3)
+        self.assertAlmostEqual(norm_pct["buy_score"], 0.70, places=2)
 
 
 if __name__ == "__main__":

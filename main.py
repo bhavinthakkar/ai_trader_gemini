@@ -1460,20 +1460,32 @@ def main():
                     # One constrained corrective retry on strict schema violations.
                     if errors:
                         print(f"[{model_label}] Schema validation failed for {symbol}; issuing one corrective retry...")
+                        ml_req_str = "- ml_signal_assessment: object with 'disposition' ('SUPPORTIVE', 'CONFLICTING', or 'NEUTRAL') and 'reason' (explanation string)\n" if (ml_context and ml_context.get("in_scope", True)) else ""
                         retry_prompt = (
                             f"{context['user_prompt']}\n\n"
                             "=== SCHEMA VALIDATION FAILED -- RESUBMIT ONLY THE FIXED JSON ===\n"
                             "Your previous response failed strict schema validation. Correct EVERY "
-                            "violation below and return ONLY a single valid JSON object with the exact "
-                            "same golden keys (ticker, as_of, analysis_status, advisory_action, "
-                            "catalysts, risk_flags, supporting_document_ids, contradictions, "
-                            "missing_information, summary, decision, primary_driver, buy_score, hold_score, "
-                            "sell_score, horizon_days=20, horizon_sessions=20, forecast_20d, "
-                            "quant_score, pillar_scores, data_completeness, "
-                            "ml_signal_assessment when an ML score was supplied, "
-                            "falsification_bull, falsification_bear, bull_case, bear_case, key_risks). "
-                            "No unrestricted broker commands or unauthorized execution fields are permitted.\n"
-                            f"Violations:\n- " + "\n- ".join(errors) + "\n"
+                            "violation below and return ONLY a single valid JSON object with the required schema fields:\n"
+                            f"- stock: \"{symbol}\"\n"
+                            "- decision: \"BUY\", \"HOLD\", or \"SELL\"\n"
+                            "- primary_driver: \"QUANT_STRUCTURE\", \"FUNDAMENTAL\", \"NEWS_CATALYST\", \"MACRO_EVENT\", or \"EARNINGS_CATALYST\"\n"
+                            "- confidence: float between 0.0 and 1.0\n"
+                            "- buy_score, hold_score, sell_score: floats between 0.0 and 1.0 summing to 1.0\n"
+                            "- horizon_days: 20\n"
+                            "- horizon_sessions: 20\n"
+                            "- quant_score: float between 0.0 and 100.0\n"
+                            "- forecast_20d: object with 'relative_outlook' ('OUTPERFORM', 'MARKET_LIKE', or 'UNDERPERFORM'), 'confidence' (float 0.0 to 1.0), and 'rationale' (string)\n"
+                            "- pillar_scores: object with 'trend', 'sector', 'alpha', 'valuation_history', 'peer_valuation' (each 0.0 to 100.0)\n"
+                            "- data_completeness: float between 0.0 and 1.0\n"
+                            "- falsification_bull: string\n"
+                            "- falsification_bear: string\n"
+                            "- bull_case: list of strings\n"
+                            "- bear_case: list of strings\n"
+                            "- key_risks: list of strings\n"
+                            "- missing_information: list of strings\n"
+                            f"{ml_req_str}"
+                            "Do not include unauthorized broker execution commands.\n"
+                            f"Violations to correct:\n- " + "\n- ".join(errors) + "\n"
                         )
                         retry_content = query_llm(
                             system_instruction=context["system_instruction"],

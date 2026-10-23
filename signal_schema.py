@@ -90,8 +90,10 @@ def validate_signal_json(
 
     # Step 4.2: Detect if object is structured under the strict LLMEvidenceAnalysis contract.
     # An evidence contract object specifies advisory_action or analysis_status without traditional decision authority.
-    is_evidence_obj = ("advisory_action" in obj) or (
-        "analysis_status" in obj and "decision" not in obj and "buy_score" not in obj
+    is_evidence_obj = (
+        ("advisory_action" in obj or "analysis_status" in obj)
+        and "decision" not in obj
+        and "buy_score" not in obj
     )
     if is_evidence_obj:
         model, evidence_errors = validate_llm_evidence_response(
@@ -124,9 +126,15 @@ def validate_signal_json(
             errors.append("ml_signal_assessment must be an object")
         else:
             disposition = clean(assessment.get("disposition", "")).upper()
-            if disposition not in ("SUPPORTIVE", "CONFLICTING", "NEUTRAL"):
+            if "SUPPORT" in disposition:
+                disposition = "SUPPORTIVE"
+            elif "CONFLICT" in disposition:
+                disposition = "CONFLICTING"
+            elif "NEUTRAL" in disposition:
+                disposition = "NEUTRAL"
+            elif disposition not in ("SUPPORTIVE", "CONFLICTING", "NEUTRAL"):
                 errors.append("ml_signal_assessment.disposition must be SUPPORTIVE, CONFLICTING, or NEUTRAL")
-            reason = clean(assessment.get("reason", ""))
+            reason = clean(assessment.get("reason") or assessment.get("explanation") or assessment.get("summary") or "")
             if not reason:
                 errors.append("ml_signal_assessment.reason must be a non-empty explanation")
             norm["ml_signal_assessment"] = {"disposition": disposition, "reason": reason}
@@ -139,12 +147,22 @@ def validate_signal_json(
             errors.append("forecast_20d must be an object")
         else:
             outlook = clean(forecast.get("relative_outlook", "")).upper()
-            if outlook not in ("OUTPERFORM", "MARKET_LIKE", "UNDERPERFORM"):
+            if "OUTPERFORM" in outlook or "BULL" in outlook:
+                outlook = "OUTPERFORM"
+            elif "UNDERPERFORM" in outlook or "BEAR" in outlook:
+                outlook = "UNDERPERFORM"
+            elif "MARKET" in outlook or "NEUTRAL" in outlook or "HOLD" in outlook or "IN_LINE" in outlook:
+                outlook = "MARKET_LIKE"
+            elif outlook not in ("OUTPERFORM", "MARKET_LIKE", "UNDERPERFORM"):
                 errors.append("forecast_20d.relative_outlook must be OUTPERFORM, MARKET_LIKE, or UNDERPERFORM")
             forecast_confidence = _to_float(forecast.get("confidence"))
+            if forecast_confidence is not None and 1.0 < forecast_confidence <= 100.0:
+                forecast_confidence = forecast_confidence / 100.0
+            if forecast_confidence is None:
+                forecast_confidence = _to_float(norm.get("confidence"), default=0.5)
             if forecast_confidence is None or not (0.0 <= forecast_confidence <= 1.0):
                 errors.append("forecast_20d.confidence must be numeric in [0,1]")
-            rationale = clean(forecast.get("rationale", ""))
+            rationale = clean(forecast.get("rationale") or forecast.get("reason") or forecast.get("summary") or "")
             if not rationale:
                 errors.append("forecast_20d.rationale must be a non-empty explanation")
             norm["forecast_20d"] = {
@@ -163,7 +181,7 @@ def validate_signal_json(
             dec = "BUY"
         elif "SELL" in dec:
             dec = "SELL"
-        elif dec == "HOLD":
+        elif "HOLD" in dec or "NEUTRAL" in dec or "NO_ACTION" in dec:
             dec = "HOLD"
         elif dec in VALID_DECISIONS:
             dec = dec
@@ -178,7 +196,18 @@ def validate_signal_json(
     else:
         driver = "_".join(clean(raw_driver).upper().split())
         if driver not in VALID_PRIMARY_DRIVERS:
-            errors.append(f"invalid primary_driver value '{raw_driver}'")
+            if "EARNING" in driver:
+                driver = "EARNINGS_CATALYST"
+            elif "NEWS" in driver or "CATALYST" in driver:
+                driver = "NEWS_CATALYST"
+            elif "MACRO" in driver or "FED" in driver or "RATE" in driver or "GEOPOLITIC" in driver:
+                driver = "MACRO_EVENT"
+            elif "FUNDAMENTAL" in driver or "VALUATION" in driver:
+                driver = "FUNDAMENTAL"
+            elif "QUANT" in driver or "STRUCTURE" in driver or "TECH" in driver or "PRICE" in driver:
+                driver = "QUANT_STRUCTURE"
+            else:
+                errors.append(f"invalid primary_driver value '{raw_driver}'")
         norm["primary_driver"] = driver
 
     # --- Probabilities: numeric, in-range, ~sum to 1 ----------------------
@@ -191,23 +220,31 @@ def validate_signal_json(
         s = _to_float(norm.get("sell_score"))
         if None in (b, h, s):
             errors.append("buy_score/hold_score/sell_score must be numeric")
-        elif any(v < 0.0 or v > 1.0 for v in (b, h, s)):
-            errors.append(f"probabilities out of [0,1]: buy={b} hold={h} sell={s}")
-        elif b + h + s <= 0.0:
-            errors.append("probabilities are all zero")
         else:
-            diff = abs(b + h + s - 1.0)
-            if diff > PROBABILITY_SUM_TOLERANCE:
-                errors.append(
-                    f"probabilities sum to {b + h + s:.3f} (tolerance ±{PROBABILITY_SUM_TOLERANCE}); "
-                    f"expected ~1.0"
-                )
+            # Auto-normalize 0-100 percentage scale if detected
+            if any(v > 1.0 for v in (b, h, s)) and all(0.0 <= v <= 100.0 for v in (b, h, s)):
+                tot = b + h + s
+                if 80.0 <= tot <= 120.0:
+                    b, h, s = b / tot, h / tot, s / tot
+                elif tot > 0:
+                    b, h, s = b / 100.0, h / 100.0, s / 100.0
+            if any(v < 0.0 or v > 1.0 for v in (b, h, s)):
+                errors.append(f"probabilities out of [0,1]: buy={b} hold={h} sell={s}")
+            elif b + h + s <= 0.0:
+                errors.append("probabilities are all zero")
             else:
-                repaired = normalize_probabilities(b, h, s)
-                if repaired is None:
-                    errors.append("probabilities are all zero")
+                diff = abs(b + h + s - 1.0)
+                if diff > PROBABILITY_SUM_TOLERANCE:
+                    errors.append(
+                        f"probabilities sum to {b + h + s:.3f} (tolerance ±{PROBABILITY_SUM_TOLERANCE}); "
+                        f"expected ~1.0"
+                    )
                 else:
-                    norm["buy_score"], norm["hold_score"], norm["sell_score"] = repaired
+                    repaired = normalize_probabilities(b, h, s)
+                    if repaired is None:
+                        errors.append("probabilities are all zero")
+                    else:
+                        norm["buy_score"], norm["hold_score"], norm["sell_score"] = repaired
 
     # --- Quantitative scores / pillars --------------------------------
     q = _to_float(norm.get("quant_score"))
@@ -237,18 +274,18 @@ def validate_signal_json(
             errors.append("horizon_days must be an integer")
 
     if required_horizon_sessions is not None:
+        raw_hs = norm.get("horizon_sessions")
+        if raw_hs is None and "horizon_days" in norm:
+            raw_hs = norm.get("horizon_days")
         try:
-            hs = int(norm.get("horizon_sessions"))
+            hs = int(raw_hs)
             if hs != int(required_horizon_sessions):
                 errors.append(f"horizon_sessions must equal {required_horizon_sessions}")
+            else:
+                norm["horizon_sessions"] = hs
+                norm["horizon_days"] = hs
         except (TypeError, ValueError):
             errors.append("missing or invalid required field 'horizon_sessions'")
-        try:
-            hd = int(norm.get("horizon_days"))
-            if hd != int(required_horizon_sessions):
-                errors.append(f"horizon_days must equal {required_horizon_sessions} trading sessions")
-        except (TypeError, ValueError):
-            pass
     elif "horizon_sessions" in norm:
         try:
             norm["horizon_sessions"] = int(norm["horizon_sessions"])
