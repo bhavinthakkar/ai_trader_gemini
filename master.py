@@ -51,12 +51,13 @@ MAIN_SCRIPT = os.path.join(BASE_DIR, "main.py")
 DEFAULT_DB_PATH = os.path.join(BASE_DIR, "trader.db")
 
 VALID_MODELS = [
+    "flint", "flint-v1.0", "recursive/flint-v1.0:free",
+    "openrouter", "openrouter/free", "free",
     "ling", "ling-3.1", "ling-flash", "ling-3.1-flash", "inclusionai", "inclusionai/ling-3.1-flash",
     "nemotron", "nvidia", "ultra", "nemotron-ultra", "550b",
     "kimi", "kimi-k3", "k3", "moonshot",
     "super", "nemotron-super", "120b",
-    "gemini", "openrouter", "free", "openrouter/free",
-    "minimax", "minimax-m3", "minimax_m3", "m3",
+    "gemini", "minimax", "minimax-m3", "minimax_m3", "m3",
     "qwen", "llamacpp", "qwen-llamacpp",
 ]
 
@@ -600,7 +601,7 @@ Examples:
         "model_arg",
         nargs="?",
         default=None,
-        help="LLM model choice for main.py (default: 'free'). Choices: 'ling', 'free', 'gemini', 'nemotron', 'ultra', 'super', 'kimi', 'openrouter', 'qwen', 'llamacpp', etc."
+        help="LLM model choice for main.py (default: 'flint' - Recursive: Flint v1.0 via OpenRouter)"
     )
     parser.add_argument(
         "--model", "-m",
@@ -732,7 +733,7 @@ Examples:
     args = parser.parse_args()
 
     # Determine model choice
-    raw_model = args.model_opt or args.model_arg or "free"
+    raw_model = args.model_opt or args.model_arg or "flint"
     model_choice = str(raw_model).strip().lower()
     if model_choice in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
         print("[master] Notice: Space Bunny Alpha ('bunny') is no longer available on OpenRouter; automatically redirecting to 'ling' (inclusionAI: Ling 3.1 Flash).")

@@ -554,7 +554,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           symbol: symbol.trim().toUpperCase(),
-          model: 'ling',
+          model: 'flint',
           is_eu: activeMarket === 'EU',
         }),
       });

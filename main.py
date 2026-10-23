@@ -1218,51 +1218,51 @@ def run_portfolio_review(llm_choice: str, temperature: float = None, reasoning_b
 
 def main():
     parser = argparse.ArgumentParser(
-        description="6-Agent Stock Swing Trading Analysis Pipeline",
-        usage="python main.py {nemotron|ultra|kimi|super|gemini|openrouter|qwen|llamacpp|qwen-llamacpp} [ticker] | python main.py portfolio {model}"
+        description="6-Agent Stock Swing Trading Analysis Pipeline (Powered by Recursive: Flint v1.0 via OpenRouter)",
+        usage="python main.py [flint] [ticker] | python main.py portfolio"
     )
     parser.add_argument(
         "model_arg",
         nargs="?",
         default=None,
-        help="Required model short name: 'nemotron' / 'ultra', 'kimi', 'super', 'gemini', 'openrouter', 'qwen' / 'llamacpp' (local Qwen via Vulkan-enabled llama.cpp), or 'qwen-llamacpp'"
+        help="Model short name (default: 'flint') or stock ticker symbol"
     )
     parser.add_argument(
         "ticker_arg",
         nargs="?",
         default=None,
-        help="Optional stock ticker symbol (e.g. 000660.KS, NVDA) or comma-separated list of tickers"
+        help="Optional stock ticker symbol (e.g. AAPL, NVDA) or comma-separated list of tickers"
     )
     parser.add_argument(
         "--model", "-m",
         dest="model_opt",
         default=None,
-        help="Model short name: 'nemotron', 'ultra', 'kimi', 'super', 'gemini', 'openrouter', 'free', 'qwen' / 'llamacpp', 'qwen-llamacpp', or 'portfolio'"
+        help="Model short name (default: 'flint')"
     )
     parser.add_argument(
         "--ticker", "-t",
         dest="ticker_opt",
         default=None,
-        help="Stock ticker symbol (e.g. 000660.KS, NVDA) or comma-separated list of tickers"
+        help="Stock ticker symbol (e.g. AAPL, NVDA) or comma-separated list of tickers"
     )
     parser.add_argument(
         "--temperature",
         type=float,
         default=None,
-        help="Model sampling temperature (e.g. 0.2 for strict determinism, 0.6-0.8 for deep reasoning CoT)"
+        help="Model sampling temperature (default: 0.2)"
     )
     parser.add_argument(
         "--reasoning-budget",
         type=int,
         default=None,
-        help="Internal reasoning token budget for reasoning models (default: 16000)"
+        help="Internal reasoning token budget"
     )
     parser.add_argument(
         "--reasoning-effort",
         type=str,
         choices=["low", "medium", "high", "max"],
         default=None,
-        help="Reasoning effort level ('low', 'medium', 'high', 'max', default: 'high')"
+        help="Reasoning effort level"
     )
     parser.add_argument(
         "--market",
@@ -1283,46 +1283,14 @@ def main():
     )
     args = parser.parse_args()
 
-    raw_model = args.model_opt or args.model_arg
-    if not raw_model:
-        print("\n❌ ERROR: Model argument is required!")
-        print("Usage: python main.py {ling|nemotron|ultra|kimi|super|gemini|openrouter|free|qwen|llamacpp|qwen-llamacpp} [ticker]")
-        print("       python main.py portfolio {model}")
-        print("  - ling / ling-3.1  : inclusionAI: Ling 3.1 Flash via OpenRouter (free, 262k context)")
-        print("  - nemotron / ultra : Cloud Nemotron-3 Ultra 550B (NVIDIA)")
-        print("  - kimi             : Moonshot AI Kimi-K3 (NVIDIA)")
-        print("  - super            : Cloud Nemotron-3 Super 120B (NVIDIA)")
-        print("  - gemini           : Cloud Gemini 3.1 Pro")
-        print("  - openrouter       : OpenRouter Free Models Router (openrouter/free)")
-        print("  - free             : Nemotron-3 Ultra 550B first, Super 120B fallback on stall")
-        print("  - qwen / llamacpp  : Local Qwen 2.5 14B via Vulkan-enabled llama.cpp")
-        print("  - qwen-llamacpp    : Explicit alias for the Vulkan-enabled llama.cpp server\n")
-        sys.exit(1)
+    raw_first = args.model_arg
+    raw_second = args.ticker_arg
+    raw_model_opt = args.model_opt
+    raw_ticker_opt = args.ticker_opt
 
-    model_choice = str(raw_model).strip().lower()
-    if model_choice in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
-        print("[main] Notice: Space Bunny Alpha ('bunny') is no longer available on OpenRouter; automatically redirecting to 'ling' preset.")
-        model_choice = "ling"
-    valid_models = [
-        "ling", "ling-3.1", "ling-flash", "ling-3.1-flash", "inclusionai", "inclusionai/ling-3.1-flash",
-        "nemotron", "nvidia", "ultra", "nemotron-ultra", "550b",
-        "kimi", "kimi-k3", "k3", "moonshot",
-        "super", "nemotron-super", "120b",
-        "gemini", "openrouter", "free", "openrouter/free",
-        "minimax", "minimax-m3", "minimax_m3", "m3",
-        "qwen", "llamacpp", "qwen-llamacpp",
-        "portfolio"
-    ]
-    if model_choice not in valid_models:
-        print(f"\n❌ ERROR: Invalid model choice '{raw_model}'!")
-        print("Supported choices are: 'ling' (Ling 3.1 Flash), 'free' (Ultra 550B then Super 120B), 'nemotron' (Ultra 550B), 'kimi' (Kimi-K3), 'super' (120B), 'gemini', 'openrouter', 'qwen' / 'llamacpp' / 'qwen-llamacpp', 'portfolio'\n")
-        sys.exit(1)
-
-    if model_choice == "portfolio":
-        llm_choice = args.model_opt or args.ticker_arg
-        if not llm_choice or str(llm_choice).strip().lower() not in [m for m in valid_models if m != "portfolio"]:
-            print("\n❌ ERROR: Portfolio review requires an LLM model choice, e.g. `python main.py portfolio gemini`.")
-            sys.exit(1)
+    # If first argument is 'portfolio', run portfolio review
+    if (raw_first and raw_first.lower() == "portfolio") or (raw_model_opt and raw_model_opt.lower() == "portfolio"):
+        llm_choice = "flint"
         with managed_llamacpp_server(llm_choice):
             run_portfolio_review(
                 llm_choice,
@@ -1332,12 +1300,40 @@ def main():
             )
         return
 
+    known_model_names = {
+        "flint", "flint-v1.0", "recursive/flint-v1.0:free",
+        "openrouter", "openrouter/free", "free", "or",
+        "kimi", "kimi-k3", "nemotron", "ultra", "super",
+        "gemini", "ling", "qwen", "llamacpp"
+    }
+
+    if raw_first and raw_second:
+        # e.g. python main.py flint AAPL or python main.py kimi AAPL
+        model_choice = "flint"
+        raw_ticker = raw_ticker_opt or raw_second
+    elif raw_first and not raw_second:
+        if raw_first.lower() in known_model_names:
+            model_choice = "flint"
+            raw_ticker = raw_ticker_opt
+        else:
+            # e.g. python main.py AAPL
+            model_choice = "flint"
+            raw_ticker = raw_first
+    else:
+        model_choice = "flint"
+        raw_ticker = raw_ticker_opt
+
+    if not raw_ticker:
+        print("\nUsage: python main.py [flint] <TICKER> (e.g. python main.py AAPL)")
+        print("       python main.py portfolio")
+        print("Model: Recursive: Flint v1.0 (recursive/flint-v1.0:free via OpenRouter)\n")
+        sys.exit(1)
+
     market = "EU" if args.eu else args.market.upper()
     force_eu = (market == "EU")
     # DE is the CLI's EU preference default. Keep US tickers on their US listing
     # unless the caller explicitly selects the EU market.
     resolve_prefer_exchange = args.prefer_exchange if force_eu else "AUTO"
-    raw_ticker = args.ticker_opt or args.ticker_arg
     if raw_ticker:
         raw_list = [t.strip().upper() for t in raw_ticker.split(",") if t.strip()]
         watchlist = [

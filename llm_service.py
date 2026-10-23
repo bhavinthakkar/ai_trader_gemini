@@ -63,162 +63,30 @@ def _collect_sse_content(response, label, deadline, progress_interval, total_bud
 
 
 MODEL_REGISTRY = {
-    "ultra": {
-        "provider": "nvidia",
-        "model": "nvidia/nemotron-3-ultra-550b-a55b",
-        "label": "Nemotron-3 Ultra 550B (NVIDIA)"
+    "flint": {
+        "provider": "openrouter",
+        "model": "recursive/flint-v1.0:free",
+        "fallbacks": ["openrouter/free"],
+        "label": "Recursive: Flint v1.0 (OpenRouter, free)"
     },
-    "nemotron-ultra": {
-        "provider": "nvidia",
-        "model": "nvidia/nemotron-3-ultra-550b-a55b",
-        "label": "Nemotron-3 Ultra 550B (NVIDIA)"
-    },
-    "550b": {
-        "provider": "nvidia",
-        "model": "nvidia/nemotron-3-ultra-550b-a55b",
-        "label": "Nemotron-3 Ultra 550B (NVIDIA)"
-    },
-    "kimi": {
-        "provider": "nvidia",
-        "model": "moonshotai/kimi-k3",
-        "fallbacks": ["nvidia/nemotron-3-ultra-550b-a55b", "nvidia/nemotron-3-super-120b-a12b"],
-        "label": "Moonshot AI Kimi-K3 (NVIDIA)"
-    },
-    "kimi-k3": {
-        "provider": "nvidia",
-        "model": "moonshotai/kimi-k3",
-        "fallbacks": ["nvidia/nemotron-3-ultra-550b-a55b", "nvidia/nemotron-3-super-120b-a12b"],
-        "label": "Moonshot AI Kimi-K3 (NVIDIA)"
-    },
-    "k3": {
-        "provider": "nvidia",
-        "model": "moonshotai/kimi-k3",
-        "fallbacks": ["nvidia/nemotron-3-ultra-550b-a55b", "nvidia/nemotron-3-super-120b-a12b"],
-        "label": "Moonshot AI Kimi-K3 (NVIDIA)"
-    },
-    "nemotron": {
-        "provider": "nvidia",
-        "model": os.getenv("NEMOTRON_MODEL", "nvidia/nemotron-3-ultra-550b-a55b"),
-        "fallbacks": ["nvidia/nemotron-3-super-120b-a12b", "moonshotai/kimi-k3"],
-        "label": "Nemotron-3 Ultra 550B (NVIDIA)"
-    },
-    "nvidia": {
-        "provider": "nvidia",
-        "model": os.getenv("NEMOTRON_MODEL", "nvidia/nemotron-3-ultra-550b-a55b"),
-        "fallbacks": ["nvidia/nemotron-3-super-120b-a12b", "moonshotai/kimi-k3"],
-        "label": "Nemotron-3 Ultra 550B (NVIDIA)"
-    },
-    "super": {
-        "provider": "nvidia",
-        "model": "nvidia/nemotron-3-super-120b-a12b",
-        "fallbacks": ["nvidia/nemotron-3-ultra-550b-a55b", "moonshotai/kimi-k3"],
-        "label": "Nemotron-3 Super 120B (NVIDIA)"
-    },
-    "nemotron-super": {
-        "provider": "nvidia",
-        "model": "nvidia/nemotron-3-super-120b-a12b",
-        "fallbacks": ["nvidia/nemotron-3-ultra-550b-a55b", "moonshotai/kimi-k3"],
-        "label": "Nemotron-3 Super 120B (NVIDIA)"
-    },
-    "120b": {
-        "provider": "nvidia",
-        "model": "nvidia/nemotron-3-super-120b-a12b",
-        "fallbacks": ["nvidia/nemotron-3-ultra-550b-a55b", "moonshotai/kimi-k3"],
-        "label": "Nemotron-3 Super 120B (NVIDIA)"
-    },
-    "gemini": {
-        "provider": "gemini",
-        "primary": "gemini-3.1-pro-preview",
-        "fallbacks": ["gemini-3.5-flash", "gemini-2.5-flash"],
-        "label": "Gemini 3.1 Pro"
-    },
-    "qwen": {
-        "provider": "llamacpp",
-        "model": os.getenv("LLAMACPP_MODEL", "qwen2.5"),
-        "label": "Qwen 2.5 14B (llama.cpp)"
-    },
-    "qwen-llamacpp": {
-        "provider": "llamacpp",
-        "model": os.getenv("LLAMACPP_MODEL", "qwen2.5"),
-        "label": "Qwen 2.5 14B (llama.cpp)"
-    },
-    "llamacpp": {
-        "provider": "llamacpp",
-        "model": os.getenv("LLAMACPP_MODEL", "qwen2.5"),
-        "label": "Qwen 2.5 14B (llama.cpp)"
+    "recursive/flint-v1.0:free": {
+        "provider": "openrouter",
+        "model": "recursive/flint-v1.0:free",
+        "fallbacks": ["openrouter/free"],
+        "label": "Recursive: Flint v1.0 (OpenRouter, free)"
     },
     "openrouter": {
         "provider": "openrouter",
-        "model": "openrouter/free",
-        "fallbacks": ["nvidia/nemotron-3-super-120b-a12b:free", "minimax/minimax-m3:free"],
-        "label": "OpenRouter Free Models Router (openrouter/free)"
+        "model": "recursive/flint-v1.0:free",
+        "fallbacks": ["openrouter/free"],
+        "label": "Recursive: Flint v1.0 (OpenRouter, free)"
     },
     "free": {
-        "provider": "nvidia",
-        "model": "nvidia/nemotron-3-ultra-550b-a55b",
-        "fallbacks": ["nvidia/nemotron-3-super-120b-a12b"],
-        "label": "Nemotron-3 Ultra 550B (NVIDIA) -> Super 120B fallback on read timeout"
-    },
-    "openrouter/free": {
         "provider": "openrouter",
-        "model": "openrouter/free",
-        "fallbacks": ["nvidia/nemotron-3-super-120b-a12b:free", "minimax/minimax-m3:free"],
-        "label": "OpenRouter Free Models Router (openrouter/free)"
+        "model": "recursive/flint-v1.0:free",
+        "fallbacks": ["openrouter/free"],
+        "label": "Recursive: Flint v1.0 (OpenRouter, free)"
     },
-    "minimax": {
-        "provider": "openrouter",
-        "model": "openrouter/free",
-        "fallbacks": ["minimax/minimax-m3:free", "nvidia/nemotron-3-super-120b-a12b:free"],
-        "label": "OpenRouter Free Models Router (openrouter/free)"
-    },
-    "minimax-m3": {
-        "provider": "openrouter",
-        "model": "openrouter/free",
-        "fallbacks": ["minimax/minimax-m3:free", "nvidia/nemotron-3-super-120b-a12b:free"],
-        "label": "OpenRouter Free Models Router (openrouter/free)"
-    },
-    "m3": {
-        "provider": "openrouter",
-        "model": "openrouter/free",
-        "fallbacks": ["minimax/minimax-m3:free", "nvidia/nemotron-3-super-120b-a12b:free"],
-        "label": "OpenRouter Free Models Router (openrouter/free)"
-    },
-    "ling": {
-        "provider": "openrouter",
-        "model": "inclusionai/ling-3.1-flash",
-        "fallbacks": ["openrouter/free", "nvidia/nemotron-3-super-120b-a12b:free"],
-        "label": "inclusionAI: Ling 3.1 Flash (OpenRouter, free, 262k context)"
-    },
-    "ling-3.1": {
-        "provider": "openrouter",
-        "model": "inclusionai/ling-3.1-flash",
-        "fallbacks": ["openrouter/free", "nvidia/nemotron-3-super-120b-a12b:free"],
-        "label": "inclusionAI: Ling 3.1 Flash (OpenRouter, free, 262k context)"
-    },
-    "ling-flash": {
-        "provider": "openrouter",
-        "model": "inclusionai/ling-3.1-flash",
-        "fallbacks": ["openrouter/free", "nvidia/nemotron-3-super-120b-a12b:free"],
-        "label": "inclusionAI: Ling 3.1 Flash (OpenRouter, free, 262k context)"
-    },
-    "ling-3.1-flash": {
-        "provider": "openrouter",
-        "model": "inclusionai/ling-3.1-flash",
-        "fallbacks": ["openrouter/free", "nvidia/nemotron-3-super-120b-a12b:free"],
-        "label": "inclusionAI: Ling 3.1 Flash (OpenRouter, free, 262k context)"
-    },
-    "inclusionai": {
-        "provider": "openrouter",
-        "model": "inclusionai/ling-3.1-flash",
-        "fallbacks": ["openrouter/free", "nvidia/nemotron-3-super-120b-a12b:free"],
-        "label": "inclusionAI: Ling 3.1 Flash (OpenRouter, free, 262k context)"
-    },
-    "inclusionai/ling-3.1-flash": {
-        "provider": "openrouter",
-        "model": "inclusionai/ling-3.1-flash",
-        "fallbacks": ["openrouter/free", "nvidia/nemotron-3-super-120b-a12b:free"],
-        "label": "inclusionAI: Ling 3.1 Flash (OpenRouter, free, 262k context)"
-    }
 }
 
 
@@ -312,320 +180,135 @@ def extract_json(text: str):
 
 
 def normalize_model_key(model_choice: str) -> str:
+    if not model_choice:
+        return "flint"
     key = str(model_choice).strip().lower()
-    if key in ["openrouter/free", "or", "minimax", "minimax-m3", "minimax_m3", "m3"]:
-        key = "openrouter"
-    if key in ["550b", "nemotron-ultra", "ultra"]:
-        key = "ultra"
-    if key in ["120b", "nemotron-super", "super"]:
-        key = "super"
-    if key in ["kimi", "kimi-k3", "k3", "moonshot"]:
-        key = "kimi"
-    if key in ["qwen-llamacpp", "llamacpp", "qwen2.5", "qwen2.5-14b"]:
-        key = "qwen"
-    if key in ["ling", "ling-3.1", "ling-flash", "ling-3.1-flash", "inclusionai/ling-3.1-flash", "inclusionai", "inclusion"]:
-        key = "ling"
-    if key in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
-        print("[llm_service] Notice: Space Bunny Alpha ('bunny') is no longer available on OpenRouter; redirecting to 'ling' (inclusionAI: Ling 3.1 Flash).")
-        key = "ling"
-    return key
+    if key in ["flint", "flint-v1.0", "recursive/flint-v1.0:free"]:
+        return "flint"
+    if key in ["openrouter", "openrouter/free", "or", "free"]:
+        return "flint"
+    # Gracefully redirect any other model request to flint
+    return "flint"
 
 
 def get_model_label(model_choice: str) -> str:
     key = normalize_model_key(model_choice)
     if key in MODEL_REGISTRY:
         return MODEL_REGISTRY[key]["label"]
-    return model_choice
+    return "Recursive: Flint v1.0 (OpenRouter, free)"
 
 
 def uses_compact_prompt_profile(model_choice: str) -> bool:
-    key = normalize_model_key(model_choice)
-    config = MODEL_REGISTRY.get(key)
-    return bool(config and config.get("provider") == "llamacpp")
+    if not model_choice:
+        return False
+    return str(model_choice).strip().lower() in ["qwen", "llamacpp", "qwen-llamacpp"]
 
 
 def query_llm(
     system_instruction: str,
     user_prompt: str,
-    model_choice: str,
+    model_choice: str = "flint",
     temperature: float = None,
     reasoning_budget: int = None,
     reasoning_effort: str = None
 ) -> str:
     """
-    Executes an LLM chat query based on the model short name.
-    Supported model short names:
-      - 'ling' / 'ling-3.1' / 'ling-flash': inclusionAI: Ling 3.1 Flash via OpenRouter (free, 262k context)
-      - 'nemotron' / 'ultra' / '550b': Cloud Nemotron-3 Ultra 550B (NVIDIA API)
-      - 'kimi' / 'kimi-k3' / 'k3': Moonshot AI Kimi-K3 (NVIDIA API)
-      - 'super' / '120b': Cloud Nemotron-3 Super 120B (NVIDIA API)
-      - 'gemini': Cloud Gemini 3.1 Pro
-      - 'openrouter': OpenRouter Free Models Router (openrouter/free)
-      - 'free': Nemotron-3 Ultra 550B first, falling back to Super 120B on stall
-      - 'qwen' / 'llamacpp': Local Qwen model through the OpenAI-compatible llama.cpp server
+    Executes an LLM chat query using Recursive: Flint v1.0 via OpenRouter.
     """
-    if not model_choice or not str(model_choice).strip():
-        raise ValueError("Model choice argument is required. Valid choices: 'ling', 'free', 'nemotron', 'ultra', 'kimi', 'gemini', 'openrouter', 'qwen', 'llamacpp'")
+    key = normalize_model_key(model_choice or "flint")
+    config = MODEL_REGISTRY.get(key, MODEL_REGISTRY["flint"])
+    provider = config.get("provider", "openrouter")
 
-    key = normalize_model_key(model_choice)
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        raise ValueError("OPENROUTER_API_KEY environment variable is not set in .env")
 
-    if key not in MODEL_REGISTRY:
-        raise ValueError(f"Invalid model choice '{model_choice}'. Choose one of: {list(MODEL_REGISTRY.keys())}")
+    eff_temp = float(temperature) if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "0.2"))
+    eff_effort = (str(reasoning_effort) if reasoning_effort is not None
+                  else config.get("default_reasoning_effort"))
 
-    config = MODEL_REGISTRY[key]
-    provider = config["provider"]
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/bhavinthakkar/ai_trader_gemini",
+        "X-Title": "AI Trader Gemini"
+    }
 
-    if provider == "nvidia":
-        api_key = os.getenv("NVIDIA_API_KEY")
-        if not api_key:
-            raise ValueError("NVIDIA_API_KEY environment variable is not set in .env")
+    candidates = [config["model"]] + config.get("fallbacks", [])
+    last_error = None
+    chain_deadline = time.monotonic() + OPENROUTER_TOTAL_TIMEOUT
 
-        url = "https://integrate.api.nvidia.com/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
+    for candidate_model in candidates:
+        if time.monotonic() > chain_deadline:
+            print(f"[llm_service] OpenRouter total budget of {OPENROUTER_TOTAL_TIMEOUT}s exhausted; "
+                  f"not attempting '{candidate_model}'.")
+            break
+
+        payload = {
+            "model": candidate_model,
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": eff_temp,
+            "response_format": {"type": "json_object"},
+            "stream": True
         }
-        candidates = [config.get("model")] + config.get("fallbacks", [])
-        eff_temp = float(temperature) if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "0.6"))
-        eff_budget = int(reasoning_budget) if reasoning_budget is not None else int(os.getenv("REASONING_BUDGET", "16000"))
-        eff_effort = str(reasoning_effort) if reasoning_effort is not None else os.getenv("REASONING_EFFORT", "high")
-
-        last_error = None
-        chain_deadline = time.monotonic() + NVIDIA_TOTAL_TIMEOUT
-
-        for model_idx, model_name in enumerate(candidates):
-            if not model_name:
-                continue
-            if time.monotonic() > chain_deadline:
-                print(f"[llm_service] Total budget of {NVIDIA_TOTAL_TIMEOUT}s exhausted; "
-                      f"not attempting '{model_name}'.")
-                break
-
-            payload = {
-                "model": model_name,
-                "messages": [
-                    {"role": "system", "content": system_instruction},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "temperature": eff_temp,
-                "top_p": 0.95,
-                "max_tokens": eff_budget,
-                "stream": True
-            }
-
-            if "kimi" in model_name.lower():
-                payload["reasoning_effort"] = eff_effort if eff_effort in ["low", "medium", "high", "max"] else "max"
-            elif "ultra" not in model_name.lower():
-                payload["reasoning_effort"] = eff_effort
-                payload["reasoning_budget"] = eff_budget
-
-            for attempt in range(2):
-                try:
-                    response = requests.post(
-                        url, headers=headers, json=payload,
-                        timeout=(NVIDIA_CONNECT_TIMEOUT, NVIDIA_READ_TIMEOUT),
-                        stream=True
-                    )
-                    if response.status_code == 200:
-                        return clean_think_tags(_collect_sse_content(
-                            response, model_name, chain_deadline,
-                            NVIDIA_PROGRESS_INTERVAL, NVIDIA_TOTAL_TIMEOUT))
-                    elif response.status_code == 400 and "thinking_token_budget" in response.text:
-                        payload.pop("reasoning_effort", None)
-                        payload.pop("reasoning_budget", None)
-                        continue
-                    elif response.status_code == 429:
-                        if attempt == 0:
-                            print(f"[llm_service] NVIDIA NIM model '{model_name}' rate limited (429). Retrying in 2s...")
-                            time.sleep(2)
-                            continue
-                        elif model_idx < len(candidates) - 1:
-                            next_model = candidates[model_idx + 1]
-                            print(f"[llm_service] NVIDIA NIM model '{model_name}' rate limited (429). Switching to fallback model '{next_model}'...")
-                            break
-                        else:
-                            last_error = RuntimeError(f"NVIDIA NIM model '{model_name}' rate limited (429): {response.text}")
-                    elif response.status_code in [502, 503, 504]:
-                        print(f"[llm_service] NVIDIA NIM model '{model_name}' returned {response.status_code}. Retrying...")
-                        time.sleep(3)
-                        continue
-                    else:
-                        raise RuntimeError(f"NVIDIA API call failed ({response.status_code}): {response.text}")
-                except TimeBudgetExceeded as e:
-                    last_error = e
-                    if model_idx < len(candidates) - 1:
-                        next_model = candidates[model_idx + 1]
-                        print(f"[llm_service] {model_name} hit the {NVIDIA_TOTAL_TIMEOUT}s total budget. "
-                              f"Switching to fallback model '{next_model}'...")
-                    else:
-                        print(f"[llm_service] {model_name} hit the {NVIDIA_TOTAL_TIMEOUT}s total budget. "
-                              f"No fallback model left.")
-                    break
-                except requests.exceptions.ReadTimeout as e:
-                    # A read timeout means the model is still thinking past the deadline, not that
-                    # the network blipped, so retrying it only burns another full timeout.
-                    last_error = e
-                    if model_idx < len(candidates) - 1:
-                        next_model = candidates[model_idx + 1]
-                        print(f"[llm_service] NVIDIA NIM model '{model_name}' read timeout after "
-                              f"{NVIDIA_READ_TIMEOUT}s. Switching to fallback model '{next_model}'...")
-                    else:
-                        print(f"[llm_service] NVIDIA NIM model '{model_name}' read timeout after "
-                              f"{NVIDIA_READ_TIMEOUT}s. No fallback model left.")
-                    break
-                except requests.exceptions.RequestException as e:
-                    last_error = e
-                    print(f"[llm_service] NVIDIA connection error for '{model_name}': {e}. Retrying...")
-                    time.sleep(3)
-                    continue
-
-        if last_error:
-            raise last_error
-        raise RuntimeError("All NVIDIA NIM candidate models failed or were rate-limited.")
-
-    elif provider == "llamacpp":
-        from llamacpp_provider import query_llamacpp
-
-        return clean_think_tags(
-            query_llamacpp(
-                system_instruction=system_instruction,
-                user_prompt=user_prompt,
-                model_override=config["model"],
-                temperature=temperature,
-            )
-        )
-
-    elif provider == "gemini":
-        try:
-            from google import genai
-            from google.genai import types
-        except ImportError:
-            raise ImportError("The 'google-genai' python package is required for Gemini model execution. Run: pip install google-genai")
-
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY environment variable is not set in .env")
-
-        eff_temp = float(temperature) if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "0.2"))
-
-        client = genai.Client(api_key=api_key)
-        candidate_models = [config["primary"]] + config.get("fallbacks", [])
-
-        last_error = None
-        for m in candidate_models:
+        if eff_effort:
+            payload["reasoning_effort"] = eff_effort
+        for attempt in range(2):
             try:
-                response = client.models.generate_content(
-                    model=m,
-                    contents=user_prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        temperature=eff_temp,
-                        response_mime_type="application/json"
-                    )
+                response = requests.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers=headers,
+                    json=payload,
+                    timeout=(OPENROUTER_CONNECT_TIMEOUT, OPENROUTER_READ_TIMEOUT),
+                    stream=True
                 )
-                return response.text
-            except Exception as e:
-                last_error = e
-                err_str = str(e)
-                if any(k in err_str for k in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "404", "NOT_FOUND", "500"]):
-                    print(f"[llm_service] Issue with {m} ({e}). Trying fallback model...")
-                    continue
-                raise e
-
-        if last_error:
-            raise last_error
-
-    elif provider == "openrouter":
-        api_key = os.getenv("OPENROUTER_API_KEY")
-        if not api_key:
-            raise ValueError("OPENROUTER_API_KEY environment variable is not set in .env")
-
-        eff_temp = float(temperature) if temperature is not None else float(os.getenv("LLM_TEMPERATURE", "0.2"))
-        eff_effort = (str(reasoning_effort) if reasoning_effort is not None
-                      else config.get("default_reasoning_effort"))
-
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/bhavinthakkar/ai_trader_gemini",
-            "X-Title": "AI Trader Gemini"
-        }
-
-        candidates = [config["model"]] + config.get("fallbacks", [])
-        last_error = None
-        chain_deadline = time.monotonic() + OPENROUTER_TOTAL_TIMEOUT
-
-        for candidate_model in candidates:
-            if time.monotonic() > chain_deadline:
-                print(f"[llm_service] OpenRouter total budget of {OPENROUTER_TOTAL_TIMEOUT}s exhausted; "
-                      f"not attempting '{candidate_model}'.")
-                break
-
-            payload = {
-                "model": candidate_model,
-                "messages": [
-                    {"role": "system", "content": system_instruction},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "temperature": eff_temp,
-                "response_format": {"type": "json_object"},
-                "stream": True
-            }
-            if eff_effort:
-                payload["reasoning_effort"] = eff_effort
-            for attempt in range(2):
-                try:
-                    response = requests.post(
-                        "https://openrouter.ai/api/v1/chat/completions",
-                        headers=headers,
-                        json=payload,
-                        timeout=(OPENROUTER_CONNECT_TIMEOUT, OPENROUTER_READ_TIMEOUT),
-                        stream=True
-                    )
-                    if response.status_code == 200:
-                        cleaned = clean_think_tags(_collect_sse_content(
-                            response, candidate_model, chain_deadline,
-                            OPENROUTER_PROGRESS_INTERVAL, OPENROUTER_TOTAL_TIMEOUT))
-                        try:
-                            _ = extract_json(cleaned)
-                            return cleaned
-                        except Exception as parse_err:
-                            print(f"[llm_service] OpenRouter model '{candidate_model}' returned "
-                                  f"non-JSON/invalid output ({parse_err}). Trying fallback...")
-                            last_error = parse_err
-                            break
-                    elif response.status_code == 429:
-                        if attempt == 0:
-                            print(f"[llm_service] OpenRouter model '{candidate_model}' rate limited (429). Retrying in 2s...")
-                            time.sleep(2)
-                            continue
-                        else:
-                            print(f"[llm_service] OpenRouter model {candidate_model} returned 429: {response.text[:200]}. Trying fallback...")
-                            last_error = RuntimeError(f"OpenRouter call failed (429): {response.text}")
-                            break
-                    elif response.status_code in [502, 503, 504]:
-                        if attempt == 0:
-                            print(f"[llm_service] OpenRouter model '{candidate_model}' returned {response.status_code}. Retrying in 2s...")
-                            time.sleep(2)
-                            continue
-                        else:
-                            print(f"[llm_service] OpenRouter model {candidate_model} returned {response.status_code}. Trying fallback...")
-                            last_error = RuntimeError(f"OpenRouter call failed ({response.status_code}): {response.text}")
-                            break
+                if response.status_code == 200:
+                    cleaned = clean_think_tags(_collect_sse_content(
+                        response, candidate_model, chain_deadline,
+                        OPENROUTER_PROGRESS_INTERVAL, OPENROUTER_TOTAL_TIMEOUT))
+                    try:
+                        _ = extract_json(cleaned)
+                        return cleaned
+                    except Exception as parse_err:
+                        print(f"[llm_service] OpenRouter model '{candidate_model}' returned "
+                              f"non-JSON/invalid output ({parse_err}). Trying fallback...")
+                        last_error = parse_err
+                        break
+                elif response.status_code == 429:
+                    if attempt == 0:
+                        print(f"[llm_service] OpenRouter model '{candidate_model}' rate limited (429). Retrying in 2s...")
+                        time.sleep(2)
+                        continue
+                    else:
+                        print(f"[llm_service] OpenRouter model {candidate_model} returned 429: {response.text[:200]}. Trying fallback...")
+                        last_error = RuntimeError(f"OpenRouter call failed (429): {response.text}")
+                        break
+                elif response.status_code in [502, 503, 504]:
+                    if attempt == 0:
+                        print(f"[llm_service] OpenRouter model '{candidate_model}' returned {response.status_code}. Retrying in 2s...")
+                        time.sleep(2)
+                        continue
                     else:
                         print(f"[llm_service] OpenRouter model {candidate_model} returned {response.status_code}. Trying fallback...")
-                        last_error = RuntimeError(f"OpenRouter API call failed ({response.status_code}): {response.text}")
+                        last_error = RuntimeError(f"OpenRouter call failed ({response.status_code}): {response.text}")
                         break
-                except TimeBudgetExceeded as e:
-                    last_error = e
-                    print(f"[llm_service] OpenRouter model {candidate_model} hit the "
-                          f"{OPENROUTER_TOTAL_TIMEOUT}s total budget. Trying fallback...")
+                else:
+                    print(f"[llm_service] OpenRouter model {candidate_model} returned {response.status_code}. Trying fallback...")
+                    last_error = RuntimeError(f"OpenRouter API call failed ({response.status_code}): {response.text}")
                     break
-                except requests.exceptions.RequestException as e:
-                    last_error = e
-                    print(f"[llm_service] OpenRouter connection error with {candidate_model}: {e}. Trying fallback...")
-                    break
+            except TimeBudgetExceeded as e:
+                last_error = e
+                print(f"[llm_service] OpenRouter model {candidate_model} hit the "
+                      f"{OPENROUTER_TOTAL_TIMEOUT}s total budget. Trying fallback...")
+                break
+            except requests.exceptions.RequestException as e:
+                last_error = e
+                print(f"[llm_service] OpenRouter connection error with {candidate_model}: {e}. Trying fallback...")
+                break
 
-        if last_error:
-            raise last_error
-        raise RuntimeError("OpenRouter query failed across all candidate models.")
+    if last_error:
+        raise last_error
+    raise RuntimeError("OpenRouter query failed across all candidate models.")

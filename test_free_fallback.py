@@ -11,8 +11,8 @@ import requests
 import llm_service
 from llm_service import MODEL_REGISTRY, get_model_label, normalize_model_key, query_llm
 
-ULTRA = "nvidia/nemotron-3-ultra-550b-a55b"
-SUPER = "nvidia/nemotron-3-super-120b-a12b"
+FLINT = "recursive/flint-v1.0:free"
+FALLBACK = "openrouter/free"
 
 
 def _sse(obj):
@@ -32,39 +32,38 @@ def stream_response(pieces=(), reasoning=(), status=200, text=""):
     return response
 
 
-def ok_response(content="hello"):
+def ok_response(content='{"decision": "HOLD"}'):
     return stream_response([content])
 
 
 class FreeRoutingTests(unittest.TestCase):
-    def test_free_is_not_aliased_to_openrouter(self):
-        self.assertEqual(normalize_model_key("free"), "free")
+    def test_free_is_aliased_to_flint(self):
+        self.assertEqual(normalize_model_key("free"), "flint")
 
-    def test_free_targets_ultra_then_super(self):
+    def test_free_targets_flint_then_fallback(self):
         config = MODEL_REGISTRY["free"]
-        self.assertEqual(config["provider"], "nvidia")
-        self.assertEqual(config["model"], ULTRA)
-        self.assertEqual(config["fallbacks"], [SUPER])
+        self.assertEqual(config["provider"], "openrouter")
+        self.assertEqual(config["model"], FLINT)
+        self.assertEqual(config["fallbacks"], [FALLBACK])
 
-    def test_free_label_advertises_fallback(self):
-        self.assertIn("Super", get_model_label("free"))
+    def test_free_label_advertises_flint(self):
+        self.assertIn("Flint", get_model_label("free"))
 
-    def test_openrouter_aliases_unchanged(self):
+    def test_openrouter_aliases_redirect_to_flint(self):
         for alias in ("openrouter", "openrouter/free", "minimax", "minimax-m3", "m3", "or"):
-            self.assertEqual(normalize_model_key(alias), "openrouter")
+            self.assertEqual(normalize_model_key(alias), "flint")
             self.assertEqual(MODEL_REGISTRY[normalize_model_key(alias)]["provider"], "openrouter")
 
-    def test_other_nvidia_aliases_unchanged(self):
-        self.assertEqual(normalize_model_key("ultra"), "ultra")
-        self.assertEqual(normalize_model_key("kimi"), "kimi")
-        self.assertEqual(MODEL_REGISTRY["ultra"]["provider"], "nvidia")
-        self.assertIsNone(MODEL_REGISTRY["ultra"].get("fallbacks"))
+    def test_other_legacy_aliases_redirect_to_flint(self):
+        for alias in ("ultra", "kimi", "ling", "nemotron", "gemini", "qwen"):
+            self.assertEqual(normalize_model_key(alias), "flint")
+            self.assertEqual(MODEL_REGISTRY[normalize_model_key(alias)]["provider"], "openrouter")
 
     def test_free_case_insensitive(self):
-        self.assertEqual(normalize_model_key("FREE"), "free")
+        self.assertEqual(normalize_model_key("FREE"), "flint")
 
 
-@patch.dict(os.environ, {"NVIDIA_API_KEY": "test-key"}, clear=False)
+@patch.dict(os.environ, {"OPENROUTER_API_KEY": "test-key"}, clear=False)
 class ReadTimeoutFallbackTests(unittest.TestCase):
     def call(self, responder, model_choice="free"):
         """Run one query_llm with requests.post and sleep patched, so nothing leaves the process."""
@@ -73,18 +72,18 @@ class ReadTimeoutFallbackTests(unittest.TestCase):
         ):
             return query_llm("sys", "user", model_choice=model_choice), post
 
-    def test_read_timeout_falls_back_to_super(self):
+    def test_read_timeout_falls_back_to_next(self):
         calls = []
 
         def responder(url, headers=None, json=None, timeout=None, stream=None):
             calls.append(json["model"])
-            if json["model"] == ULTRA:
+            if json["model"] == FLINT:
                 raise requests.exceptions.ReadTimeout("read timed out")
-            return ok_response("from super")
+            return ok_response('{"decision": "from fallback"}')
 
         out, post = self.call(responder)
-        self.assertEqual(out, "from super")
-        self.assertEqual(calls, [ULTRA, SUPER])
+        self.assertEqual(out, '{"decision": "from fallback"}')
+        self.assertEqual(calls, [FLINT, FALLBACK])
         self.assertEqual(post.call_count, 2)
 
     def test_read_timeout_does_not_retry_same_model(self):
@@ -96,31 +95,31 @@ class ReadTimeoutFallbackTests(unittest.TestCase):
 
         with self.assertRaises(requests.exceptions.ReadTimeout):
             self.call(responder)
-        self.assertEqual(calls, [ULTRA, SUPER])
+        self.assertEqual(calls, [FLINT, FALLBACK])
 
-    def test_ultra_success_does_not_touch_super(self):
+    def test_flint_success_does_not_touch_fallback(self):
         calls = []
 
         def responder(url, headers=None, json=None, timeout=None, stream=None):
             calls.append(json["model"])
-            return ok_response("from ultra")
+            return ok_response('{"decision": "from flint"}')
 
         out, _ = self.call(responder)
-        self.assertEqual(out, "from ultra")
-        self.assertEqual(calls, [ULTRA])
+        self.assertEqual(out, '{"decision": "from flint"}')
+        self.assertEqual(calls, [FLINT])
 
-    def test_generic_connection_error_still_retries(self):
+    def test_generic_connection_error_advances_to_fallback(self):
         calls = []
 
         def responder(url, headers=None, json=None, timeout=None, stream=None):
             calls.append(json["model"])
-            if calls.count(json["model"]) == 1:
+            if json["model"] == FLINT:
                 raise requests.exceptions.ConnectionError("reset")
-            return ok_response("recovered")
+            return ok_response('{"decision": "recovered"}')
 
         out, _ = self.call(responder)
-        self.assertEqual(out, "recovered")
-        self.assertEqual(calls, [ULTRA, ULTRA])
+        self.assertEqual(out, '{"decision": "recovered"}')
+        self.assertEqual(calls, [FLINT, FALLBACK])
 
     def test_rate_limit_still_advances_to_fallback(self):
         calls = []
@@ -133,13 +132,13 @@ class ReadTimeoutFallbackTests(unittest.TestCase):
 
         def responder(url, headers=None, json=None, timeout=None, stream=None):
             calls.append(json["model"])
-            if json["model"] == ULTRA:
+            if json["model"] == FLINT:
                 return limited()
-            return ok_response("from super")
+            return ok_response('{"decision": "from fallback"}')
 
         out, _ = self.call(responder)
-        self.assertEqual(out, "from super")
-        self.assertEqual(calls, [ULTRA, ULTRA, SUPER])
+        self.assertEqual(out, '{"decision": "from fallback"}')
+        self.assertEqual(calls, [FLINT, FLINT, FALLBACK])
 
     def test_timeout_value_uses_constants(self):
         seen = []
@@ -151,7 +150,7 @@ class ReadTimeoutFallbackTests(unittest.TestCase):
         self.call(responder)
         self.assertEqual(
             seen,
-            [(llm_service.NVIDIA_CONNECT_TIMEOUT, llm_service.NVIDIA_READ_TIMEOUT)],
+            [(llm_service.OPENROUTER_CONNECT_TIMEOUT, llm_service.OPENROUTER_READ_TIMEOUT)],
         )
 
     def test_streaming_is_requested(self):
@@ -160,7 +159,7 @@ class ReadTimeoutFallbackTests(unittest.TestCase):
         def responder(url, headers=None, json=None, timeout=None, stream=None):
             seen["stream_arg"] = stream
             seen["payload_stream"] = json.get("stream")
-            return ok_response("ok")
+            return ok_response()
 
         self.call(responder)
         self.assertIs(seen["stream_arg"], True)
@@ -168,10 +167,10 @@ class ReadTimeoutFallbackTests(unittest.TestCase):
 
     def test_reasoning_content_is_excluded_from_output(self):
         def responder(url, headers=None, json=None, timeout=None, stream=None):
-            return stream_response(["final answer"], reasoning=["thinking hard", "more thoughts"])
+            return stream_response(['{"decision": "HOLD"}'], reasoning=["thinking hard", "more thoughts"])
 
         out, _ = self.call(responder)
-        self.assertEqual(out, "final answer")
+        self.assertEqual(out, '{"decision": "HOLD"}')
 
     def test_multiple_content_chunks_are_concatenated(self):
         def responder(url, headers=None, json=None, timeout=None, stream=None):
@@ -188,20 +187,21 @@ class ReadTimeoutFallbackTests(unittest.TestCase):
             response.iter_lines.return_value = iter([
                 b": keep-alive comment",
                 b"data: not-json{",
+                _sse({"choices": [{"index": 0, "delta": {"content": '{"decision": "HOLD"}'}, "finish_reason": None}]}),
                 b"data: [DONE]",
             ])
             return response
 
         out, _ = self.call(responder)
-        self.assertEqual(out, "")
+        self.assertEqual(out, '{"decision": "HOLD"}')
 
     def test_mid_stream_read_timeout_falls_back(self):
         calls = []
 
         def responder(url, headers=None, json=None, timeout=None, stream=None):
             calls.append(json["model"])
-            if json["model"] == ULTRA:
-                response = ok_response("partial")
+            if json["model"] == FLINT:
+                response = ok_response()
 
                 def raising_iter(*_args, **_kwargs):
                     yield _sse({"choices": [{"index": 0, "delta": {"content": "partial"}, "finish_reason": None}]})
@@ -209,25 +209,24 @@ class ReadTimeoutFallbackTests(unittest.TestCase):
 
                 response.iter_lines.side_effect = raising_iter
                 return response
-            return ok_response("from super")
+            return ok_response('{"decision": "from fallback"}')
 
         out, _ = self.call(responder)
-        self.assertEqual(out, "from super")
-        self.assertEqual(calls, [ULTRA, SUPER])
+        self.assertEqual(out, '{"decision": "from fallback"}')
+        self.assertEqual(calls, [FLINT, FALLBACK])
 
-    def test_gateway_504_is_not_a_read_timeout(self):
+    def test_gateway_504_retries_and_falls_back(self):
         calls = []
 
         def responder(url, headers=None, json=None, timeout=None, stream=None):
             calls.append(json["model"])
-            if json["model"] == ULTRA:
+            if json["model"] == FLINT:
                 return stream_response(status=504, text="gateway timeout")
-            return ok_response("from super")
+            return ok_response('{"decision": "from fallback"}')
 
         out, _ = self.call(responder)
-        self.assertEqual(out, "from super")
-        self.assertEqual(calls, [ULTRA, ULTRA, SUPER])
-
+        self.assertEqual(out, '{"decision": "from fallback"}')
+        self.assertEqual(calls, [FLINT, FLINT, FALLBACK])
 
     def test_finish_reason_without_done_still_terminates(self):
         """Regression: the stream must not require a trailing [DONE] to stop iterating."""
@@ -238,7 +237,7 @@ class ReadTimeoutFallbackTests(unittest.TestCase):
             emitted = []
 
             def lines():
-                emitted.append(_sse({"choices": [{"index": 0, "delta": {"content": "done"}, "finish_reason": None}]}))
+                emitted.append(_sse({"choices": [{"index": 0, "delta": {"content": '{"decision": "HOLD"}'}, "finish_reason": None}]}))
                 yield emitted[-1]
                 # Server signals completion but never sends [DONE] and holds the connection open.
                 yield _sse({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
@@ -248,33 +247,33 @@ class ReadTimeoutFallbackTests(unittest.TestCase):
             return response
 
         out, _ = self.call(responder)
-        self.assertEqual(out, "done")
+        self.assertEqual(out, '{"decision": "HOLD"}')
 
     def test_total_budget_exceeded_falls_back(self):
         seen = []
 
         def fake_collect(response, model_name, deadline, progress_interval, total_budget):
             seen.append(model_name)
-            if model_name == ULTRA:
+            if model_name == FLINT:
                 raise llm_service.TimeBudgetExceeded("budget")
-            return "from super"
+            return '{"decision": "from fallback"}'
 
         def responder(url, headers=None, json=None, timeout=None, stream=None):
             return ok_response()
 
         with patch.object(llm_service, "_collect_sse_content", fake_collect):
             out, _ = self.call(responder)
-        self.assertEqual(out, "from super")
-        self.assertEqual(seen, [ULTRA, SUPER])
+        self.assertEqual(out, '{"decision": "from fallback"}')
+        self.assertEqual(seen, [FLINT, FALLBACK])
 
     def test_budget_exhaustion_stops_before_next_candidate(self):
         calls = []
 
         def responder(url, headers=None, json=None, timeout=None, stream=None):
             calls.append(json["model"])
-            return ok_response("ok")
+            return ok_response()
 
-        with patch.object(llm_service, "NVIDIA_TOTAL_TIMEOUT", -1):
+        with patch.object(llm_service, "OPENROUTER_TOTAL_TIMEOUT", -1):
             with self.assertRaises(RuntimeError):
                 self.call(responder)
         self.assertEqual(calls, [])
@@ -288,23 +287,23 @@ class ReadTimeoutFallbackTests(unittest.TestCase):
 
         with patch.object(llm_service, "_collect_sse_content", fake_collect):
             with self.assertRaises(llm_service.TimeBudgetExceeded):
-                self.call(responder, model_choice="ultra")
+                self.call(responder, model_choice="flint")
 
     def test_heartbeat_lines_do_not_prevent_budget_check(self):
         response = Mock()
         response.iter_lines.side_effect = lambda: iter([b": ping"] * 1000)
         with self.assertRaises(llm_service.TimeBudgetExceeded):
             llm_service._collect_sse_content(
-                response, ULTRA, time.monotonic() - 1, 0, 600)
+                response, FLINT, time.monotonic() - 1, 0, 600)
 
     def test_progress_is_reported_while_streaming(self):
         def responder(url, headers=None, json=None, timeout=None, stream=None):
-            return stream_response(["a", "b", "c"])
+            return stream_response(['{"decision":', ' "HOLD"', '}'])
 
         buf = io.StringIO()
-        with patch.object(llm_service, "NVIDIA_PROGRESS_INTERVAL", 0), contextlib.redirect_stdout(buf):
+        with patch.object(llm_service, "OPENROUTER_PROGRESS_INTERVAL", 0), contextlib.redirect_stdout(buf):
             out, _ = self.call(responder)
-        self.assertEqual(out, "abc")
+        self.assertEqual(out, '{"decision": "HOLD"}')
         self.assertIn("still generating", buf.getvalue())
 
 

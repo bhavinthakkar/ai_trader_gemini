@@ -10,7 +10,7 @@ from llamacpp_provider import (
     load_config,
     query_llamacpp,
 )
-from llm_service import MODEL_REGISTRY, get_model_label, query_llm
+from llm_service import MODEL_REGISTRY, get_model_label, normalize_model_key, query_llm
 
 
 class FakeHttpClient:
@@ -167,63 +167,15 @@ def load_config_from_values(**overrides):
 
 
 class ModelRegistryTests(unittest.TestCase):
-    def test_registry_has_only_supported_local_provider(self):
-        expected_keys = {
-            "ultra",
-            "nemotron-ultra",
-            "550b",
-            "kimi",
-            "kimi-k3",
-            "k3",
-            "nemotron",
-            "nvidia",
-            "super",
-            "nemotron-super",
-            "120b",
-            "gemini",
-            "qwen",
-            "qwen-llamacpp",
-            "llamacpp",
-            "openrouter",
-            "free",
-            "openrouter/free",
-            "minimax",
-            "minimax-m3",
-            "m3",
-            "ling",
-            "ling-3.1",
-            "ling-flash",
-            "ling-3.1-flash",
-            "inclusionai",
-            "inclusionai/ling-3.1-flash",
-        }
-        self.assertEqual(set(MODEL_REGISTRY), expected_keys)
-        self.assertEqual(
-            {key for key, config in MODEL_REGISTRY.items() if config["provider"] == "llamacpp"},
-            {"qwen", "qwen-llamacpp", "llamacpp"},
-        )
-        self.assertEqual(MODEL_REGISTRY["qwen"]["provider"], "llamacpp")
-        self.assertIn("llama.cpp", get_model_label("qwen"))
+    def test_registry_targets_flint_openrouter(self):
+        for key in MODEL_REGISTRY:
+            self.assertEqual(MODEL_REGISTRY[key]["provider"], "openrouter")
+            self.assertEqual(MODEL_REGISTRY[key]["model"], "recursive/flint-v1.0:free")
+        self.assertIn("flint", MODEL_REGISTRY)
 
-        with self.assertRaises(ValueError):
-            query_llm("system", "user", model_choice="retired-local-model")
-
-    @patch("llamacpp_provider.query_llamacpp", return_value="local result")
-    def test_query_llm_dispatches_qwen_to_llamacpp(self, mock_query):
-        result = query_llm(
-            system_instruction="system",
-            user_prompt="user",
-            model_choice="qwen",
-            temperature=0.1,
-        )
-
-        self.assertEqual(result, "local result")
-        mock_query.assert_called_once_with(
-            system_instruction="system",
-            user_prompt="user",
-            model_override="qwen2.5",
-            temperature=0.1,
-        )
+    def test_query_llm_routes_qwen_to_flint(self):
+        self.assertEqual(normalize_model_key("qwen"), "flint")
+        self.assertIn("flint", get_model_label("qwen").lower())
 
 
 if __name__ == "__main__":
