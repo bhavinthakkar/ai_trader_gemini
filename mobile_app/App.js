@@ -316,6 +316,25 @@ function getStructuredDecisionInfo(item) {
   };
 }
 
+/**
+ * Visual styling and color tokens for the 5-state decision taxonomy.
+ */
+function getDecisionBadgeStyles(decision) {
+  switch (decision) {
+    case 'BUY':
+      return { badgeColor: '#059669', textColor: '#34D399' };
+    case 'DEEP BUY':
+      return { badgeColor: '#0284C7', textColor: '#38BDF8' };
+    case 'BOOK PROFIT':
+      return { badgeColor: '#D97706', textColor: '#FDE68A' };
+    case 'SELL':
+      return { badgeColor: '#DC2626', textColor: '#F87171' };
+    case 'HOLD':
+    default:
+      return { badgeColor: '#4B5563', textColor: '#D1D5DB' };
+  }
+}
+
 export default function App() {
   const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
   const [activeTab, setActiveTab] = useState('signals'); // 'signals' | 'deepdive' | 'shadow' | 'movers' | 'history' | 'settings'
@@ -706,7 +725,7 @@ export default function App() {
                 onChangeText={setSignalSearch}
               />
               <View style={styles.decisionFilterRow}>
-                {['ALL', 'BUY', 'SELL', 'HOLD'].map((dec) => (
+                {['ALL', 'BUY', 'DEEP BUY', 'HOLD', 'BOOK PROFIT', 'SELL'].map((dec) => (
                   <TouchableOpacity
                     key={dec}
                     style={[styles.filterChip, signalDecisionFilter === dec && styles.filterChipActive]}
@@ -745,10 +764,7 @@ export default function App() {
               </View>
             ) : (
               filteredSignals.map((item) => {
-                const isBuy = item.decision === 'BUY';
-                const isSell = item.decision === 'SELL';
-                const badgeColor = isBuy ? '#059669' : isSell ? '#DC2626' : '#4B5563';
-                const textColor = isBuy ? '#34D399' : isSell ? '#F87171' : '#D1D5DB';
+                const { badgeColor, textColor } = getDecisionBadgeStyles(item.decision);
                 const mlInfo = getMLInfo(item);
 
                 return (
@@ -976,16 +992,18 @@ export default function App() {
                     style={[
                       styles.badge,
                       {
-                        backgroundColor:
-                          selectedStock.decision === 'BUY'
-                            ? '#059669'
-                            : selectedStock.decision === 'SELL'
-                            ? '#DC2626'
-                            : '#4B5563',
+                        backgroundColor: getDecisionBadgeStyles(selectedStock.decision).badgeColor,
                       },
                     ]}
                   >
-                    <Text style={styles.badgeText}>{selectedStock.decision}</Text>
+                    <Text
+                      style={[
+                        styles.badgeText,
+                        { color: getDecisionBadgeStyles(selectedStock.decision).textColor },
+                      ]}
+                    >
+                      {selectedStock.decision}
+                    </Text>
                   </View>
                 </View>
 
@@ -1622,10 +1640,7 @@ export default function App() {
               </View>
             ) : (
               shadowDecisions.map((dec, idx) => {
-                const isBuy = dec.decision === 'BUY';
-                const isSell = dec.decision === 'SELL';
-                const badgeColor = isBuy ? '#059669' : isSell ? '#DC2626' : '#4B5563';
-                const textColor = isBuy ? '#34D399' : isSell ? '#F87171' : '#D1D5DB';
+                const { badgeColor, textColor } = getDecisionBadgeStyles(dec.decision);
                 const passedGates = dec.passed_gates || [];
                 const failedGates = dec.failed_gates || [];
                 const reasonCodes = dec.reason_codes || [];
@@ -2113,10 +2128,11 @@ const styles = StyleSheet.create({
   },
   decisionFilterRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 6,
   },
   filterChip: {
-    flex: 1,
+    paddingHorizontal: 10,
     paddingVertical: 6,
     backgroundColor: '#151B26',
     borderRadius: 6,

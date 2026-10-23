@@ -188,9 +188,13 @@ def normalize_master_trader_json(
     hold_score = _to_float(data.get("hold_score"), 0.0)
     sell_score = _to_float(data.get("sell_score"), 0.0)
 
-    # Normalize Decision
+    # Normalize Decision (5-State Taxonomy: BUY, DEEP BUY, HOLD, BOOK PROFIT, SELL)
     raw_dec = str(data.get("decision") or data.get("recommendation") or data.get("signal") or "HOLD").upper()
-    if "BUY" in raw_dec:
+    if "DEEP BUY" in raw_dec or "DIP BUY" in raw_dec or "DEEP_BUY" in raw_dec or "DIP_BUY" in raw_dec:
+        decision = "DEEP BUY"
+    elif "BOOK PROFIT" in raw_dec or "TAKE PROFIT" in raw_dec or "BOOK_PROFIT" in raw_dec or "TAKE_PROFIT" in raw_dec or "PROFIT_TAKING" in raw_dec:
+        decision = "BOOK PROFIT"
+    elif "BUY" in raw_dec:
         decision = "BUY"
     elif "SELL" in raw_dec:
         decision = "SELL"
@@ -547,20 +551,20 @@ def normalize_master_trader_json(
     catalyst_qualified = bool(catalyst_setup.get("qualified"))
     catalyst_direction = catalyst_setup.get("direction")
 
-    # A certificate only unlocks the direction it proves: DIP_BUY never authorises a SELL, nor the reverse.
+    # A certificate only unlocks the direction it proves: DIP_BUY unlocks BUY/DEEP BUY; EXTENSION_SELL unlocks SELL/BOOK PROFIT.
     catalyst_allows = {
-        DIP_BUY: "BUY",
-        EXTENSION_SELL: "SELL",
-    }.get(catalyst_direction)
+        DIP_BUY: ("BUY", "DEEP BUY"),
+        EXTENSION_SELL: ("SELL", "BOOK PROFIT"),
+    }.get(catalyst_direction, ())
     # MACRO_EVENT is never unlocks-able: the certificate is built from ticker-specific news, so a
     # macro-tagged trade is a misclassification of a move this system most wants to refuse.
     catalyst_path = (
         catalyst_qualified
-        and catalyst_allows == decision
+        and decision in catalyst_allows
         and primary_driver == "NEWS_CATALYST"
     )
 
-    if decision in ("BUY", "SELL") and primary_driver in ("NEWS_CATALYST", "MACRO_EVENT"):
+    if decision in ("BUY", "DEEP BUY", "SELL", "BOOK PROFIT") and primary_driver in ("NEWS_CATALYST", "MACRO_EVENT"):
         if catalyst_path:
             _append_risk(
                 f"Catalyst certificate '{catalyst_direction}' unlocked this {decision} despite "
@@ -628,18 +632,16 @@ def normalize_master_trader_json(
                 f"Upcoming ex-dividend date in {days_to_ex_div} day(s); short sellers incur dividend liability and borrow recall risk."
             )
 
-    # Deterministic BUY gates: momentum/valuation anchors cannot override setup geometry or risk.
-    # Hard post-model rule: the model's BUY is advisory and is only certified when the
-    # DETERMINISTIC composite (computed from market data, not echoed by the model) is >= 70,
-    # the market snapshot is valid/fresh, data coverage is adequate, and reward:risk >= 1.5.
-    if decision == "BUY":
+    # Deterministic BUY / DEEP BUY gates: momentum/valuation anchors cannot override setup geometry or risk.
+    if decision in ("BUY", "DEEP BUY"):
         det_composite = decision_composite
         if det_composite is None:
             det_composite = deterministic_scores.get("raw_composite")
         # A certified catalyst dip buys a discount the composite cannot score, because the composite
         # reads the selloff itself as weak trend/alpha. That path carries its own, distinct floor
         # resolved deterministically via the policy precedence hierarchy.
-        buy_composite_floor, rule_name = active_policy.resolve_buy_score_floor(catalyst_path)
+        is_dip_req = (decision == "DEEP BUY") or catalyst_path
+        buy_composite_floor, rule_name = active_policy.resolve_buy_score_floor(is_dip_req)
         try:
             composite_ok = det_composite is not None and float(det_composite) >= buy_composite_floor
         except (TypeError, ValueError):
@@ -705,20 +707,26 @@ def normalize_master_trader_json(
                 "BUY downgraded to HOLD (deterministic BUY eligibility): " + "; ".join(gate_reasons) + "."
             )
         elif days_to_earnings is not None and days_to_earnings <= active_policy.events.earnings_blackout_sessions:
-            decision = "HOLD"
-            gates_applied = True
-            no_trade_reason = "EARNINGS_BLACKOUT"
-            note = (
-                f"BUY downgraded to HOLD: earnings report in {days_to_earnings} day(s) is a "
-                f"binary gap-risk event; do not initiate a fresh position into it."
-            )
-            _append_risk(note)
+            if getattr(active_policy.events, "allow_pre_earnings_trading", False):
+                _append_risk(
+                    f"Pre-earnings event trading mode active ({days_to_earnings} session(s) to earnings report). "
+                    f"50% position sizing haircut applied to mitigate discrete overnight gap risk."
+                )
+            else:
+                decision = "HOLD"
+                gates_applied = True
+                no_trade_reason = "EARNINGS_BLACKOUT"
+                note = (
+                    f"{decision} downgraded to HOLD: earnings report in {days_to_earnings} day(s) is a "
+                    f"binary gap-risk event; do not initiate a fresh position into it."
+                )
+                _append_risk(note)
         elif event_risk_info.get("is_blackout") and event_risk_info.get("reason_code") == "EVENT_RISK":
             decision = "HOLD"
             gates_applied = True
             no_trade_reason = "EVENT_RISK"
             note = (
-                f"BUY downgraded to HOLD: {event_risk_info.get('description')}; "
+                f"{decision} downgraded to HOLD: {event_risk_info.get('description')}; "
                 f"do not initiate a fresh position into a scheduled company event."
             )
             _append_risk(note)
@@ -728,26 +736,23 @@ def normalize_master_trader_json(
             no_trade_reason = "VOLATILITY_REGIME" if vol_regime_info.get("is_extreme") and vol_factor >= active_policy.volatility.min_vol_factor else "INSUFFICIENT_EVIDENCE"
             reasons_str = "; ".join(vol_regime_info.get("reasons", [])) if vol_regime_info.get("reasons") else f"ATR {atr_pct}% of price, vol factor {vol_factor:.2f}"
             note = (
-                f"BUY downgraded to HOLD: extreme volatility ({reasons_str}); "
+                f"{decision} downgraded to HOLD: extreme volatility ({reasons_str}); "
                 f"composite is dampened to {quant_score}/100."
             )
             _append_risk(note)
         elif stop_inside_expected_move:
-            decision = "HOLD"
-            gates_applied = True
-            no_trade_reason = "EXPECTED_MOVE_EXCEEDS_STOP"
-            note = (
-                f"BUY downgraded to HOLD: option-implied expected move (${expected_move:.2f} / {expected_move_pct:.1f}%) "
-                f"exceeds stop distance (${stop_distance:.2f} / {stop_distance_pct:.1f}%); "
-                f"stop is placed inside normal volatility noise, creating high stop-out probability."
+            # Downgraded from hard veto to position sizing risk note & sizing dampener
+            _append_risk(
+                f"Elevated volatility noise: option-implied expected move (${expected_move:.2f} / {expected_move_pct:.1f}%) "
+                f"exceeds stop distance (${stop_distance:.2f} / {stop_distance_pct:.1f}%). "
+                f"Position size scaled down by 30% to account for normal volatility noise."
             )
-            _append_risk(note)
         elif not liquidity_ok:
             decision = "HOLD"
             gates_applied = True
             no_trade_reason = "LOW_LIQUIDITY"
             note = (
-                f"BUY downgraded to HOLD: insufficient liquidity "
+                f"{decision} downgraded to HOLD: insufficient liquidity "
                 f"(RVOL {rvol_20d_val if rvol_20d_val is not None else 'N/A'}x, "
                 f"20d avg dollar volume "
                 f"${avg_dollar_vol_20d_val if avg_dollar_vol_20d_val is not None else 'N/A'}); "
@@ -756,23 +761,32 @@ def normalize_master_trader_json(
             )
             _append_risk(note)
         elif analyst_rr is not None and analyst_rr < 1.0:
-            decision = "HOLD"
-            gates_applied = True
-            no_trade_reason = "INSUFFICIENT_EVIDENCE"
-            note = (
-                f"BUY downgraded to HOLD: Wall Street mean target "
+            # Downgraded from hard veto to confidence penalty & risk note
+            confidence = round(max(0.50, confidence - 0.10), 2)
+            _append_risk(
+                f"Analyst consensus caution: Wall Street mean target "
                 f"${_to_float(m_data.get('analyst_target_price'), 0.0):.2f} is below entry "
-                f"${_to_float(m_data.get('current_price'), 0.0):.2f} (analyst RR {analyst_rr:.2f})."
+                f"${_to_float(m_data.get('current_price'), 0.0):.2f} (analyst RR {analyst_rr:.2f}); "
+                f"confidence dampened by -0.10 to {confidence}."
             )
-            _append_risk(note)
         elif evidence_veto_reasons:
             decision = "HOLD"
             gates_applied = True
             no_trade_reason = "EVIDENCE_VETO"
             note = (
-                f"BUY downgraded to HOLD by deterministic evidence veto: {'; '.join(evidence_veto_reasons)}."
+                f"{decision} downgraded to HOLD by deterministic evidence veto: {'; '.join(evidence_veto_reasons)}."
             )
             _append_risk(note)
+
+    elif decision == "BOOK PROFIT":
+        # First-class profit-taking action (Step 5.4)
+        sell_type = "LONG_EXIT"
+        target_hit = target_v > 0.0 and price_v >= target_v
+        overbought = (m_data.get("rsi14") is not None and float(m_data.get("rsi14")) >= 70.0)
+        _append_risk(
+            f"BOOK PROFIT certified: Locking in gains into extended strength/resistance "
+            f"(Price ${price_v:.2f}, Target ${target_v:.2f}, RSI {m_data.get('rsi14')})."
+        )
 
     elif decision == "SELL":
         det_composite = decision_composite
@@ -949,11 +963,13 @@ def normalize_master_trader_json(
         confidence = round(min(confidence, 0.60), 2)
 
     # Map resolved decision to 5 internal action types (Step 5.4)
-    if decision == "BUY":
+    if decision in ("BUY", "DEEP BUY"):
         if sell_type == "COVER_SHORT":
             internal_action = InternalActionType.COVER_SHORT.value
         else:
             internal_action = InternalActionType.BUY.value
+    elif decision == "BOOK PROFIT":
+        internal_action = InternalActionType.SELL_TO_CLOSE.value
     elif decision == "SELL":
         if sell_type == "LONG_EXIT":
             internal_action = InternalActionType.SELL_TO_CLOSE.value

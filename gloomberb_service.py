@@ -702,8 +702,27 @@ class GloomberbService:
                 options_data["put_call_ratio"] = 2.0
                 options_data["unusual_activity"] = "Dominant put flow with near-zero call volume"
 
-            # Compute mean Implied Volatility
-            iv_values = [c.get("impliedVolatility") for c in calls if c.get("impliedVolatility") is not None]
+            # Compute ATM Implied Volatility (filter out deep OTM penny wing distortion)
+            s_price_iv = None
+            if underlying_price:
+                try:
+                    s_price_iv = float(underlying_price)
+                except (ValueError, TypeError):
+                    pass
+
+            atm_calls = calls
+            if s_price_iv and s_price_iv > 0:
+                filtered = [
+                    c for c in calls
+                    if c.get("strike") and abs(float(c.get("strike")) - s_price_iv) / s_price_iv <= 0.075
+                ]
+                if filtered:
+                    atm_calls = filtered
+
+            iv_values = [
+                float(c.get("impliedVolatility")) for c in atm_calls
+                if c.get("impliedVolatility") is not None and 0.01 <= float(c.get("impliedVolatility")) <= 5.0
+            ]
             mean_iv = None
             if iv_values:
                 mean_iv = sum(iv_values) / len(iv_values)
@@ -793,26 +812,34 @@ class GloomberbService:
                 pc_ratio = round(put_vol / call_vol, 2) if call_vol > 0 else 0.85
                 options_data["put_call_ratio"] = pc_ratio
 
-                mean_iv = None
-                if 'impliedVolatility' in calls and not calls['impliedVolatility'].empty:
-                    mean_iv = float(calls['impliedVolatility'].mean())
-                    iv_pct = round(mean_iv * 100.0, 2)
-                    options_data["implied_volatility"] = f"{iv_pct:.1f}%"
-                    options_data["implied_volatility_pct"] = iv_pct
-                    if iv_pct < 20.0:
-                        options_data["volatility_regime"] = "CALM"
-                    elif iv_pct <= 40.0:
-                        options_data["volatility_regime"] = "NORMAL"
-                    elif iv_pct <= 65.0:
-                        options_data["volatility_regime"] = "ELEVATED"
-                    else:
-                        options_data["volatility_regime"] = "EXTREME"
-
                 if not stock_price and not calls.empty and 'underlyingPrice' in calls.columns:
                     try:
                         stock_price = float(calls['underlyingPrice'].iloc[0])
                     except Exception:
                         pass
+
+                mean_iv = None
+                if 'impliedVolatility' in calls and not calls['impliedVolatility'].empty:
+                    df_calls = calls
+                    if stock_price and stock_price > 0 and 'strike' in calls.columns:
+                        atm_df = calls[(calls['strike'] - stock_price).abs() / stock_price <= 0.075]
+                        if not atm_df.empty:
+                            df_calls = atm_df
+                    valid_iv = df_calls['impliedVolatility'].dropna()
+                    valid_iv = valid_iv[(valid_iv >= 0.01) & (valid_iv <= 5.0)]
+                    if not valid_iv.empty:
+                        mean_iv = float(valid_iv.mean())
+                        iv_pct = round(mean_iv * 100.0, 2)
+                        options_data["implied_volatility"] = f"{iv_pct:.1f}%"
+                        options_data["implied_volatility_pct"] = iv_pct
+                        if iv_pct < 20.0:
+                            options_data["volatility_regime"] = "CALM"
+                        elif iv_pct <= 40.0:
+                            options_data["volatility_regime"] = "NORMAL"
+                        elif iv_pct <= 65.0:
+                            options_data["volatility_regime"] = "ELEVATED"
+                        else:
+                            options_data["volatility_regime"] = "EXTREME"
 
                 if stock_price and stock_price > 0 and not calls.empty and not puts.empty:
                     try:

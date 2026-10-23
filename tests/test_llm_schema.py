@@ -423,6 +423,30 @@ class TestLLMEvidenceSchema(unittest.TestCase):
         self.assertAlmostEqual(norm_pct["buy_score"] + norm_pct["hold_score"] + norm_pct["sell_score"], 1.0, places=3)
         self.assertAlmostEqual(norm_pct["buy_score"], 0.70, places=2)
 
+        # G. Traditional signal with DEEP BUY / DIP BUY normalizes to DEEP BUY
+        trad_deep = dict(trad_payload)
+        trad_deep["decision"] = "DIP BUY"
+        norm_deep, errors_deep = validate_signal_json(
+            trad_deep,
+            required_horizon_sessions=20,
+            require_forecast_20d=True,
+            expected_ticker="MSFT",
+        )
+        self.assertEqual(errors_deep, [])
+        self.assertEqual(norm_deep["decision"], "DEEP BUY")
+
+        # H. Traditional signal with BOOK PROFIT / TAKE PROFIT normalizes to BOOK PROFIT
+        trad_profit = dict(trad_payload)
+        trad_profit["decision"] = "TAKE PROFIT"
+        norm_profit, errors_profit = validate_signal_json(
+            trad_profit,
+            required_horizon_sessions=20,
+            require_forecast_20d=True,
+            expected_ticker="MSFT",
+        )
+        self.assertEqual(errors_profit, [])
+        self.assertEqual(norm_profit["decision"], "BOOK PROFIT")
+
 
 if __name__ == "__main__":
     unittest.main()

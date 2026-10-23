@@ -226,6 +226,8 @@ def calculate_risk_based_position_size(
     valuation_history_score: Optional[float] = None,
     reward_risk_ratio: Optional[float] = None,
     days_to_ex_dividend: Optional[int] = None,
+    days_to_earnings: Optional[int] = None,
+    stop_inside_expected_move: bool = False,
 ) -> PositionSizingResult:
     """
     Calculates deterministic risk-based position size under formal investment mandate caps.
@@ -691,6 +693,23 @@ def calculate_risk_based_position_size(
         scale = 1.0 + (score_val - 50.0) * 0.004
         r = r * max(0.70, min(1.30, scale))
 
+    # Pre-Earnings Event Sizing Haircut (Mode A: Event-Sized Pre-Earnings Trading)
+    effective_policy = policy or get_default_policy()
+    if (
+        days_to_earnings is not None
+        and days_to_earnings <= effective_policy.events.earnings_blackout_sessions
+        and getattr(effective_policy.events, "allow_pre_earnings_trading", False)
+    ):
+        haircut = getattr(effective_policy.events, "earnings_risk_haircut", 0.50)
+        r = r * haircut
+        base_metrics["pre_earnings_event_mode"] = True
+        base_metrics["earnings_risk_haircut"] = haircut
+
+    # Stop Noise Dampener: If stop is within 1-sigma expected move, scale risk budget down
+    if stop_inside_expected_move:
+        r = r * 0.70
+        base_metrics["stop_noise_dampener_applied"] = 0.70
+
     equity_at_risk_dollars = E * r
 
     # 6. Preliminary Risk Size: N_risk = floor( (E * r) / (|P - S| + C + G) )
@@ -755,6 +774,7 @@ def calculate_risk_based_position_size(
             )
 
     calc_metrics: Dict[str, Any] = {
+        **base_metrics,
         "portfolio_equity": E,
         "risk_fraction_r": r,
         "entry_price": entry_price,

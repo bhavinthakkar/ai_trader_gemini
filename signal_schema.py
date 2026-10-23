@@ -13,7 +13,7 @@ Anything else is reported as an error so the caller can issue one corrective
 retry instead of silently coercing critical decision fields.
 """
 
-VALID_DECISIONS = ("BUY", "SELL", "HOLD")
+VALID_DECISIONS = ("BUY", "DEEP BUY", "HOLD", "BOOK PROFIT", "SELL")
 VALID_PRIMARY_DRIVERS = ("QUANT_STRUCTURE", "FUNDAMENTAL", "NEWS_CATALYST", "MACRO_EVENT", "EARNINGS_CATALYST")
 
 NO_TRADE_REASONS = (
@@ -177,7 +177,11 @@ def validate_signal_json(
         errors.append("missing required field 'decision'")
     else:
         dec = clean(raw_dec).upper()
-        if "BUY" in dec:
+        if "DEEP BUY" in dec or "DIP BUY" in dec or "DEEP_BUY" in dec or "DIP_BUY" in dec:
+            dec = "DEEP BUY"
+        elif "BOOK PROFIT" in dec or "TAKE PROFIT" in dec or "BOOK_PROFIT" in dec or "TAKE_PROFIT" in dec or "PROFIT_TAKING" in dec:
+            dec = "BOOK PROFIT"
+        elif "BUY" in dec:
             dec = "BUY"
         elif "SELL" in dec:
             dec = "SELL"

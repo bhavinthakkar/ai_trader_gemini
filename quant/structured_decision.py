@@ -660,7 +660,8 @@ class StructuredDecisionEngine:
         # ---------------------------------------------------------------------
         # STAGE 5: Directional Entry Certification
         # ---------------------------------------------------------------------
-        if cand_dec == "BUY":
+        if cand_dec in ("BUY", "DEEP BUY", "DIP BUY"):
+            effective_catalyst = "DIP_BUY" if cand_dec in ("DEEP BUY", "DIP BUY") else catalyst_path
             # 1. Gate 1: BUY Floor & Value Trap Veto
             if is_value_trap:
                 failed_gates.append(StandardGateName.BUY_FLOOR)
@@ -680,9 +681,9 @@ class StructuredDecisionEngine:
                 )
 
             g1 = BuyFloorGate.evaluate(
-                candidate_decision="BUY",
+                candidate_decision=cand_dec,
                 composite_score=composite_score,
-                catalyst_path=catalyst_path,
+                catalyst_path=effective_catalyst,
                 rsi14=rsi14,
                 drawdown_5d_pct=drawdown_5d_pct,
                 valuation_history_score=valuation_history_score,
@@ -691,7 +692,7 @@ class StructuredDecisionEngine:
             )
             if not g1.passed:
                 failed_gates.append(StandardGateName.BUY_FLOOR)
-                if catalyst_path == "DIP_BUY" and not g1.metrics.get("dip_certified", False):
+                if effective_catalyst == "DIP_BUY" and not g1.metrics.get("dip_certified", False):
                     rc = StandardReasonCode.DIP_CRITERIA_FAILED
                 elif g1.reason_code == "VALUE_TRAP_CONFIRMED":
                     rc = StandardReasonCode.VALUE_TRAP_DETECTED
@@ -799,6 +800,7 @@ class StructuredDecisionEngine:
                     atr=atr,
                     avg_dollar_volume_20d=avg_dollar_volume_20d,
                     composite_score=composite_score,
+                    days_to_earnings=days_to_earnings,
                     mandate=mandate,
                     policy=self.policy,
                 )
@@ -808,10 +810,11 @@ class StructuredDecisionEngine:
             if sizing_metrics:
                 cert_metrics["position_sizing"] = sizing_metrics
 
+            out_dec = "DEEP BUY" if cand_dec in ("DEEP BUY", "DIP BUY") else "BUY"
             return StructuredDecision(
                 run_id=run_id_val,
                 ticker=ticker_val,
-                decision="BUY",
+                decision=out_dec,
                 composite_score=composite_score,
                 model_status=eff_model_status,
                 passed_gates=passed_gates,
@@ -820,6 +823,22 @@ class StructuredDecisionEngine:
                 position_action=PositionAction.OPEN_LONG.value,
                 reason_codes=reason_codes,
                 metrics=cert_metrics,
+            )
+
+        elif cand_dec in ("BOOK PROFIT", "TAKE PROFIT", "BOOK_PROFIT", "TAKE_PROFIT"):
+            # Profit-Taking / Exit Certification (Step 5.4)
+            return StructuredDecision(
+                run_id=run_id_val,
+                ticker=ticker_val,
+                decision="BOOK PROFIT",
+                composite_score=composite_score,
+                model_status=eff_model_status,
+                passed_gates=passed_gates,
+                failed_gates=[],
+                data_quality_status=data_quality_status,
+                position_action=PositionAction.TRIM_LONG.value,
+                reason_codes=[StandardReasonCode.PROFIT_TARGET_REACHED if (target_price and price_val and price_val >= target_price) else StandardReasonCode.POSITION_MAINTAINED],
+                metrics={"profit_taking": True},
             )
 
         elif cand_dec == "SELL":

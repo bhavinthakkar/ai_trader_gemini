@@ -113,10 +113,14 @@ class EventsConfig:
     earnings_blackout_sessions: int = 3
     event_risk_blackout: bool = True
     ex_dividend_short_blackout_days: int = 2
+    allow_pre_earnings_trading: bool = False
+    earnings_risk_haircut: float = 0.50
 
     def validate(self) -> None:
         if self.earnings_blackout_sessions < 0:
             raise ValueError("earnings_blackout_sessions cannot be negative")
+        if not (0.0 < self.earnings_risk_haircut <= 1.0):
+            raise ValueError("earnings_risk_haircut must be in (0.0, 1.0]")
 
 
 @dataclass
@@ -370,7 +374,7 @@ class TradingPolicy:
         Returns:
             (effective_floor, rule_name)
         """
-        is_dip = bool(is_certified_dip_buy) if not isinstance(is_certified_dip_buy, str) else (is_certified_dip_buy.upper() == "DIP_BUY")
+        is_dip = bool(is_certified_dip_buy) if not isinstance(is_certified_dip_buy, str) else (is_certified_dip_buy.upper() in ("DIP_BUY", "DEEP_BUY", "DEEP BUY", "DIP BUY"))
         if is_dip and self.dip_buy.enabled:
             return self.dip_buy.score_minimum, "RULE_DIP_BUY_DISCOUNT_FLOOR"
         return self.scores.buy_minimum, "RULE_STANDARD_BUY_FLOOR"

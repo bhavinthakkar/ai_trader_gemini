@@ -401,6 +401,36 @@ class TestPositionSizingIntegration(unittest.TestCase):
         self.assertEqual(sizing["entry_price"], 100.0)
         self.assertEqual(sizing["stop_loss"], 92.0)
 
+    def test_pre_earnings_haircut_reduces_shares(self):
+        """Verifies that pre-earnings mode applies a 50% haircut to position sizing."""
+        policy = get_default_policy()
+        policy.events.allow_pre_earnings_trading = True
+        policy.events.earnings_risk_haircut = 0.50
+
+        # Normal sizing (earnings 30 days away)
+        res_normal = calculate_risk_based_position_size(
+            entry_price=100.0,
+            stop_loss=90.0,
+            portfolio_equity=100_000.0,
+            risk_fraction=0.01,
+            days_to_earnings=30,
+            policy=policy,
+        )
+
+        # Pre-earnings sizing (earnings 2 days away)
+        res_event = calculate_risk_based_position_size(
+            entry_price=100.0,
+            stop_loss=90.0,
+            portfolio_equity=100_000.0,
+            risk_fraction=0.01,
+            days_to_earnings=2,
+            policy=policy,
+        )
+
+        self.assertTrue(res_event.metrics.get("pre_earnings_event_mode"))
+        self.assertEqual(res_event.metrics.get("earnings_risk_haircut"), 0.50)
+        self.assertAlmostEqual(res_event.shares_allowed, res_normal.shares_allowed // 2, delta=2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -607,11 +607,8 @@ def derive_deterministic_channel_geometry(
 
                 if cand_valid:
                     metadata["candidate_accepted"] = True
-                    stops_to_check = [s for s in [structural_stop, cand_stop] if s is not None and s < entry]
-                    structural_stop = min(stops_to_check) if stops_to_check else cand_stop
-
-                    targets_to_check = [t for t in [structural_target, cand_tgt] if t is not None and t > entry]
-                    structural_target = min(targets_to_check) if targets_to_check else cand_tgt
+                    structural_stop = cand_stop
+                    structural_target = cand_tgt
                 else:
                     metadata["candidate_accepted"] = False
                     metadata["sanitization_notes"].append(
@@ -658,11 +655,8 @@ def derive_deterministic_channel_geometry(
 
                 if cand_valid:
                     metadata["candidate_accepted"] = True
-                    stops_to_check = [s for s in [structural_stop, cand_stop] if s is not None and s > entry]
-                    structural_stop = max(stops_to_check) if stops_to_check else cand_stop
-
-                    targets_to_check = [t for t in [structural_target, cand_tgt] if t is not None and t < entry]
-                    structural_target = max(targets_to_check) if targets_to_check else cand_tgt
+                    structural_stop = cand_stop
+                    structural_target = cand_tgt
                 else:
                     metadata["candidate_accepted"] = False
                     metadata["sanitization_notes"].append(

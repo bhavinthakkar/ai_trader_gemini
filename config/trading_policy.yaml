@@ -87,6 +87,9 @@ trade_quality:
 events:
   # Number of trading sessions preceding scheduled earnings report triggering mandatory HOLD
   earnings_blackout_sessions: 3
+  # Allow pre-earnings directional trading with an event sizing haircut
+  allow_pre_earnings_trading: true
+  earnings_risk_haircut: 0.50
   # Whether scheduled company event risks (investor days, regulatory decisions) force HOLD
   event_risk_blackout: true
   # Number of days preceding ex-dividend date during which new short sales are prohibited

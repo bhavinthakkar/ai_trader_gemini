@@ -558,6 +558,64 @@ class TestComplianceGatesSemantics(unittest.TestCase):
         self.assertEqual(report_pass_dip.final_decision, "BUY")
         self.assertIsNone(report_pass_dip.no_trade_reason)
 
+    def test_pre_earnings_event_mode_with_haircut(self):
+        """When allow_pre_earnings_trading is True, gate passes with event sizing haircut."""
+        self.policy.events.allow_pre_earnings_trading = True
+        self.policy.events.earnings_risk_haircut = 0.50
+
+        res_earn_mode = VolatilityEventLiquidityGate.evaluate(
+            direction="LONG",
+            price=100.0,
+            stop_loss=90.0,
+            atr=2.5,
+            days_to_earnings=2,
+            avg_dollar_volume_20d=50_000_000.0,
+            policy=self.policy,
+        )
+        self.assertTrue(res_earn_mode.passed)
+        self.assertTrue(res_earn_mode.metrics.get("pre_earnings_event_mode"))
+        self.assertEqual(res_earn_mode.metrics.get("earnings_risk_haircut"), 0.50)
+
+    def test_deep_buy_decision_qualification(self):
+        """Candidate DEEP BUY evaluates against 52.0 floor and requires dip criteria."""
+        res_deep = BuyFloorGate.evaluate(
+            candidate_decision="DEEP BUY",
+            composite_score=55.0,
+            rsi14=35.0,
+            drawdown_5d_pct=8.0,
+            valuation_history_score=65.0,
+            policy=self.policy,
+        )
+        self.assertTrue(res_deep.passed)
+        self.assertEqual(res_deep.metrics["required_floor"], 52.0)
+
+    def test_book_profit_decision_authorization(self):
+        """Candidate BOOK PROFIT is authorized when target reached or overbought momentum."""
+        res_profit_target = SellExitSymmetryGate.evaluate(
+            candidate_decision="BOOK PROFIT",
+            is_holding=True,
+            current_price=125.0,
+            target_price=120.0,
+            stop_loss=90.0,
+            composite_score=75.0,
+            policy=self.policy,
+        )
+        self.assertTrue(res_profit_target.passed)
+        self.assertEqual(res_profit_target.reason_code, "PROFIT_TARGET_REACHED")
+
+        res_profit_rsi = SellExitSymmetryGate.evaluate(
+            candidate_decision="BOOK PROFIT",
+            is_holding=True,
+            current_price=115.0,
+            target_price=120.0,
+            stop_loss=90.0,
+            rsi=74.0,
+            composite_score=75.0,
+            policy=self.policy,
+        )
+        self.assertTrue(res_profit_rsi.passed)
+        self.assertEqual(res_profit_rsi.reason_code, "OVERBOUGHT_PROFIT_TAKING")
+
 
 if __name__ == "__main__":
     unittest.main()

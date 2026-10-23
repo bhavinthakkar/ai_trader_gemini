@@ -86,16 +86,17 @@ class BuyFloorGate:
     ) -> GateResult:
         active_policy = policy or get_default_policy()
 
-        if candidate_decision.upper() != "BUY":
+        cand = candidate_decision.upper()
+        if cand not in ("BUY", "DEEP BUY", "DIP BUY"):
             return GateResult(
                 gate_name="1. BUY Floor",
                 passed=True,
                 status=GateStatus.NOT_APPLICABLE,
-                message="Candidate decision is not BUY; score floor not applicable.",
+                message="Candidate decision is not BUY/DEEP BUY; score floor not applicable.",
             )
 
         # Evaluate Dip-Buy eligibility
-        is_dip_path = catalyst_path == "DIP_BUY"
+        is_dip_path = (catalyst_path == "DIP_BUY") or (cand in ("DEEP BUY", "DIP BUY"))
         dip_certified = False
         dip_rejection_reasons = []
 
@@ -391,17 +392,21 @@ class VolatilityEventLiquidityGate:
 
         metrics: Dict[str, Any] = {}
 
-        # 1. Earnings Blackout
+        # 1. Earnings Blackout / Pre-Earnings Event Mode
         if days_to_earnings is not None and days_to_earnings <= active_policy.events.earnings_blackout_sessions:
             metrics["days_to_earnings"] = days_to_earnings
-            return GateResult(
-                gate_name="3. Volatility, Events & Liquidity",
-                passed=False,
-                status=GateStatus.FAIL,
-                reason_code="EARNINGS_BLACKOUT",
-                message=f"Earnings report in {days_to_earnings} day(s) is a binary gap-risk event.",
-                metrics=metrics,
-            )
+            if getattr(active_policy.events, "allow_pre_earnings_trading", False):
+                metrics["pre_earnings_event_mode"] = True
+                metrics["earnings_risk_haircut"] = getattr(active_policy.events, "earnings_risk_haircut", 0.50)
+            else:
+                return GateResult(
+                    gate_name="3. Volatility, Events & Liquidity",
+                    passed=False,
+                    status=GateStatus.FAIL,
+                    reason_code="EARNINGS_BLACKOUT",
+                    message=f"Earnings report in {days_to_earnings} day(s) is a binary gap-risk event.",
+                    metrics=metrics,
+                )
 
         # 2. Scheduled Company Event Risk
         if is_event_risk_blackout and active_policy.events.event_risk_blackout:
@@ -581,6 +586,23 @@ class SellExitSymmetryGate:
             "borrow_status": borrow_status,
             "borrow_fee_bps": borrow_fee_bps,
         }
+
+        cand = candidate_decision.upper()
+        # Explicit BOOK PROFIT / TAKE PROFIT Handling (Step 5.4)
+        if cand in ("BOOK PROFIT", "TAKE PROFIT", "BOOK_PROFIT", "TAKE_PROFIT"):
+            target_hit = target_price is not None and current_price >= target_price
+            overbought = rsi is not None and rsi >= 70.0
+            return GateResult(
+                gate_name="4. SELL & Exit Symmetry",
+                passed=True,
+                status=GateStatus.PASS,
+                reason_code="PROFIT_TARGET_REACHED" if target_hit else "OVERBOUGHT_PROFIT_TAKING",
+                message=(
+                    f"Profit-taking authorized: Target reached (${target_price:.2f})."
+                    if target_hit else f"Profit-taking authorized: Overbought momentum (RSI {rsi:.1f} >= 70.0)."
+                ) if (target_hit or overbought) else "Profit-taking authorized by setup geometry.",
+                metrics=metrics,
+            )
 
         # Branch A: Active Holding Exit Evaluation
         if is_holding:
