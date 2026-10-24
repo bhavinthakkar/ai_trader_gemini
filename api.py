@@ -85,12 +85,12 @@ RUNNING_JOBS: Dict[str, Dict[str, Any]] = {}
 
 class AnalyzeRequest(BaseModel):
     symbol: str = Field(..., description="Stock symbol or European ISIN (e.g. NVDA, US67066G1040, NVD.DE)")
-    model: str = Field(default="free", description="AI Model to run (OpenRouter Free auto-router)")
+    model: str = Field(default="haiku", description="AI Model to run (Anthropic Claude Haiku 5.5)")
     is_eu: bool = Field(default=False, description="Flag for European gettex/XETRA tickers")
 
 
 class MasterRunRequest(BaseModel):
-    model: str = Field(default="free", description="AI Model to run across top active stocks (OpenRouter Free)")
+    model: str = Field(default="haiku", description="AI Model to run across top active stocks (Anthropic Claude Haiku 5.5)")
     limit: int = Field(default=5, ge=1, le=25, description="Number of top active stocks to analyze")
     dashboard_limit: int = Field(default=10, ge=1, le=50, description="Number of active stocks to screen")
     market: str = Field(default="US", description="Market to scan: 'US' or 'EU'")
@@ -118,6 +118,13 @@ def health_check():
         "app": "AI Trader API",
         "version": "1.0.0",
     }
+
+
+@app.get("/api/danelfin/quota", tags=["Danelfin"])
+def get_danelfin_quota():
+    """Returns current Danelfin API monthly usage and quota status."""
+    from danelfin_service import DanelfinService
+    return DanelfinService().get_usage()
 
 
 # ==========================================
@@ -263,7 +270,7 @@ def _run_single_analysis_job(job_id: str, symbol: str, model: str, is_eu: bool):
     RUNNING_JOBS[job_id]["status"] = "running"
     RUNNING_JOBS[job_id]["started_at"] = datetime.now(timezone.utc).isoformat()
 
-    effective_model = "free"
+    effective_model = model or "haiku"
 
     main_script = BASE_DIR / "main.py"
     cmd = [sys.executable, str(main_script), effective_model, symbol]
@@ -303,7 +310,7 @@ def trigger_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks):
         resolved = resolve_symbol(clean_sym, prefer_exchange="AUTO", force_european=False)
         target_symbol = resolved["symbol"]
 
-    req_model = "free"
+    req_model = req.model if req.model else "haiku"
 
     job_id = f"job_{target_symbol}_{int(datetime.now().timestamp())}"
 

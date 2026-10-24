@@ -167,11 +167,17 @@ def load_config_from_values(**overrides):
 
 
 class ModelRegistryTests(unittest.TestCase):
-    def test_registry_targets_openrouter_free(self):
-        for key in MODEL_REGISTRY:
+    def test_registry_contains_anthropic_haiku(self):
+        for key in ("claude-haiku-5-5", "haiku", "haike"):
+            self.assertIn(key, MODEL_REGISTRY)
+            self.assertEqual(MODEL_REGISTRY[key]["provider"], "anthropic")
+            self.assertEqual(MODEL_REGISTRY[key]["model"], "claude-haiku-5-5")
+
+    def test_registry_contains_optional_openrouter(self):
+        for key in ("openrouter/free", "free", "openrouter"):
+            self.assertIn(key, MODEL_REGISTRY)
             self.assertEqual(MODEL_REGISTRY[key]["provider"], "openrouter")
             self.assertEqual(MODEL_REGISTRY[key]["model"], "openrouter/free")
-        self.assertIn("free", MODEL_REGISTRY)
 
     def test_query_llm_routes_qwen_to_free(self):
         self.assertEqual(normalize_model_key("qwen"), "openrouter/free")

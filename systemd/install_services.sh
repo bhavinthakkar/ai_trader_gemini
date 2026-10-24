@@ -52,6 +52,13 @@ sed -e "s|{{USER}}|${TARGET_USER}|g" \
 
 cp "${SCRIPT_DIR}/ai-trader-scanner.timer" /etc/systemd/system/ai-trader-scanner.timer
 
+# Configure and install ai-trader-danelfin-daily.service & timer
+sed -e "s|{{USER}}|${TARGET_USER}|g" \
+    -e "s|{{PROJECT_DIR}}|${PROJECT_DIR}|g" \
+    "${SCRIPT_DIR}/ai-trader-danelfin-daily.service" > /etc/systemd/system/ai-trader-danelfin-daily.service
+
+cp "${SCRIPT_DIR}/ai-trader-danelfin-daily.timer" /etc/systemd/system/ai-trader-danelfin-daily.timer
+
 # Detect npx for mobile service (Expo Metro Bundler)
 TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
 NPX_BIN=""
@@ -88,6 +95,9 @@ systemctl enable --now ai-trader-web.service
 echo "🟢 Enabling and starting ai-trader-scanner.timer (periodic scans)..."
 systemctl enable --now ai-trader-scanner.timer
 
+echo "🟢 Enabling and starting ai-trader-danelfin-daily.timer (daily Danelfin 25-stock pipeline)..."
+systemctl enable --now ai-trader-danelfin-daily.timer
+
 if [ "$MOBILE_INSTALLED" = true ]; then
     echo "🟢 Enabling and starting ai-trader-mobile.service (Expo Metro)..."
     systemctl enable --now ai-trader-mobile.service
@@ -98,11 +108,12 @@ echo "============================================================"
 echo " ✅ Installation Complete!"
 echo "============================================================"
 echo " Services configured to automatically start on boot:"
-echo "   1. ai-trader-api.service      (FastAPI REST backend on port 8000)"
-echo "   2. ai-trader-web.service      (Streamlit Web Dashboard on port 8501)"
-echo "   3. ai-trader-scanner.timer    (Periodic market scan runner)"
+echo "   1. ai-trader-api.service              (FastAPI REST backend on port 8000)"
+echo "   2. ai-trader-web.service              (Streamlit Web Dashboard on port 8501)"
+echo "   3. ai-trader-scanner.timer            (Periodic market scan runner)"
+echo "   4. ai-trader-danelfin-daily.timer     (Daily Danelfin 25-stock AI analysis)"
 if [ "$MOBILE_INSTALLED" = true ]; then
-    echo "   4. ai-trader-mobile.service   (Expo Metro Mobile Bundler on port 8081)"
+    echo "   5. ai-trader-mobile.service           (Expo Metro Mobile Bundler on port 8081)"
 fi
 echo ""
 echo " Useful management commands:"

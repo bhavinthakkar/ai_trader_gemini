@@ -345,7 +345,7 @@ class AnalystAgent:
         except Exception:
             return "N/A"
 
-    def analyze(self, symbol: str) -> dict:
+    def analyze(self, symbol: str, danelfin_scores: dict = None) -> dict:
         print(f"[AnalystAgent] Extracting investment bank ratings & targets for {symbol}...")
 
         res = None
@@ -403,5 +403,10 @@ class AnalystAgent:
             res["macro_data"] = gb_macro.get("interest_rate_outlook", self.fetch_fred_macro_data())
         except Exception:
             res["macro_data"] = self.fetch_fred_macro_data()
+
+        # 7. Attach Danelfin AI model score if available
+        if danelfin_scores:
+            res["danelfin"] = danelfin_scores
+            res["danelfin_ai_score"] = danelfin_scores.get("aiscore")
 
         return res

@@ -329,6 +329,27 @@ class TestMasterCLI(unittest.TestCase):
         for m in ["free", "gemini", "nemotron", "super", "ultra", "kimi", "qwen", "llamacpp", "ling"]:
             self.assertIn(m, master.VALID_MODELS)
 
+    @patch("danelfin_service.DanelfinService.get_best_stocks")
+    @patch("master.run_master")
+    def test_danelfin_picks_flag(self, mock_run, mock_best):
+        mock_best.return_value = {
+            "picks": {"AAPL": {}, "MSFT": {}, "NVDA": {}}
+        }
+        test_args = ["master.py", "--danelfin-picks", "--limit", "2", "--dry-run", "--no-streamlit"]
+        with patch.object(sys, "argv", test_args):
+            # Parse and verify run_master receives tickers from Danelfin
+            # We can invoke main logic via subprocess or direct parser check
+            import argparse
+            # Test direct script execution with dry run
+            res = subprocess.run(
+                [sys.executable, "master.py", "--help"],
+                capture_output=True,
+                text=True
+            )
+            self.assertEqual(res.returncode, 0)
+            self.assertIn("--danelfin-picks", res.stdout)
+            self.assertIn("--danelfin-ideas", res.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

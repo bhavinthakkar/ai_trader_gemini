@@ -16,6 +16,14 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(data["status"], "healthy")
         self.assertEqual(data["app"], "AI Trader API")
 
+    def test_danelfin_quota(self):
+        resp = self.client.get("/api/danelfin/quota")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("call_count", data)
+        self.assertIn("monthly_limit", data)
+        self.assertEqual(data["monthly_limit"], 500)
+
     def test_fetch_latest_signals(self):
         resp = self.client.get("/api/signals/latest?days=7")
         self.assertEqual(resp.status_code, 200)
@@ -69,7 +77,7 @@ class TestAPI(unittest.TestCase):
     @unittest.mock.patch("api._run_single_analysis_job")
     def test_analyze_trigger(self, mock_job):
         # Test queuing endpoint (mocking background task)
-        resp = self.client.post("/api/analyze", json={"symbol": "AAPL", "model": "free", "is_eu": False})
+        resp = self.client.post("/api/analyze", json={"symbol": "AAPL", "model": "haiku", "is_eu": False})
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["status"], "queued")
@@ -80,23 +88,23 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(job_resp.status_code, 200)
         job_data = job_resp.json()
         self.assertEqual(job_data["target_symbol"], "AAPL")
-        self.assertEqual(job_data["model"], "free")
+        self.assertEqual(job_data["model"], "haiku")
         mock_job.assert_called_once()
 
     @unittest.mock.patch("api._run_single_analysis_job")
-    def test_analyze_trigger_defaults_to_free(self, mock_job):
+    def test_analyze_trigger_defaults_to_haiku(self, mock_job):
         resp = self.client.post("/api/analyze", json={"symbol": "NVDA"})
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
-        self.assertEqual(data["model"], "free")
+        self.assertEqual(data["model"], "haiku")
 
         job_resp = self.client.get(f"/api/jobs/{data['job_id']}")
         self.assertEqual(job_resp.status_code, 200)
-        self.assertEqual(job_resp.json()["model"], "free")
+        self.assertEqual(job_resp.json()["model"], "haiku")
 
     @unittest.mock.patch("api._run_single_analysis_job")
-    def test_analyze_trigger_redirects_bunny_to_free(self, mock_job):
-        resp = self.client.post("/api/analyze", json={"symbol": "NVDA", "model": "bunny"})
+    def test_analyze_trigger_allows_free_option(self, mock_job):
+        resp = self.client.post("/api/analyze", json={"symbol": "NVDA", "model": "free"})
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["model"], "free")

@@ -27,6 +27,14 @@ import requests
 
 # Built-in reference registry of top European equities and US dual-listings traded on gettex / EIX / XETRA
 SECURITIES_DIRECTORY: Dict[str, Dict[str, Any]] = {
+    "000660.KS": {
+        "company_name": "SK hynix Inc.",
+        "isin": "KR7000660001",
+        "wkn": "923145",
+        "us_symbol": "000660.KS",
+        "currency": "KRW",
+        "currency_symbol": "₩",
+    },
     # ------------------ US Dual-Listings Traded on gettex / EIX / XETRA (EUR) ------------------
     "NVDA": {
         "company_name": "NVIDIA Corporation",

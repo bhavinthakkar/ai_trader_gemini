@@ -1,0 +1,13 @@
+[Unit]
+Description=AI Trader Daily Danelfin Top 25 Best Stocks Analysis Pipeline
+After=network-online.target ai-trader-api.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User={{USER}}
+WorkingDirectory={{PROJECT_DIR}}
+ExecStart={{PROJECT_DIR}}/venv/bin/python danelfin_daily_runner.py haiku --limit 25
+EnvironmentFile=-{{PROJECT_DIR}}/.env
+StandardOutput=journal
+StandardError=journal

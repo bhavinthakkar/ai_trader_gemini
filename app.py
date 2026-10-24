@@ -311,17 +311,18 @@ st.sidebar.markdown("---")
 st.sidebar.info("""
 💻 **Terminal Trigger Mode (6-Agent System)**
 To run a new pipeline analysis, execute in your terminal:
+- `python main.py haiku <TICKER>` (Anthropic Claude Haiku 5.5 - default)
+- `python main.py openrouter <TICKER>` (Optional: OpenRouter Free Models Router - openrouter/free)
 - `python main.py nemotron <TICKER>` (Nemotron-3 Ultra 550B / Super 120B)
 - `python main.py kimi <TICKER>` (Moonshot AI Kimi-K3 via NVIDIA)
 - `python main.py gemini <TICKER>` (Gemini 3.1 Pro)
-- `python main.py openrouter <TICKER>` (OpenRouter Free Models Router - openrouter/free)
 - `python main.py qwen <TICKER>` (Local Qwen 2.5 14B via Vulkan-enabled llama.cpp)
 - `python main.py llamacpp <TICKER>` (Alias for the local llama.cpp server)
 - `python main.py qwen-llamacpp <TICKER>` (Explicit alias for the local llama.cpp server)
 
-*Example:* `python main.py kimi NVDA` or `python main.py nemotron AAPL`
+*Example:* `python main.py haiku NVDA` or `python main.py haiku AAPL`
 
-**Portfolio risk review:** `python main.py portfolio gemini`
+**Portfolio risk review:** `python main.py portfolio haiku`
 """)
 
 st.sidebar.markdown("---")
@@ -347,6 +348,24 @@ with st.sidebar.expander("🗑️ Database Maintenance"):
         deleted_count = delete_signals_older_than(days=int(purge_days))
         st.success(f"Purged {deleted_count} records older than {purge_days} days.")
         st.rerun()
+
+st.sidebar.markdown("---")
+
+# Danelfin API Free Tier Quota Meter
+try:
+    from danelfin_service import DanelfinService
+    dan_usage = DanelfinService().get_usage()
+    used = dan_usage.get("call_count", 0)
+    limit = dan_usage.get("monthly_limit", 500)
+    pct = min(1.0, float(used) / max(1, limit))
+    st.sidebar.subheader("🤖 Danelfin API (Free Tier)")
+    st.sidebar.progress(pct, text=f"Calls: {used} / {limit} ({dan_usage.get('month')})")
+    if not dan_usage.get("is_safe"):
+        st.sidebar.warning(f"⚠️ Safe threshold reached ({used}/{dan_usage.get('safe_threshold')}). Safe mode active (serving from cache).")
+    else:
+        st.sidebar.caption(f"✅ {dan_usage.get('remaining')} calls remaining this month (24h SQLite cached).")
+except Exception:
+    pass
 
 st.sidebar.markdown("---")
 if st.sidebar.button("🔄 Refresh Report Data", use_container_width=True):
@@ -505,6 +524,10 @@ with tab1:
                 cols_to_use.append("us_10y_yield")
                 col_renames["us_10y_yield"] = "10Y Yield"
 
+            if "danelfin_score" in df_display.columns and df_display["danelfin_score"].notna().any():
+                cols_to_use.append("danelfin_score")
+                col_renames["danelfin_score"] = "🧠 Danelfin AI"
+
             cols_to_use.extend(["pe_and_peg", "model_used", "timestamp"])
             col_renames["pe_and_peg"] = "Fwd Valuation"
             col_renames["model_used"] = "Model"
@@ -553,10 +576,10 @@ with tab2:
         )
 
         if analyze_isin_btn:
-            with st.status(f"🚀 Running 6-Agent AI Swing Synthesis on {res_sym} via OpenRouter Free...", expanded=True) as status_box:
+            with st.status(f"🚀 Running 6-Agent AI Swing Synthesis on {res_sym} via Anthropic Claude Haiku 5.5...", expanded=True) as status_box:
                 st.write(f"Launching main.py for {res_sym}...")
                 main_script = os.path.join(BASE_DIR, "main.py")
-                cmd = [sys.executable, main_script, "free", res_sym, "--eu"]
+                cmd = [sys.executable, main_script, "haiku", res_sym, "--eu"]
                 try:
                     proc = subprocess.run(cmd, cwd=BASE_DIR, capture_output=True, text=True)
                     if proc.returncode == 0:
@@ -695,6 +718,43 @@ with tab2:
                         st.info(f"ℹ️ **ML Signal vs Multi-Agent Setup (NEUTRAL):** {reason}")
             else:
                 st.info(f"ℹ️ No point-in-time S&P 500 ML model score available for `{selected_stock}`. The ML alpha pipeline currently evaluates the US S&P 500 universe (~483 components).")
+
+            # =====================================================================
+            # 🧠 Danelfin AI Quantitative Intelligence
+            # =====================================================================
+            danelfin_score = stock_data.get("danelfin_score")
+            danelfin_sig = stock_data.get("danelfin_signal")
+            danelfin_details_raw = stock_data.get("danelfin_details")
+            dan_info = None
+            if danelfin_details_raw and isinstance(danelfin_details_raw, str):
+                try:
+                    dan_info = json.loads(danelfin_details_raw)
+                except Exception:
+                    dan_info = None
+            if not dan_info and stock_data.get("raw_json"):
+                try:
+                    dan_info = json.loads(stock_data["raw_json"]).get("danelfin")
+                except Exception:
+                    dan_info = None
+
+            if danelfin_score is not None or (dan_info and dan_info.get("aiscore") is not None):
+                d_score = danelfin_score if danelfin_score is not None else dan_info.get("aiscore")
+                st.markdown("#### 🧠 Danelfin AI Quantitative Intelligence")
+                dc1, dc2, dc3, dc4, dc5 = st.columns(5)
+                with dc1:
+                    st.metric("Overall AI Score", f"{d_score}/10")
+                with dc2:
+                    st.metric("Fundamental", f"{dan_info.get('fundamental', '—')}/10" if dan_info else "—")
+                with dc3:
+                    st.metric("Technical", f"{dan_info.get('technical', '—')}/10" if dan_info else "—")
+                with dc4:
+                    st.metric("Sentiment", f"{dan_info.get('sentiment', '—')}/10" if dan_info else "—")
+                with dc5:
+                    st.metric("Low Risk", f"{dan_info.get('low_risk', '—')}/10" if dan_info else "—")
+
+                if danelfin_sig:
+                    sig_badge = "🟢 BUY" if str(danelfin_sig).lower() == "buy" else ("🔴 SELL" if str(danelfin_sig).lower() == "sell" else "⚪ HOLD")
+                    st.caption(f"Danelfin AI Stance: **{sig_badge}** | As of: `{dan_info.get('date', 'latest') if dan_info else 'latest'}`")
 
             # 5-Pillar Quantitative Scores Display with Visible Missingness
             if any(stock_data.get(k) is not None for k in ["trend_score", "sector_score", "alpha_score", "val_history_score", "peer_val_score"]):
@@ -1019,10 +1079,10 @@ with tab4:
     with top_ctrl2:
         limit_val = st.selectbox("Number of Active Stocks:", options=[10, 15, 20, 25], index=0)
         analyse_count = st.selectbox(
-            "AI Analysis Count (OpenRouter Free):",
+            "AI Analysis Count (Claude Haiku 5.5):",
             options=[3, 5, 10],
             index=1,
-            help="Number of top active stocks to sequentially analyze with main.py using OpenRouter Free auto-router ('free')"
+            help="Number of top active stocks to sequentially analyze with main.py using Anthropic Claude Haiku 5.5 ('haiku')"
         )
     with top_ctrl3:
         if st.button("🔄 Refresh Active Data", key="refresh_active_stocks", use_container_width=True):
@@ -1032,7 +1092,7 @@ with tab4:
         run_analyse = st.button(
             "🚀 Refresh active data & Analyse",
             key="refresh_and_analyse_stocks",
-            help="Refreshes active stocks data and executes master.py using OpenRouter Free (free)",
+            help="Refreshes active stocks data and executes master.py using Anthropic Claude Haiku 5.5 (haiku)",
             use_container_width=True,
             type="primary"
         )
@@ -1043,7 +1103,7 @@ with tab4:
         cmd = [
             sys.executable,
             master_script,
-            "free",
+            "haiku",
             "--limit", str(analyse_count),
             "--dashboard-limit", str(limit_val),
             "--market", selected_market,
@@ -1051,7 +1111,7 @@ with tab4:
             "--no-streamlit",
         ]
         status_market_label = f"Europe (gettex / XETRA: {selected_exchange})" if is_eu else "US Markets"
-        with st.status(f"🚀 Running Gloomberb Master Orchestration ({status_market_label} | Model: free, Limit: {analyse_count})...", expanded=True) as status_box:
+        with st.status(f"🚀 Running Gloomberb Master Orchestration ({status_market_label} | Model: haiku, Limit: {analyse_count})...", expanded=True) as status_box:
             st.write(f"Initializing active volume screener [{selected_market}] & launching 6-agent AI swing analysis...")
             log_box = st.empty()
             logs = []

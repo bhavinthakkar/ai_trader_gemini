@@ -51,6 +51,7 @@ MAIN_SCRIPT = os.path.join(BASE_DIR, "main.py")
 DEFAULT_DB_PATH = os.path.join(BASE_DIR, "trader.db")
 
 VALID_MODELS = [
+    "haiku", "haiku-5.5", "haike", "haike-5.5", "claude", "claude-haiku", "claude-haiku-5-5", "claude-5-5-haiku", "anthropic",
     "xingchen", "xing", "xing4", "xingchen-agi/xing4.0-29b-a4b:free",
     "flint", "flint-v1.0", "recursive/flint-v1.0:free",
     "openrouter", "openrouter/free", "free",
@@ -164,7 +165,7 @@ def extract_most_traded_stocks(dashboard_data: Optional[Dict[str, Any]], limit: 
 
 def run_main_analysis(
     symbol: str,
-    model: str = "free",
+    model: str = "haiku",
     market: str = "US",
     prefer_exchange: str = "DE",
     temperature: Optional[float] = None,
@@ -391,6 +392,7 @@ def run_master(
     delay: float = 2.0,
     dry_run: bool = False,
     stop_on_error: bool = False,
+    skip_existing: bool = False,
     output_json: Optional[str] = None,
     skip_dashboard: bool = False,
     dashboard_json: Optional[str] = None,
@@ -491,6 +493,24 @@ def run_master(
             symbol = stock_item.get("symbol", "").upper()
             if not symbol:
                 continue
+
+            if skip_existing:
+                existing_sig = get_latest_signal(symbol)
+                today_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+                if existing_sig and str(existing_sig.get("timestamp", "")).startswith(today_str):
+                    dec = existing_sig.get("decision", "RECORDED")
+                    conf = existing_sig.get("confidence", "N/A")
+                    print(f"⏩ [{idx}/{total_tickers}] Skipping '{symbol}': already analyzed today ({existing_sig.get('timestamp')}) -> Decision: {dec} (Conf: {conf})")
+                    results.append({
+                        "symbol": symbol,
+                        "stock_info": stock_item,
+                        "returncode": 0,
+                        "elapsed": 0.0,
+                        "latest_signal": existing_sig,
+                        "dry_run": False,
+                        "skipped": True,
+                    })
+                    continue
 
             print(f"\n{'─'*75}")
             print(f"▶ [{idx}/{total_tickers}] Launching main.py for '{symbol}' | Model: {model.upper()}")
@@ -602,7 +622,7 @@ Examples:
         "model_arg",
         nargs="?",
         default=None,
-        help="LLM model choice for main.py (default: 'free' - OpenRouter Free auto-router)"
+        help="LLM model choice for main.py (default: 'haiku' - Anthropic Claude Haiku 5.5)"
     )
     parser.add_argument(
         "--model", "-m",
@@ -675,6 +695,11 @@ Examples:
         help="Stop sequential execution immediately if any ticker fails"
     )
     parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Skip analyzing any ticker that has already been analyzed today in trader.db"
+    )
+    parser.add_argument(
         "--json",
         type=str,
         default=None,
@@ -720,6 +745,16 @@ Examples:
         help="URL of shared Google Sheet or Google Finance portfolio to sync before analyzing"
     )
     parser.add_argument(
+        "--danelfin-picks",
+        action="store_true",
+        help="Screen and analyze Danelfin AI's daily Top 25 Best Stocks (consumes only 1 API call for all stocks)"
+    )
+    parser.add_argument(
+        "--danelfin-ideas",
+        action="store_true",
+        help="Screen and analyze Danelfin AI's high-win-rate Trade Ideas (consumes only 1 API call)"
+    )
+    parser.add_argument(
         "--no-streamlit",
         action="store_true",
         help="Do not automatically start the Streamlit dashboard server"
@@ -734,7 +769,7 @@ Examples:
     args = parser.parse_args()
 
     # Determine model choice
-    raw_model = args.model_opt or args.model_arg or "free"
+    raw_model = args.model_opt or args.model_arg or "haiku"
     model_choice = str(raw_model).strip().lower()
     if model_choice in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
         print("[master] Notice: Space Bunny Alpha ('bunny') is no longer available on OpenRouter; automatically redirecting to 'ling' (inclusionAI: Ling 3.1 Flash).")
@@ -747,6 +782,33 @@ Examples:
 
     use_portfolio = args.portfolio or bool(args.portfolio_url)
     market = "EU" if (args.eu or use_portfolio) else args.market.upper()
+
+    # Danelfin AI Candidate Screening
+    if args.danelfin_picks:
+        try:
+            from danelfin_service import DanelfinService
+            dan_svc = DanelfinService()
+            best_res = dan_svc.get_best_stocks()
+            if best_res and best_res.get("picks"):
+                picks_map = best_res["picks"]
+                dan_list = list(picks_map.keys())[:args.limit]
+                print(f"[Master] Sourced {len(dan_list)} top Danelfin AI Best Stock picks: {', '.join(dan_list)}")
+                args.tickers = ",".join(dan_list)
+        except Exception as e:
+            print(f"[Master] Warning: Failed to query Danelfin Best Stocks: {e}")
+    elif args.danelfin_ideas:
+        try:
+            from danelfin_service import DanelfinService
+            dan_svc = DanelfinService()
+            market_param = "europe" if market == "EU" else "us_stocks"
+            ideas_res = dan_svc.get_trade_ideas(market=market_param, limit=args.limit)
+            if ideas_res and ideas_res.get("ideas"):
+                ideas_map = ideas_res["ideas"]
+                dan_list = list(ideas_map.keys())[:args.limit]
+                print(f"[Master] Sourced {len(dan_list)} Danelfin Trade Ideas ({market_param}): {', '.join(dan_list)}")
+                args.tickers = ",".join(dan_list)
+        except Exception as e:
+            print(f"[Master] Warning: Failed to query Danelfin Trade Ideas: {e}")
 
     print("\n" + "=" * 70)
     print("⚡ GLOOMBERB MASTER ORCHESTRATION PIPELINE ⚡")
@@ -783,6 +845,7 @@ Examples:
         delay=args.delay,
         dry_run=args.dry_run,
         stop_on_error=args.stop_on_error,
+        skip_existing=args.skip_existing,
         output_json=args.json,
         skip_dashboard=args.skip_dashboard,
         dashboard_json=args.dashboard_json,

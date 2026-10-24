@@ -15,6 +15,8 @@ systemctl stop ai-trader-mobile.service 2>/dev/null || true
 systemctl disable ai-trader-mobile.service 2>/dev/null || true
 systemctl stop ai-trader-scanner.timer 2>/dev/null || true
 systemctl disable ai-trader-scanner.timer 2>/dev/null || true
+systemctl stop ai-trader-danelfin-daily.timer 2>/dev/null || true
+systemctl disable ai-trader-danelfin-daily.timer 2>/dev/null || true
 systemctl stop ai-trader-web.service 2>/dev/null || true
 systemctl disable ai-trader-web.service 2>/dev/null || true
 systemctl stop ai-trader-api.service 2>/dev/null || true
@@ -26,6 +28,8 @@ rm -f /etc/systemd/system/ai-trader-api.service
 rm -f /etc/systemd/system/ai-trader-web.service
 rm -f /etc/systemd/system/ai-trader-scanner.service
 rm -f /etc/systemd/system/ai-trader-scanner.timer
+rm -f /etc/systemd/system/ai-trader-danelfin-daily.service
+rm -f /etc/systemd/system/ai-trader-danelfin-daily.timer
 
 systemctl daemon-reload
 echo "✅ AI Trader services successfully uninstalled."

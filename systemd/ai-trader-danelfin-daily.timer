@@ -1,0 +1,13 @@
+[Unit]
+Description=Trigger Danelfin 25-Stock Analysis Daily After Market Close (Mon-Fri)
+
+[Timer]
+# Run 10 minutes after power-on / system boot (runs if not already analyzed today)
+OnBootSec=10min
+# Trigger Monday through Friday at 22:30 UTC (18:30 EST / 23:30 CET), right after market close when Danelfin recalculates daily AI scores
+OnCalendar=Mon..Fri 22:30:00 UTC
+# Catch up if the system was powered off during the scheduled run time
+Persistent=true
+
+[Install]
+WantedBy=timers.target

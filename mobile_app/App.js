@@ -26,7 +26,7 @@ const getAutoApiUrl = () => {
       }
     }
   } catch (e) {}
-  return 'http://192.168.0.92:8000';
+  return 'http://192.168.0.241:8000';
 };
 
 // Default backend API URL
@@ -95,6 +95,7 @@ const STOCK_NAMES = {
   '2PP.DE': 'PayPal Holdings, Inc.',
   'MQN.DE': 'Micron Technology, Inc.',
   'MQN.MU': 'Micron Technology, Inc.',
+  '000660.KS': 'SK hynix Inc.',
 };
 
 /**

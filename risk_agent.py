@@ -55,6 +55,17 @@ class RiskAgent:
             risk_factors.append(f"Elevated Forward P/E ({forward_pe}) - High valuation multiple compression risk")
             risk_score += 2
 
+        # 5. Danelfin Low Risk / Downside Protection Score (1-10)
+        danelfin = market_data.get("danelfin") or {}
+        low_risk_score = danelfin.get("low_risk")
+        if isinstance(low_risk_score, (int, float)):
+            if low_risk_score <= 3:
+                risk_factors.append(f"Depressed Danelfin Low-Risk Score ({low_risk_score}/10) - High tail risk & downside volatility")
+                risk_score += 2
+            elif low_risk_score >= 8:
+                risk_factors.append(f"Strong Danelfin Low-Risk Score ({low_risk_score}/10) - Robust downside protection")
+                risk_score = max(0, risk_score - 1)
+
         # Determine Risk Level Tier
         if risk_score >= 6:
             risk_level = "HIGH"

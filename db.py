@@ -124,7 +124,10 @@ def init_db(db_path=DB_PATH):
             "data_quality_status": "TEXT",
             "position_action": "TEXT",
             "reason_codes": "TEXT",
-            "structured_decision": "TEXT"
+            "structured_decision": "TEXT",
+            "danelfin_score": "REAL",
+            "danelfin_signal": "TEXT",
+            "danelfin_details": "TEXT"
         }
 
         cursor.execute("PRAGMA table_info(signals);")
@@ -473,6 +476,12 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
             else:
                 structured_decision = _ensure_str(struct_dec, "")
 
+            # Danelfin AI Intelligence metrics
+            danelfin_data = item.get("danelfin") or {}
+            danelfin_score = _to_float(item.get("danelfin_score") or danelfin_data.get("aiscore"), None)
+            danelfin_signal = _ensure_str(item.get("danelfin_signal") or danelfin_data.get("signal", ""), "")
+            danelfin_details = json.dumps(danelfin_data) if danelfin_data else ""
+
             # Backward-compatible text summaries
             reason = _ensure_str(item.get("reason") or bull_case)
             inst_data = _ensure_str(item.get("institutional_data", ""))
@@ -503,8 +512,9 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                     short_stop_distance, short_stop_distance_pct, short_expected_move_stop_ratio,
                     pillar_status, pillar_input_tracking, financial_quality_score, is_value_trap, value_trap_reasons,
                     ml_score, ml_predicted_return, ml_rank, ml_universe_size, ml_signal_label, ml_disposition,
-                    run_id, model_status, passed_gates, failed_gates, data_quality_status, position_action, reason_codes, structured_decision
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    run_id, model_status, passed_gates, failed_gates, data_quality_status, position_action, reason_codes, structured_decision,
+                    danelfin_score, danelfin_signal, danelfin_details
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 timestamp, stock, decision, confidence, reason, inst_data, macro_data, news,
                 bank_coverage, risk_info, pe_peg, model_used, raw_json,
@@ -524,7 +534,8 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                 short_stop_distance, short_stop_distance_pct, short_expected_move_stop_ratio,
                 pillar_status, pillar_input_tracking, financial_quality_score, is_value_trap, value_trap_reasons,
                 ml_score, ml_predicted_return, ml_rank, ml_universe_size, ml_signal_label, ml_disposition,
-                run_id, model_status, passed_gates, failed_gates, data_quality_status, position_action, reason_codes, structured_decision
+                run_id, model_status, passed_gates, failed_gates, data_quality_status, position_action, reason_codes, structured_decision,
+                danelfin_score, danelfin_signal, danelfin_details
             ))
 
             signal_id = cursor.lastrowid

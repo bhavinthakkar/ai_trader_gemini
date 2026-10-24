@@ -34,6 +34,7 @@ from catalyst_service import (
 from signal_schema import validate_signal_json
 from ticker_resolver import resolve_symbol
 from ml_signal_service import format_ml_context, get_ml_context
+from danelfin_service import DanelfinService
 from policy_config import TradingPolicy, load_policy_config
 from decision_precedence import (
     InternalActionType,
@@ -120,6 +121,38 @@ def _to_list_of_strings(val, default_str="None") -> list:
         parts = [p.strip(" •-*") for p in val.split("\n") if p.strip(" •-*")]
         return parts if parts else [val.strip()]
     return [default_str]
+
+
+def format_danelfin_context(danelfin_scores: dict | None) -> str:
+    """Formats Danelfin AI model scores and sub-scores for LLM context injection."""
+    if not danelfin_scores or not danelfin_scores.get("aiscore"):
+        return ""
+
+    aiscore = danelfin_scores.get("aiscore")
+    tech = danelfin_scores.get("technical", "N/A")
+    fund = danelfin_scores.get("fundamental", "N/A")
+    sent = danelfin_scores.get("sentiment", "N/A")
+    low_risk = danelfin_scores.get("low_risk", "N/A")
+    date_str = danelfin_scores.get("date", "latest")
+
+    tier = (
+        "HIGH CONVICTION OUTPERFORM (AI Score >= 8/10)"
+        if (isinstance(aiscore, (int, float)) and aiscore >= 8)
+        else "MODERATE / NEUTRAL (AI Score 5-7/10)"
+        if (isinstance(aiscore, (int, float)) and aiscore >= 5)
+        else "UNDERPERFORM / HIGH RISK (AI Score < 5/10)"
+    )
+
+    return f"""
+================ 7. DANELFIN AI QUANTITATIVE INTELLIGENCE ================
+As of: {date_str}
+Danelfin Overall AI Score: {aiscore}/10 [{tier}]
+  - Fundamental Pillar Score: {fund}/10
+  - Technical Pillar Score:   {tech}/10
+  - Sentiment Pillar Score:   {sent}/10
+  - Low Risk Pillar Score:    {low_risk}/10
+Guidance: Factor Danelfin's independent predictive score into your synthesis. Pillar concordance provides additional confirmation.
+"""
 
 
 def days_from_earnings_date(date_str, today=None) -> int:
@@ -1146,6 +1179,10 @@ def normalize_master_trader_json(
         "structured_decision": structured_dec.to_dict(),
         # Step 7.1: Risk-Based Position Sizing (Independent of score)
         "position_sizing": structured_dec.metrics.get("position_sizing", {}),
+        # Danelfin AI Intelligence metrics
+        "danelfin": m_data.get("danelfin", {}),
+        "danelfin_score": m_data.get("danelfin", {}).get("aiscore"),
+        "danelfin_signal": m_data.get("danelfin", {}).get("signal", ""),
         # Backward compatibility for SQLite DB string storage
         "reason": "; ".join(bull_case),
         "risk_assessment": "; ".join(key_risks),
@@ -1306,7 +1343,7 @@ def main():
 
     # If first argument is 'portfolio', run portfolio review
     if (raw_first and raw_first.lower() == "portfolio") or (raw_model_opt and raw_model_opt.lower() == "portfolio"):
-        llm_choice = "free"
+        llm_choice = raw_model_opt or "haiku"
         with managed_llamacpp_server(llm_choice):
             run_portfolio_review(
                 llm_choice,
@@ -1317,6 +1354,7 @@ def main():
         return
 
     known_model_names = {
+        "haiku", "haiku-5.5", "haike", "haike-5.5", "claude", "claude-haiku", "claude-haiku-5-5", "claude-5-5-haiku", "anthropic",
         "free", "openrouter/free", "openrouter", "auto", "or",
         "xingchen", "xing", "xing4", "xingchen-agi/xing4.0-29b-a4b:free",
         "flint", "flint-v1.0", "recursive/flint-v1.0:free",
@@ -1325,25 +1363,27 @@ def main():
     }
 
     if raw_first and raw_second:
-        # e.g. python main.py free AAPL
-        model_choice = "free"
+        if raw_first.lower() in known_model_names:
+            model_choice = raw_first.lower()
+        else:
+            model_choice = "haiku"
         raw_ticker = raw_ticker_opt or raw_second
     elif raw_first and not raw_second:
         if raw_first.lower() in known_model_names:
-            model_choice = "free"
+            model_choice = raw_first.lower()
             raw_ticker = raw_ticker_opt
         else:
             # e.g. python main.py AAPL
-            model_choice = "free"
+            model_choice = "haiku"
             raw_ticker = raw_first
     else:
-        model_choice = "free"
+        model_choice = raw_model_opt or "haiku"
         raw_ticker = raw_ticker_opt
 
     if not raw_ticker:
-        print("\nUsage: python main.py [free] <TICKER> (e.g. python main.py AAPL)")
+        print("\nUsage: python main.py [haiku] <TICKER> (e.g. python main.py AAPL)")
         print("       python main.py portfolio")
-        print("Model: OpenRouter Free (openrouter/free via OpenRouter)\n")
+        print("Model: Anthropic Claude Haiku 5.5 (claude-haiku-5-5)\n")
         sys.exit(1)
 
     market = "EU" if args.eu else args.market.upper()
@@ -1370,6 +1410,7 @@ def main():
         gloomberb_service = GloomberbService()
         institutional_service = InstitutionalDataService()
         rag_service = RAGService()
+        danelfin_service = DanelfinService()
 
         all_results = []
         prompt_profile = "compact" if uses_compact_prompt_profile(model_choice) else "full"
@@ -1386,6 +1427,12 @@ def main():
             if not m_data:
                 print(f"Skipping {symbol}: Insufficient price data.")
                 continue
+
+            # Danelfin AI Intelligence (Cached, quota-protected)
+            danelfin_scores = danelfin_service.get_scores(symbol)
+            if danelfin_scores and danelfin_scores.get("aiscore") is not None:
+                m_data["danelfin"] = danelfin_scores
+                print(f"[Danelfin] AI Score for {symbol}: {danelfin_scores.get('aiscore')}/10 (Source: {danelfin_scores.get('source')})")
 
             # 2. Macro Data Stream (FRED Yield Curve, Spreads, 10Y Real Yield, 5d Velocity, Fed Funds, CFTC COT)
             macro_data = macro_agent.analyze(symbol)
@@ -1423,6 +1470,8 @@ def main():
             )
             ml_context = get_ml_context(symbol)
             context["user_prompt"] += format_ml_context(ml_context)
+            if danelfin_scores:
+                context["user_prompt"] += format_danelfin_context(danelfin_scores)
 
             # Attach the deterministic 5-pillar scores to m_data so normalize can fall back to them
             # instead of defaults (and so gated_confidence uses real pillar agreement).
