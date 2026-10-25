@@ -341,9 +341,30 @@ execution:
   kill_switch_on_drawdown_halt: true
 
 # =============================================================================
-# 11. SHADOW TRADING & PROMOTION CRITERIA (Step 8)
+# 11. SHADOW TRADING & DUAL-PILLAR PROMOTION CRITERIA (Step 8)
 # =============================================================================
+# Promotion Invariant:
+# Backtested performance alone is hypothetical and NEVER qualifies for promotion.
+# Live shadow trading alone without out-of-sample backtesting NEVER qualifies.
+# The strategy must pass BOTH out-of-sample historical evaluation and shadow trading.
 shadow_trading:
+  # --- Pillar 1: Historical Out-of-Sample Backtest Promotion Hurdles ---
+  # Minimum independent trades evaluated across out-of-fold historical data (2022-2026)
+  min_historical_trades: 50
+  # Minimum required CAGR percentage for PULLBACK_BUY setups
+  min_pullback_cagr_pct: 0.0
+  # Minimum required CAGR percentage for CATALYST_DIP_BUY setups
+  min_catalyst_dip_cagr_pct: 0.0
+  # Maximum allowable drawdown percentage across 2022-2026 out-of-fold window
+  max_historical_drawdown_pct: 20.0
+  # Minimum percentage of peak open profit retained after trims and trailing stops
+  min_profit_retained_after_trims_pct: 50.0
+  # Maximum permissible trade stop-out rate percentage
+  max_stop_out_rate_pct: 50.0
+  # Require positive net PnL in untuned forward holdout window (2025-2026)
+  require_holdout_positive_pnl: true
+
+  # --- Pillar 2: Live Shadow Trading Period Promotion Hurdles ---
   # Minimum independent observations required to evaluate promotion
   min_observations_for_promotion: 20
   # Minimum signal reproducibility rate (1.00 = 100% deterministic reproducibility)

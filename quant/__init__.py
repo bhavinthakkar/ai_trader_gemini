@@ -190,6 +190,18 @@ from quant.shadow_trading import (
     ShadowTradingEngine,
     ShadowMetricsAnalyzer,
     ShadowPromotionEvaluator,
+    DualPromotionStatus,
+    DualPromotionDecision,
+    DualPromotionEvaluator,
+    run_shadow_trading_evaluation,
+    run_dual_promotion_evaluation,
+)
+from quant.historical_evaluation import (
+    HistoricalEvaluationConfig,
+    HistoricalTrade,
+    HistoricalSetupMetrics,
+    HistoricalEvaluationReport,
+    run_historical_setups_evaluation,
 )
 
 
@@ -326,6 +338,16 @@ __all__ = [
     "ShadowTradingEngine",
     "ShadowMetricsAnalyzer",
     "ShadowPromotionEvaluator",
+    "DualPromotionStatus",
+    "DualPromotionDecision",
+    "DualPromotionEvaluator",
+    "run_shadow_trading_evaluation",
+    "run_dual_promotion_evaluation",
+    "HistoricalEvaluationConfig",
+    "HistoricalTrade",
+    "HistoricalSetupMetrics",
+    "HistoricalEvaluationReport",
+    "run_historical_setups_evaluation",
     "StagedEntriesConfig",
     "TrancheStatus",
     "TrancheRejectionReason",

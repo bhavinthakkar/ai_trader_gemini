@@ -395,6 +395,15 @@ class ShadowTradingConfig:
     max_reconciliation_error_rate: float = 0.0    # Zero tolerance for ledger reconciliation mismatch
     max_drawdown_pct: float = 0.10                # Max 10% drawdown
 
+    # Historical Out-of-Sample Backtest Promotion Criteria (Pillar 1)
+    min_historical_trades: int = 50               # Minimum 50 historical trades across 2022-2026
+    min_pullback_cagr_pct: float = 0.0            # Positive CAGR required for pullbacks
+    min_catalyst_dip_cagr_pct: float = 0.0        # Positive CAGR required for catalyst dips
+    max_historical_drawdown_pct: float = 20.0     # Max 20.0% drawdown across 2022-2026 out-of-fold data
+    min_profit_retained_after_trims_pct: float = 50.0 # Min 50.0% profit retained after trims
+    max_stop_out_rate_pct: float = 50.0           # Max 50.0% stop-out rate
+    require_holdout_positive_pnl: bool = True     # Positive net PnL required in untuned holdout (2025-2026)
+
     def validate(self) -> None:
         if self.min_observations_for_promotion <= 0:
             raise ValueError("min_observations_for_promotion must be positive")
@@ -410,6 +419,14 @@ class ShadowTradingConfig:
             raise ValueError("max_feature_psi must be positive")
         if not (0.0 < self.max_drawdown_pct <= 0.50):
             raise ValueError("max_drawdown_pct must be in (0.0, 0.50]")
+        if self.min_historical_trades <= 0:
+            raise ValueError("min_historical_trades must be positive")
+        if not (0.0 < self.max_historical_drawdown_pct <= 50.0):
+            raise ValueError("max_historical_drawdown_pct must be in (0.0, 50.0]")
+        if not (0.0 <= self.min_profit_retained_after_trims_pct <= 100.0):
+            raise ValueError("min_profit_retained_after_trims_pct must be in [0.0, 100.0]")
+        if not (0.0 < self.max_stop_out_rate_pct <= 100.0):
+            raise ValueError("max_stop_out_rate_pct must be in (0.0, 100.0]")
 
 
 @dataclass
