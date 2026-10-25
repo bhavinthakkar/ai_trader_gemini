@@ -34,6 +34,16 @@ SECURITIES_DIRECTORY: Dict[str, Dict[str, Any]] = {
         "us_symbol": "000660.KS",
         "currency": "KRW",
         "currency_symbol": "₩",
+        "exchange": "Korea Exchange (KRX)",
+    },
+    "000660": {
+        "company_name": "SK hynix Inc.",
+        "isin": "KR7000660001",
+        "wkn": "923145",
+        "us_symbol": "000660.KS",
+        "currency": "KRW",
+        "currency_symbol": "₩",
+        "exchange": "Korea Exchange (KRX)",
     },
     # ------------------ US Dual-Listings Traded on gettex / EIX / XETRA (EUR) ------------------
     "NVDA": {
@@ -699,8 +709,8 @@ def resolve_symbol(
 
         # Determine whether to return European dual-listing or native US ticker
         wants_european = force_european or pref_upper in ("DE", "MU")
-        if wants_european:
-            chosen_symbol = rec["gettex_symbol"] if target_suffix == ".MU" else rec["xetra_symbol"]
+        if wants_european and ("xetra_symbol" in rec or "gettex_symbol" in rec):
+            chosen_symbol = rec["gettex_symbol"] if target_suffix == ".MU" else rec.get("xetra_symbol", rec.get("gettex_symbol"))
             return {
                 "query": raw,
                 "symbol": chosen_symbol,
@@ -712,8 +722,8 @@ def resolve_symbol(
                 "currency_symbol": "€",
                 "exchange": default_venue,
                 "is_european": True,
-                "xetra_symbol": rec["xetra_symbol"],
-                "gettex_symbol": rec["gettex_symbol"],
+                "xetra_symbol": rec.get("xetra_symbol", chosen_symbol),
+                "gettex_symbol": rec.get("gettex_symbol", chosen_symbol),
             }
         elif is_us_security:
             # Return native US ticker (USD, $)
@@ -728,12 +738,12 @@ def resolve_symbol(
                 "currency_symbol": "$",
                 "exchange": "US Exchange (NYSE/NASDAQ)",
                 "is_european": False,
-                "xetra_symbol": rec["xetra_symbol"],
-                "gettex_symbol": rec["gettex_symbol"],
+                "xetra_symbol": rec.get("xetra_symbol", f"{rec['us_symbol']}.DE"),
+                "gettex_symbol": rec.get("gettex_symbol", f"{rec['us_symbol']}.MU"),
             }
-        else:
+        elif "xetra_symbol" in rec or "gettex_symbol" in rec:
             # Native European security (e.g. SAP, BMW) defaults to European exchange
-            chosen_symbol = rec["gettex_symbol"] if target_suffix == ".MU" else rec["xetra_symbol"]
+            chosen_symbol = rec["gettex_symbol"] if target_suffix == ".MU" else rec.get("xetra_symbol", rec.get("gettex_symbol"))
             return {
                 "query": raw,
                 "symbol": chosen_symbol,
@@ -745,8 +755,25 @@ def resolve_symbol(
                 "currency_symbol": rec.get("currency_symbol", "€"),
                 "exchange": default_venue,
                 "is_european": True,
-                "xetra_symbol": rec["xetra_symbol"],
-                "gettex_symbol": rec["gettex_symbol"],
+                "xetra_symbol": rec.get("xetra_symbol", chosen_symbol),
+                "gettex_symbol": rec.get("gettex_symbol", chosen_symbol),
+            }
+        else:
+            # International non-European security (e.g. 000660.KS)
+            symbol = rec.get("us_symbol", norm)
+            return {
+                "query": raw,
+                "symbol": symbol,
+                "underlying_symbol": symbol,
+                "company_name": rec.get("company_name", norm),
+                "isin": rec.get("isin", ""),
+                "wkn": rec.get("wkn", ""),
+                "currency": rec.get("currency", "USD"),
+                "currency_symbol": rec.get("currency_symbol", "$"),
+                "exchange": rec.get("exchange", "International Exchange"),
+                "is_european": is_european_symbol(norm),
+                "xetra_symbol": rec.get("xetra_symbol", f"{symbol}.DE"),
+                "gettex_symbol": rec.get("gettex_symbol", f"{symbol}.MU"),
             }
 
     # 6. Dynamic online ISIN lookup fallback

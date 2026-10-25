@@ -666,12 +666,13 @@ with tab2:
             if not ml_ctx:
                 ml_ctx = get_ml_context(selected_stock)
 
-            if ml_ctx:
-                score_val = float(ml_ctx.get("score_0_100", 0.0))
+            if ml_ctx and ml_ctx.get("in_scope") and ml_ctx.get("score_0_100") is not None:
+                score_val = float(ml_ctx.get("score_0_100") or 0.0)
                 cls = classify_ml_signal(score_val)
                 ml_badge = ml_ctx.get("badge") or cls["badge"]
                 ml_tier = ml_ctx.get("tier") or cls["tier"]
-                ml_pred_pct = ml_ctx.get("predicted_20d_excess_return", 0.0) * 100.0
+                pred_ret = ml_ctx.get("predicted_20d_excess_return")
+                ml_pred_pct = (float(pred_ret) * 100.0) if pred_ret is not None else 0.0
                 in_top10 = ml_ctx.get("in_top_10_portfolio", False)
 
                 if in_top10:
@@ -1172,7 +1173,10 @@ with tab4:
             chg = s.get("change_pct", 0.0)
             sign = "+" if chg >= 0 else ""
             ml_ctx = get_ml_context(s["symbol"])
-            ml_disp = f"{ml_ctx['score_0_100']:.1f} (#{ml_ctx['rank']})" if ml_ctx else "—"
+            if ml_ctx and ml_ctx.get("score_0_100") is not None:
+                ml_disp = f"{ml_ctx['score_0_100']:.1f} (#{ml_ctx.get('rank', '—')})"
+            else:
+                ml_disp = "—"
             table_rows.append({
                 "Ticker": s["symbol"],
                 "Company": s["name"],
@@ -1204,8 +1208,10 @@ with tab4:
                 m_c2.metric("Market Cap", s["market_cap_str"])
                 m_c3.metric("RVOL (20d avg)", f"{s['rvol']:.1f}x")
                 m_c4.metric("RSI14 / ATR", f"{s.get('rsi14', 'N/A')} / {curr_sym}{s.get('atr', 'N/A')}")
-                if ml_ctx:
-                    m_c5.metric("🤖 Pure ML Score", f"{ml_ctx['score_0_100']:.1f}/100", delta=f"{ml_ctx['predicted_20d_excess_return']*100:+.1f}% 20d")
+                if ml_ctx and ml_ctx.get("score_0_100") is not None:
+                    pred_ret = ml_ctx.get("predicted_20d_excess_return")
+                    delta_str = f"{pred_ret*100:+.1f}% 20d" if pred_ret is not None else None
+                    m_c5.metric("🤖 Pure ML Score", f"{ml_ctx['score_0_100']:.1f}/100", delta=delta_str)
                 else:
                     m_c5.metric("🤖 Pure ML Score", "N/A")
 
@@ -1466,33 +1472,38 @@ with tab8:
         evaluator = ShadowPromotionEvaluator()
         promo = evaluator.evaluate(report)
 
-        p_status = promo.status.value
-        p_badge = "badge-open-long" if p_status == "PASSED" else ("badge-ml-neutral" if p_status == "PENDING_OBSERVATION" else "badge-sell")
+        p_status = promo.status.value if hasattr(promo.status, "value") else str(promo.status)
+        p_badge = "badge-open-long" if p_status == "PROMOTED_TO_PRODUCTION" else ("badge-ml-neutral" if "OBSERVATION" in p_status else "badge-sell")
+
+        obs_count = report.total_observations
+        min_obs = evaluator.policy.shadow_trading.min_observations_for_promotion if hasattr(evaluator.policy, "shadow_trading") else 20
+        passed_count = len(promo.passed_criteria)
+        total_req_count = len(promo.passed_criteria) + len(promo.failed_criteria)
 
         p_c1, p_c2, p_c3, p_c4 = st.columns([1.5, 1, 1, 1])
         p_c1.markdown(f"**Gate Status:** <span class='{p_badge}'>{p_status}</span>", unsafe_allow_html=True)
-        p_c2.metric("Observations", f"{promo.observation_count} / {promo.required_min_observations}")
-        p_c3.metric("Passed Requirements", f"{promo.passed_requirements_count} / {promo.total_requirements_count}")
-        p_c4.metric("Live Eligible", "YES" if promo.is_eligible_for_live else "NO")
+        p_c2.metric("Observations", f"{obs_count} / {min_obs}")
+        p_c3.metric("Passed Requirements", f"{passed_count} / {total_req_count}" if total_req_count > 0 else "0 / 8")
+        p_c4.metric("Live Eligible", "YES" if promo.is_promoted else "NO")
 
-        st.caption(f"**Summary:** {promo.recommendation_summary}")
+        st.caption(f"**Summary:** {promo.remediation_guidance or p_status}")
 
-        if promo.remediation_actions:
-            st.warning("⚠️ **Required Remediation Actions:** " + " • ".join(promo.remediation_actions))
+        if promo.failed_criteria:
+            st.warning("⚠️ **Required Remediation Actions:** " + " • ".join(promo.failed_criteria))
 
         # 8 Formal Measurements Table
         st.markdown("#### 📊 The Eight Formal Shadow Measurements")
         m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-        m_col1.metric("1. Signal Reproducibility", f"{report.reproducibility.decision_match_rate * 100:.0f}%", help="Deterministic decision match rate")
-        m_col2.metric("2. Median Latency", f"{report.latency_freshness.median_decision_latency_seconds * 1000:.1f}ms", help="Decision execution latency")
-        m_col3.metric("3. Directional Accuracy", f"{report.predictive_performance.directional_accuracy * 100:.0f}%", help="Forecast direction consistency")
-        m_col4.metric("4. Cost-Adjusted Sharpe", f"{report.cost_adjusted.net_sharpe_ratio:.2f}", help="Net Sharpe after realistic slippage")
+        m_col1.metric("1. Signal Reproducibility", f"{report.reproducibility_rate * 100:.0f}%", help="Deterministic decision match rate")
+        m_col2.metric("2. Mean Latency", f"{report.mean_latency_seconds * 1000:.1f}ms", help="Decision execution latency")
+        m_col3.metric("3. Directional Accuracy", f"{report.directional_accuracy * 100:.0f}%", help="Forecast direction consistency")
+        m_col4.metric("4. Cost-Adjusted Sharpe", f"{report.net_sharpe_ratio:.2f}", help="Net Sharpe after realistic slippage")
 
         m_col5, m_col6, m_col7, m_col8 = st.columns(4)
-        m_col5.metric("5. Gate Rejection Rate", f"{report.gate_efficiency.rejection_rate * 100:.0f}%", help="Trades filtered by compliance gates")
-        m_col6.metric("6. Model Drift (PSI)", f"{report.model_drift.aggregate_psi:.3f}", help="Population Stability Index")
-        m_col7.metric("7. LLM PIT Adherence", f"{report.llm_temporal_integrity.point_in_time_adherence * 100:.0f}%", help="Timestamp-verified evidence citations")
-        m_col8.metric("8. Ledger Discrepancies", f"{report.risk_compliance.reconciliation_discrepancies}", help="State drift between portfolio & ledger")
+        m_col5.metric("5. Gate Rejection Rate", f"{report.rejection_rate_pct:.0f}%", help="Trades filtered by compliance gates")
+        m_col6.metric("6. Model Drift (PSI)", f"{report.overall_psi:.3f}", help="Population Stability Index")
+        m_col7.metric("7. Temporal Integrity", f"{(1.0 - report.temporal_leakage_rate) * 100:.0f}%", help="Timestamp-verified Point-in-Time data citations")
+        m_col8.metric("8. Ledger Discrepancies", f"{report.reconciliation_error_rate * 100:.0f}%", help="State drift between portfolio & ledger")
 
         # Shadow Trading Decisions Audit Log
         st.markdown("#### 📜 Shadow Trading Execution Log")

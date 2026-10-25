@@ -1004,7 +1004,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--html",
-        type=str,
+        nargs="?",
+        const="dashboard.html",
         default="dashboard.html",
         help="Path to generate standalone HTML dashboard (default: dashboard.html)"
     )
