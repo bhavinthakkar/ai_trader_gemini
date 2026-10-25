@@ -435,29 +435,32 @@ class VolatilityEventLiquidityGate:
                 metrics=metrics,
             )
 
-        # 4. Options 1-Sigma Expected Move vs Stop Placement
-        horizon = active_policy.volatility.option_horizon_days
-        expected_move, move_source = cls.calculate_expected_move(price, iv_pct, atr, horizon_days=horizon)
-        stop_distance = abs(price - stop_loss)
-        min_required_stop = expected_move * active_policy.volatility.min_stop_noise_multiple
+        # 4. Options 1-Sigma Expected Move vs Stop Placement (evaluated when options IV is available)
+        expected_move: Optional[float] = None
+        move_source: str = "NONE"
+        if iv_pct is not None and iv_pct > 0.0:
+            horizon = active_policy.volatility.option_horizon_days
+            expected_move, move_source = cls.calculate_expected_move(price, iv_pct, atr, horizon_days=horizon)
+            stop_distance = abs(price - stop_loss)
+            min_required_stop = expected_move * active_policy.volatility.min_stop_noise_multiple
 
-        metrics["expected_move_dollars"] = expected_move
-        metrics["expected_move_source"] = move_source
-        metrics["stop_distance_dollars"] = round(stop_distance, 2)
-        metrics["min_required_noise_stop"] = round(min_required_stop, 2)
+            metrics["expected_move_dollars"] = expected_move
+            metrics["expected_move_source"] = move_source
+            metrics["stop_distance_dollars"] = round(stop_distance, 2)
+            metrics["min_required_noise_stop"] = round(min_required_stop, 2)
 
-        if stop_distance < min_required_stop:
-            return GateResult(
-                gate_name="3. Volatility, Events & Liquidity",
-                passed=False,
-                status=GateStatus.FAIL,
-                reason_code="STOP_INSIDE_NOISE_ZONE",
-                message=(
-                    f"Stop distance ${stop_distance:.2f} is inside the 1-sigma noise zone "
-                    f"(${min_required_stop:.2f} required via {move_source}); high risk of routine noise exit."
-                ),
-                metrics=metrics,
-            )
+            if stop_distance < min_required_stop:
+                return GateResult(
+                    gate_name="3. Volatility, Events & Liquidity",
+                    passed=False,
+                    status=GateStatus.FAIL,
+                    reason_code="STOP_INSIDE_NOISE_ZONE",
+                    message=(
+                        f"Stop distance ${stop_distance:.2f} is inside the 1-sigma noise zone "
+                        f"(${min_required_stop:.2f} required via {move_source}); high risk of routine noise exit."
+                    ),
+                    metrics=metrics,
+                )
 
         # 5. Universal Liquidity Controls & Market Impact Sizing
         if rvol_20d is not None and rvol_20d < active_policy.trade_quality.min_rvol_20d:
@@ -512,12 +515,13 @@ class VolatilityEventLiquidityGate:
                 metrics=metrics,
             )
 
+        noise_desc = f" (${expected_move:.2f} {move_source})" if expected_move is not None else ""
         return GateResult(
             gate_name="3. Volatility, Events & Liquidity",
             passed=True,
             status=GateStatus.PASS,
             message=(
-                f"Volatility and liquidity verified: Stop outside 1-sigma noise (${expected_move:.2f} {move_source}), "
+                f"Volatility and liquidity verified: Stop outside 1-sigma noise{noise_desc}, "
                 f"market impact {impact_bps:.1f} bps within {active_policy.trade_quality.max_market_impact_bps:.0f} bps limit."
             ),
             metrics=metrics,
@@ -573,6 +577,7 @@ class SellExitSymmetryGate:
         available_cash: Optional[float] = None,
         portfolio_equity: Optional[float] = None,
         ticker: str = "TICKER",
+        is_certified_extension_sell: bool = False,
     ) -> GateResult:
         active_policy = policy or get_default_policy()
         metrics = {
@@ -703,6 +708,7 @@ class SellExitSymmetryGate:
                 days_to_ex_dividend=days_to_ex_dividend,
                 available_cash=available_cash,
                 portfolio_equity=portfolio_equity,
+                is_certified_extension_sell=is_certified_extension_sell,
             )
             metrics.update(short_res.metrics)
             if not short_res.is_eligible:
@@ -810,13 +816,17 @@ class GatedConfidenceGate:
         data_completeness: float,
         policy: Optional[TradingPolicy] = None,
         is_certified_dip_buy: bool = False,
+        candidate_type: Optional[str] = None,
     ) -> GateResult:
         active_policy = policy or get_default_policy()
-        min_thresh = (
-            active_policy.dip_buy.min_confidence_threshold
-            if is_certified_dip_buy
-            else active_policy.trade_quality.min_confidence_threshold
-        )
+        c_type = str(candidate_type or "").upper()
+        is_dislocation = is_certified_dip_buy or c_type in ("CATALYST_DIP_BUY", "OVERSOLD_DIP_BUY", "EXTENSION_SELL")
+        if is_dislocation:
+            min_thresh = active_policy.dip_buy.min_confidence_threshold
+        elif c_type in ("PULLBACK_BUY", "BREAKDOWN_SHORT", "VALUE_BUY", "MOMENTUM_BUY", "QUANT_COMPOSITE_BUY"):
+            min_thresh = min(active_policy.trade_quality.min_confidence_threshold, getattr(active_policy.signal_strength, "hold_ceiling", 0.60))
+        else:
+            min_thresh = active_policy.trade_quality.min_confidence_threshold
 
         conf, meta = cls.calculate_confidence(
             composite_score=composite_score,
@@ -824,12 +834,13 @@ class GatedConfidenceGate:
             data_completeness=data_completeness,
             decision=candidate_decision,
             policy=active_policy,
-            is_certified_dip_buy=is_certified_dip_buy,
+            is_certified_dip_buy=is_dislocation,
         )
 
         metrics = dict(meta)
         metrics["confidence_threshold"] = min_thresh
-        metrics["is_certified_dip_buy"] = is_certified_dip_buy
+        metrics["is_certified_dip_buy"] = is_dislocation
+        metrics["candidate_type"] = candidate_type
 
         # Neutral HOLD is always acceptable
         if candidate_decision.upper() == "HOLD":

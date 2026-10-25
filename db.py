@@ -127,7 +127,14 @@ def init_db(db_path=DB_PATH):
             "structured_decision": "TEXT",
             "danelfin_score": "REAL",
             "danelfin_signal": "TEXT",
-            "danelfin_details": "TEXT"
+            "danelfin_details": "TEXT",
+            "model_decision": "TEXT",
+            "candidate_action": "TEXT",
+            "candidate_type": "TEXT",
+            "setup_evidence": "TEXT",
+            "gate_results": "TEXT",
+            "rejection_reasons": "TEXT",
+            "final_decision": "TEXT"
         }
 
         cursor.execute("PRAGMA table_info(signals);")
@@ -482,6 +489,15 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
             danelfin_signal = _ensure_str(item.get("danelfin_signal") or danelfin_data.get("signal", ""), "")
             danelfin_details = json.dumps(danelfin_data) if danelfin_data else ""
 
+            # Explicit Decision Contract (Step 2)
+            model_decision = _ensure_str(item.get("model_decision") or decision, "HOLD")
+            candidate_action = _ensure_str(item.get("candidate_action"), "")
+            candidate_type = _ensure_str(item.get("candidate_type"), "")
+            setup_evidence = _ensure_str(item.get("setup_evidence") or {})
+            gate_results = _ensure_str(item.get("gate_results") or {})
+            rejection_reasons = _ensure_str(item.get("rejection_reasons") or [])
+            final_decision = _ensure_str(item.get("final_decision") or decision, "HOLD")
+
             # Backward-compatible text summaries
             reason = _ensure_str(item.get("reason") or bull_case)
             inst_data = _ensure_str(item.get("institutional_data", ""))
@@ -513,8 +529,9 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                     pillar_status, pillar_input_tracking, financial_quality_score, is_value_trap, value_trap_reasons,
                     ml_score, ml_predicted_return, ml_rank, ml_universe_size, ml_signal_label, ml_disposition,
                     run_id, model_status, passed_gates, failed_gates, data_quality_status, position_action, reason_codes, structured_decision,
-                    danelfin_score, danelfin_signal, danelfin_details
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    danelfin_score, danelfin_signal, danelfin_details,
+                    model_decision, candidate_action, candidate_type, setup_evidence, gate_results, rejection_reasons, final_decision
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 timestamp, stock, decision, confidence, reason, inst_data, macro_data, news,
                 bank_coverage, risk_info, pe_peg, model_used, raw_json,
@@ -535,7 +552,8 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                 pillar_status, pillar_input_tracking, financial_quality_score, is_value_trap, value_trap_reasons,
                 ml_score, ml_predicted_return, ml_rank, ml_universe_size, ml_signal_label, ml_disposition,
                 run_id, model_status, passed_gates, failed_gates, data_quality_status, position_action, reason_codes, structured_decision,
-                danelfin_score, danelfin_signal, danelfin_details
+                danelfin_score, danelfin_signal, danelfin_details,
+                model_decision, candidate_action, candidate_type, setup_evidence, gate_results, rejection_reasons, final_decision
             ))
 
             signal_id = cursor.lastrowid

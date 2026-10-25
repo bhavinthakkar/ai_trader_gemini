@@ -449,6 +449,7 @@ class ShortEligibilityValidator:
         days_to_ex_dividend: Optional[int] = None,
         available_cash: Optional[float] = None,
         portfolio_equity: Optional[float] = None,
+        is_certified_extension_sell: bool = False,
     ) -> ShortEligibilityResult:
         active_policy = policy or get_default_policy()
         pr = active_policy.portfolio_risk
@@ -468,10 +469,11 @@ class ShortEligibilityValidator:
             "valuation_history_score": valuation_history_score,
             "reward_risk_ratio": reward_risk_ratio,
             "days_to_ex_dividend": days_to_ex_dividend,
+            "is_certified_extension_sell": is_certified_extension_sell,
         }
 
         # 1. Composite Score Breakdown Ceiling Check
-        ceiling = active_policy.scores.short_maximum
+        ceiling = 65.0 if is_certified_extension_sell else active_policy.scores.short_maximum
         if composite_score is None:
             return ShortEligibilityResult(
                 is_eligible=False,
@@ -491,7 +493,7 @@ class ShortEligibilityValidator:
 
         # 2. Structural Trend Breakdown Verification (Not Just Score Alone)
         # Price must trade below key EMAs, confirming established downward trajectory
-        if pr.short_require_trend_breakdown:
+        if pr.short_require_trend_breakdown and not is_certified_extension_sell:
             trend_broken = True
             fail_reason = ""
             if ema_20 is not None and entry_price > ema_20:

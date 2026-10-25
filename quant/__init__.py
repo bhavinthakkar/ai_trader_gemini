@@ -116,6 +116,7 @@ from quant.structured_decision import (
     StructuredDecision,
     StructuredDecisionEngine,
     build_structured_decision,
+    qualify_candidate_setup,
 )
 from quant.position_sizing import (
     BindingConstraint,
@@ -253,6 +254,7 @@ __all__ = [
     "StructuredDecision",
     "StructuredDecisionEngine",
     "build_structured_decision",
+    "qualify_candidate_setup",
     "BindingConstraint",
     "InvestmentMandate",
     "PositionSizingResult",

@@ -529,6 +529,14 @@ with tab1:
                 cols_to_use.append("danelfin_score")
                 col_renames["danelfin_score"] = "🧠 Danelfin AI"
 
+            if "candidate_type" in df_display.columns and df_display["candidate_type"].notna().any():
+                cols_to_use.append("candidate_type")
+                col_renames["candidate_type"] = "Candidate Setup"
+
+            if "model_decision" in df_display.columns and df_display["model_decision"].notna().any():
+                cols_to_use.append("model_decision")
+                col_renames["model_decision"] = "Model Opinion"
+
             cols_to_use.extend(["pe_and_peg", "model_used", "timestamp"])
             col_renames["pe_and_peg"] = "Fwd Valuation"
             col_renames["model_used"] = "Model"

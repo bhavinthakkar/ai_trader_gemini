@@ -9,6 +9,7 @@ from quant.structured_decision import (
     StructuredDecision,
     StructuredDecisionEngine,
     build_structured_decision,
+    qualify_candidate_setup,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "StructuredDecision",
     "StructuredDecisionEngine",
     "build_structured_decision",
+    "qualify_candidate_setup",
 ]

@@ -143,18 +143,20 @@ class StandardReasonCode:
 
     # General Fallback
     NO_TRADE_DEFAULT = "NO_TRADE_DEFAULT"
+    NO_QUALIFIED_SETUP = "NO_QUALIFIED_SETUP"
+    VOLATILITY_REGIME = "VOLATILITY_REGIME"
 
 
 @dataclass
 class StructuredDecision:
     """
-    Pure structured investment decision contract (Step 6.4).
+    Pure structured investment decision contract (Step 6.4 & Step 2 Contract).
     Contains no free-form narrative explanations; derived deterministically
     from mathematical components and policy configuration.
     """
     run_id: str
     ticker: str
-    decision: str                                   # "BUY", "HOLD", "SELL"
+    decision: str                                   # "BUY", "DEEP BUY", "HOLD", "BOOK PROFIT", "SELL"
     composite_score: Optional[float]                # e.g. 58.4
     model_status: str                              # e.g. "IN_SCOPE", "OUT_OF_SCOPE"
     passed_gates: List[str]                        # e.g. ["DATA_QUALITY", "EVENT_RISK"]
@@ -164,12 +166,34 @@ class StructuredDecision:
     reason_codes: List[str]                        # e.g. ["SCORE_BELOW_BUY_THRESHOLD"]
     timestamp: str = ""
     metrics: Dict[str, Any] = field(default_factory=dict)
+    model_decision: Optional[str] = None
+    candidate_action: Optional[str] = None
+    candidate_type: Optional[str] = None
+    setup_evidence: Dict[str, Any] = field(default_factory=dict)
+    rejection_reasons: List[str] = field(default_factory=list)
 
     def __post_init__(self):
         if not self.timestamp:
             self.timestamp = datetime.now(timezone.utc).isoformat()
         if self.composite_score is not None:
             self.composite_score = round(float(self.composite_score), 2)
+        if not self.candidate_action:
+            self.candidate_action = str(self.decision).upper()
+        if not self.candidate_type:
+            self.candidate_type = "NO_SETUP" if str(self.decision).upper() == "HOLD" else "GENERAL_SETUP"
+        if not self.rejection_reasons:
+            if self.failed_gates or (self.decision == "HOLD" and self.reason_codes):
+                self.rejection_reasons = [
+                    r for r in self.reason_codes
+                    if r not in (
+                        StandardReasonCode.BUY_ORDER_CERTIFIED,
+                        StandardReasonCode.SHORT_ORDER_CERTIFIED,
+                        StandardReasonCode.HOLDING_THESIS_INTACT,
+                        StandardReasonCode.PROFIT_TARGET_REACHED,
+                    )
+                ]
+            elif self.decision == "HOLD" and self.candidate_type == "NO_SETUP":
+                self.rejection_reasons = [StandardReasonCode.NO_QUALIFIED_SETUP]
 
     def to_dict(self) -> Dict[str, Any]:
         """Returns clean serializable dictionary."""
@@ -177,6 +201,11 @@ class StructuredDecision:
             "run_id": str(self.run_id),
             "ticker": str(self.ticker).upper(),
             "decision": str(self.decision).upper(),
+            "final_decision": str(self.decision).upper(),
+            "model_decision": str(self.model_decision).upper() if self.model_decision else None,
+            "candidate_action": str(self.candidate_action).upper() if self.candidate_action else None,
+            "candidate_type": str(self.candidate_type).upper() if self.candidate_type else None,
+            "setup_evidence": dict(self.setup_evidence) if self.setup_evidence else {},
             "composite_score": self.composite_score,
             "model_status": str(self.model_status),
             "passed_gates": list(self.passed_gates),
@@ -184,6 +213,13 @@ class StructuredDecision:
             "data_quality_status": str(self.data_quality_status),
             "position_action": str(self.position_action),
             "reason_codes": list(self.reason_codes),
+            "rejection_reasons": list(self.rejection_reasons),
+            "gate_results": {
+                "passed_gates": list(self.passed_gates),
+                "failed_gates": list(self.failed_gates),
+                "reason_codes": list(self.reason_codes),
+                "data_quality_status": str(self.data_quality_status),
+            },
             "timestamp": self.timestamp,
             "metrics": dict(self.metrics),
         }
@@ -191,6 +227,283 @@ class StructuredDecision:
     def to_json(self, indent: Optional[int] = None) -> str:
         """Serializes structured decision to deterministic JSON string."""
         return json.dumps(self.to_dict(), indent=indent, sort_keys=True)
+
+
+def qualify_candidate_setup(
+    ticker: str,
+    composite_score: Optional[float],
+    position_state: str = "FLAT",
+    current_price: Optional[float] = None,
+    stop_loss: Optional[float] = None,
+    target_price: Optional[float] = None,
+    atr: Optional[float] = None,
+    rsi14: Optional[float] = None,
+    drawdown_5d_pct: Optional[float] = None,
+    pillar_scores: Optional[Dict[str, Optional[float]]] = None,
+    reward_risk_ratio: Optional[float] = None,
+    short_reward_risk_ratio: Optional[float] = None,
+    catalyst_path: Optional[str] = None,
+    catalyst_setup: Optional[Dict[str, Any]] = None,
+    is_value_trap: bool = False,
+    model_decision: Optional[str] = None,
+    primary_driver: Optional[str] = None,
+    policy: Optional[TradingPolicy] = None,
+) -> Tuple[str, str, Dict[str, Any]]:
+    """
+    Deterministically qualifies candidate_action, candidate_type, and setup_evidence.
+    Separates candidate generation from compliance gate verification and model opinion.
+    """
+    pol = policy or get_default_policy()
+    pos_str = str(position_state).strip().upper()
+    is_open_long = pos_str in ("LONG", "HOLDING", "TRUE", "1")
+    is_open_short = pos_str in ("SHORT", "BORROWED")
+    is_open = is_open_long or is_open_short
+
+    raw_model_dec = str(model_decision or "HOLD").strip().upper()
+    if raw_model_dec in ("DEEP BUY", "DIP BUY", "DEEP_BUY", "DIP_BUY"):
+        m_dec = "DEEP BUY"
+    elif raw_model_dec in ("BOOK PROFIT", "TAKE PROFIT", "BOOK_PROFIT", "TAKE_PROFIT"):
+        m_dec = "BOOK PROFIT"
+    elif "BUY" in raw_model_dec:
+        m_dec = "BUY"
+    elif "SELL" in raw_model_dec:
+        m_dec = "SELL"
+    else:
+        m_dec = "HOLD"
+
+    c_score = float(composite_score) if composite_score is not None else None
+    c_price = float(current_price) if (current_price is not None and current_price > 0) else None
+    c_stop = float(stop_loss) if (stop_loss is not None and stop_loss > 0) else None
+    c_target = float(target_price) if (target_price is not None and target_price > 0) else None
+    c_rsi = float(rsi14) if rsi14 is not None else None
+    c_dd5 = float(drawdown_5d_pct) if drawdown_5d_pct is not None else None
+    c_rr = float(reward_risk_ratio) if reward_risk_ratio is not None else None
+    c_short_rr = float(short_reward_risk_ratio) if short_reward_risk_ratio is not None else None
+
+    pillars = pillar_scores or {}
+    trend_sc = float(pillars.get("trend")) if pillars.get("trend") is not None else None
+    val_sc = float(pillars.get("valuation_history")) if pillars.get("valuation_history") is not None else None
+
+    # 1. Existing Open Position Management
+    if is_open:
+        if is_open_long:
+            if c_price is not None and c_stop is not None and c_price <= c_stop:
+                return (
+                    "SELL",
+                    "STOP_LOSS_EXIT",
+                    {"trigger": "stop_loss_breached", "current_price": c_price, "stop_loss": c_stop},
+                )
+            if c_price is not None and c_target is not None and c_price >= c_target:
+                return (
+                    "BOOK PROFIT",
+                    "PROFIT_TARGET_EXIT",
+                    {"trigger": "profit_target_reached", "current_price": c_price, "target_price": c_target},
+                )
+            if m_dec == "BOOK PROFIT":
+                return (
+                    "BOOK PROFIT",
+                    "PROFIT_TARGET_EXIT",
+                    {"trigger": "model_proposed_profit_taking", "model_decision": m_dec},
+                )
+            if c_score is not None and c_score < pol.holding_guard.catastrophic_composite_floor:
+                return (
+                    "SELL",
+                    "THESIS_BREAKDOWN_EXIT",
+                    {"trigger": "catastrophic_composite_floor_breached", "composite_score": c_score, "floor": pol.holding_guard.catastrophic_composite_floor},
+                )
+            if trend_sc is not None and trend_sc < 40.0:
+                return (
+                    "SELL",
+                    "THESIS_BREAKDOWN_EXIT",
+                    {"trigger": "trend_collapse", "trend_score": trend_sc},
+                )
+            if m_dec == "SELL":
+                return (
+                    "SELL",
+                    "DISCRETIONARY_EXIT",
+                    {"trigger": "model_proposed_exit", "model_decision": m_dec},
+                )
+            return (
+                "HOLD",
+                "HOLDING_THESIS_INTACT",
+                {"trigger": "holding_intact", "composite_score": c_score, "current_price": c_price, "stop_loss": c_stop},
+            )
+        else: # is_open_short
+            if c_price is not None and c_stop is not None and c_price >= c_stop:
+                return (
+                    "BUY",
+                    "STOP_LOSS_EXIT",
+                    {"trigger": "short_stop_breached", "current_price": c_price, "stop_loss": c_stop},
+                )
+            if c_price is not None and c_target is not None and c_price <= c_target:
+                return (
+                    "BUY",
+                    "PROFIT_TARGET_EXIT",
+                    {"trigger": "short_target_reached", "current_price": c_price, "target_price": c_target},
+                )
+            if c_score is not None and c_score > 60.0:
+                return (
+                    "BUY",
+                    "THESIS_BREAKDOWN_EXIT",
+                    {"trigger": "short_thesis_collapsed_score_rebound", "composite_score": c_score},
+                )
+            return (
+                "HOLD",
+                "HOLDING_THESIS_INTACT",
+                {"trigger": "short_position_maintained", "composite_score": c_score, "current_price": c_price, "stop_loss": c_stop},
+            )
+
+    # 2. Refusal of unverified news / macro external events
+    p_driver = str(primary_driver or "").strip().upper()
+    if p_driver in ("NEWS_CATALYST", "MACRO_EVENT") and not catalyst_path:
+        return (
+            "HOLD",
+            "NO_SETUP",
+            {"trigger": "unverified_external_catalyst_refused", "primary_driver": p_driver},
+        )
+
+    # 3. Flat Position Candidate Setup Qualification
+    cat_dir = str(catalyst_path).strip().upper() if catalyst_path else None
+    if not cat_dir and p_driver == "NEWS_CATALYST" and catalyst_setup and catalyst_setup.get("qualified"):
+        cat_dir = str(catalyst_setup.get("direction", "")).strip().upper()
+
+    # A. Certified Catalyst Dip Buy
+    if cat_dir == "DIP_BUY" and c_score is not None and c_score >= pol.scores.dip_buy_minimum and not is_value_trap:
+        act = "DEEP BUY" if m_dec == "DEEP BUY" else "BUY"
+        return (
+            act,
+            "CATALYST_DIP_BUY",
+            {
+                "trigger": "catalyst_dip_dislocation",
+                "composite_score": c_score,
+                "catalyst_direction": "DIP_BUY",
+                "reasons": catalyst_setup.get("reasons", []) if catalyst_setup else ["verified_catalyst_dislocation"],
+                "floor": pol.scores.dip_buy_minimum,
+            },
+        )
+
+    # B. Certified Oversold Dip Buy
+    if c_rsi is not None and c_rsi <= 35.0 and c_score is not None and c_score >= pol.scores.dip_buy_minimum and not is_value_trap:
+        act = "DEEP BUY" if m_dec == "DEEP BUY" else "BUY"
+        return (
+            act,
+            "OVERSOLD_DIP_BUY",
+            {
+                "trigger": "rsi_oversold_discount",
+                "rsi14": c_rsi,
+                "composite_score": c_score,
+                "drawdown_5d_pct": c_dd5,
+                "floor": pol.scores.dip_buy_minimum,
+            },
+        )
+
+    # C. Certified Extension Sell Setup
+    if cat_dir == "EXTENSION_SELL" or (c_rsi is not None and c_rsi >= 72.0 and c_score is not None and c_score <= 65.0 and m_dec in ("SELL", "BOOK PROFIT")):
+        return (
+            "SELL",
+            "EXTENSION_SELL",
+            {
+                "trigger": "overextended_exhaustion",
+                "composite_score": c_score,
+                "rsi14": c_rsi,
+                "short_reward_risk_ratio": c_short_rr,
+                "catalyst_direction": cat_dir,
+            },
+        )
+
+    # D. Quantitative Long Setups (composite score >= buy_minimum, default 60.0)
+    if c_score is not None and c_score >= pol.scores.buy_minimum and not is_value_trap:
+        if c_rsi is not None and 35.0 < c_rsi <= 55.0:
+            return (
+                "BUY",
+                "PULLBACK_BUY",
+                {
+                    "trigger": "pullback_in_uptrend",
+                    "composite_score": c_score,
+                    "rsi14": c_rsi,
+                    "reward_risk_ratio": c_rr,
+                },
+            )
+        if val_sc is not None and val_sc >= 65.0:
+            return (
+                "BUY",
+                "VALUE_BUY",
+                {
+                    "trigger": "valuation_history_discount",
+                    "composite_score": c_score,
+                    "valuation_history": val_sc,
+                    "reward_risk_ratio": c_rr,
+                },
+            )
+        if (c_rsi is not None and c_rsi > 55.0) or (trend_sc is not None and trend_sc >= 65.0):
+            return (
+                "BUY",
+                "MOMENTUM_BUY",
+                {
+                    "trigger": "trend_momentum_strength",
+                    "composite_score": c_score,
+                    "trend_score": trend_sc,
+                    "rsi14": c_rsi,
+                    "reward_risk_ratio": c_rr,
+                },
+            )
+        return (
+            "BUY",
+            "QUANT_COMPOSITE_BUY",
+            {
+                "trigger": "composite_score_clears_buy_floor",
+                "composite_score": c_score,
+                "reward_risk_ratio": c_rr,
+            },
+        )
+
+    # E. Short Breakdown Setup
+    if c_score is not None and c_score <= pol.scores.short_maximum:
+        return (
+            "SELL",
+            "BREAKDOWN_SHORT",
+            {
+                "trigger": "structural_breakdown",
+                "composite_score": c_score,
+                "trend_score": trend_sc,
+                "short_reward_risk_ratio": c_short_rr,
+            },
+        )
+
+    # E. Model Discretionary Proposals (Forwarded to gates for certification or rejection)
+    if m_dec in ("BUY", "DEEP BUY"):
+        return (
+            m_dec,
+            "MODEL_DISCRETIONARY_BUY",
+            {
+                "trigger": "model_proposed_buy",
+                "model_decision": m_dec,
+                "composite_score": c_score,
+                "reward_risk_ratio": c_rr,
+            },
+        )
+    if m_dec == "SELL":
+        return (
+            "SELL",
+            "MODEL_DISCRETIONARY_SHORT",
+            {
+                "trigger": "model_proposed_short",
+                "model_decision": m_dec,
+                "composite_score": c_score,
+                "short_reward_risk_ratio": c_short_rr,
+            },
+        )
+
+    # F. Fallback: No Setup Qualified
+    return (
+        "HOLD",
+        "NO_SETUP",
+        {
+            "trigger": "no_setup_qualified",
+            "composite_score": c_score,
+            "model_decision": m_dec,
+        },
+    )
 
 
 class StructuredDecisionEngine:
@@ -236,6 +549,118 @@ class StructuredDecisionEngine:
         portfolio_equity: Optional[float] = None,
         risk_fraction: Optional[float] = None,
         mandate: Optional[Any] = None,
+        candidate_action: Optional[str] = None,
+        candidate_type: Optional[str] = None,
+        model_decision: Optional[str] = None,
+        setup_evidence: Optional[Dict[str, Any]] = None,
+        is_extreme_volatility: bool = False,
+    ) -> StructuredDecision:
+        cand_dec = str(candidate_action or candidate_decision).strip().upper()
+        eff_cand_action = cand_dec
+        eff_cand_type = str(candidate_type).strip().upper() if candidate_type else None
+        eff_model_decision = str(model_decision).strip().upper() if model_decision else None
+        eff_setup_evidence = dict(setup_evidence) if setup_evidence else {}
+
+        res = self._evaluate_impl(
+            ticker=ticker,
+            candidate_decision=cand_dec,
+            composite_score=composite_score,
+            position_state=position_state,
+            current_price=current_price,
+            stop_loss=stop_loss,
+            target_price=target_price,
+            atr=atr,
+            pillar_scores=pillar_scores,
+            data_completeness=data_completeness,
+            market_data_fresh=market_data_fresh,
+            ml_data_fresh=ml_data_fresh,
+            outage_duration_hours=outage_duration_hours,
+            days_to_earnings=days_to_earnings,
+            is_event_risk_blackout=is_event_risk_blackout,
+            days_to_ex_dividend=days_to_ex_dividend,
+            iv_pct=iv_pct,
+            rvol_20d=rvol_20d,
+            avg_dollar_volume_20d=avg_dollar_volume_20d,
+            borrow_available=borrow_available,
+            has_critical_evidence_veto=has_critical_evidence_veto,
+            catalyst_path=catalyst_path,
+            rsi14=rsi14,
+            drawdown_5d_pct=drawdown_5d_pct,
+            valuation_history_score=valuation_history_score,
+            is_value_trap=is_value_trap,
+            model_status=model_status,
+            run_id=run_id,
+            intended_order_value=intended_order_value,
+            execution_costs=execution_costs,
+            portfolio_equity=portfolio_equity,
+            risk_fraction=risk_fraction,
+            mandate=mandate,
+            candidate_type=eff_cand_type,
+            is_extreme_volatility=is_extreme_volatility,
+        )
+
+        if eff_model_decision:
+            res.model_decision = eff_model_decision
+        if eff_cand_action:
+            res.candidate_action = eff_cand_action
+        if eff_cand_type:
+            res.candidate_type = eff_cand_type
+        if eff_setup_evidence:
+            res.setup_evidence = eff_setup_evidence
+
+        if not res.rejection_reasons:
+            rejs = [
+                r for r in res.reason_codes
+                if r not in (
+                    StandardReasonCode.BUY_ORDER_CERTIFIED,
+                    StandardReasonCode.SHORT_ORDER_CERTIFIED,
+                    StandardReasonCode.HOLDING_THESIS_INTACT,
+                    StandardReasonCode.PROFIT_TARGET_REACHED,
+                )
+            ]
+            if not rejs and res.decision == "HOLD" and res.candidate_type == "NO_SETUP":
+                rejs = [StandardReasonCode.NO_QUALIFIED_SETUP]
+            res.rejection_reasons = rejs
+
+        return res
+
+    def _evaluate_impl(
+        self,
+        ticker: str,
+        candidate_decision: str,
+        composite_score: Optional[float],
+        position_state: str = "FLAT",
+        current_price: Optional[float] = None,
+        stop_loss: Optional[float] = None,
+        target_price: Optional[float] = None,
+        atr: Optional[float] = None,
+        pillar_scores: Optional[Dict[str, Optional[float]]] = None,
+        data_completeness: float = 1.0,
+        market_data_fresh: bool = True,
+        ml_data_fresh: bool = True,
+        outage_duration_hours: float = 0.0,
+        days_to_earnings: Optional[int] = None,
+        is_event_risk_blackout: bool = False,
+        days_to_ex_dividend: Optional[int] = None,
+        iv_pct: Optional[float] = None,
+        rvol_20d: Optional[float] = None,
+        avg_dollar_volume_20d: Optional[float] = None,
+        borrow_available: bool = True,
+        has_critical_evidence_veto: bool = False,
+        catalyst_path: Optional[str] = None,
+        rsi14: Optional[float] = None,
+        drawdown_5d_pct: Optional[float] = None,
+        valuation_history_score: Optional[float] = None,
+        is_value_trap: bool = False,
+        model_status: Optional[str] = None,
+        run_id: Optional[str] = None,
+        intended_order_value: float = 25_000.0,
+        execution_costs: Optional[ExecutionCostModel] = None,
+        portfolio_equity: Optional[float] = None,
+        risk_fraction: Optional[float] = None,
+        mandate: Optional[Any] = None,
+        candidate_type: Optional[str] = None,
+        is_extreme_volatility: bool = False,
     ) -> StructuredDecision:
         """
         Evaluates the trade setup across all mandatory compliance gates and derives
@@ -361,8 +786,8 @@ class StructuredDecisionEngine:
         else:
             passed_gates.append(StandardGateName.DATA_QUALITY)
 
-        # Check pillar hurdle (>= 3 pillars required)
-        if pillar_scores is not None and avail_pillars < getattr(self.policy.data_quality, "min_valid_pillars", 3):
+        # Check pillar hurdle (>= 3 pillars required for fresh entry)
+        if not is_open_position and pillar_scores is not None and avail_pillars < getattr(self.policy.data_quality, "min_valid_pillars", 3):
             failed_gates.append(StandardGateName.INSUFFICIENT_PILLARS)
             reason_codes.append(StandardReasonCode.INSUFFICIENT_PILLARS)
             return StructuredDecision(
@@ -378,7 +803,7 @@ class StructuredDecisionEngine:
                 reason_codes=reason_codes,
                 metrics={"available_pillars": avail_pillars},
             )
-        elif pillar_scores is not None:
+        elif pillar_scores is not None and avail_pillars >= getattr(self.policy.data_quality, "min_valid_pillars", 3):
             passed_gates.append(StandardGateName.INSUFFICIENT_PILLARS)
 
         # ---------------------------------------------------------------------
@@ -534,6 +959,10 @@ class StructuredDecisionEngine:
 
             # Holding thesis guard on winning long position
             if is_open_long and cand_dec == "SELL":
+                is_blackout_e = (
+                    days_to_earnings is not None
+                    and days_to_earnings <= self.policy.events.earnings_blackout_sessions
+                )
                 g4 = SellExitSymmetryGate.evaluate(
                     candidate_decision="SELL",
                     is_holding=True,
@@ -542,6 +971,7 @@ class StructuredDecisionEngine:
                     target_price=target_price,
                     composite_score=composite_score,
                     has_critical_evidence_veto=has_critical_evidence_veto,
+                    is_earnings_blackout=is_blackout_e,
                     policy=self.policy,
                 )
                 if not g4.passed and g4.reason_code == "HOLDING_THESIS_INTACT":
@@ -593,8 +1023,30 @@ class StructuredDecisionEngine:
         # ---------------------------------------------------------------------
         # STAGE 3: Event, Liquidity, & Noise Restrictions (for Fresh Entries)
         # ---------------------------------------------------------------------
-        if cand_dec in ("BUY", "SELL"):
-            dir_eval = TradeDirection.LONG if cand_dec == "BUY" else TradeDirection.SHORT
+        if cand_dec in ("BUY", "DEEP BUY", "DIP BUY", "SELL"):
+            dir_eval = TradeDirection.LONG if cand_dec in ("BUY", "DEEP BUY", "DIP BUY") else TradeDirection.SHORT
+
+            # Check extreme volatility regime
+            if (
+                (iv_pct is not None and iv_pct > 100.0)
+                or is_extreme_volatility
+            ) and getattr(self.policy.volatility, "reject_extreme_regime", True):
+                failed_gates.append(StandardGateName.EVENT_RISK)
+                reason_codes.append(StandardReasonCode.VOLATILITY_REGIME)
+                return StructuredDecision(
+                    run_id=run_id_val,
+                    ticker=ticker_val,
+                    decision="HOLD",
+                    composite_score=composite_score,
+                    model_status=eff_model_status,
+                    passed_gates=passed_gates,
+                    failed_gates=failed_gates,
+                    data_quality_status=data_quality_status,
+                    position_action=PositionAction.NO_ACTION.value,
+                    reason_codes=reason_codes,
+                    metrics={"is_extreme_volatility": True, "iv_pct": iv_pct},
+                )
+
             atr_calc = atr_val or (0.02 * (price_val or 100.0))
             stop_calc = stop_loss if stop_loss is not None else (
                 (price_val or 100.0) - 1.5 * atr_calc if dir_eval == TradeDirection.LONG else (price_val or 100.0) + 1.5 * atr_calc
@@ -616,43 +1068,50 @@ class StructuredDecisionEngine:
             )
 
             if not g3.passed:
-                if any(k in (g3.reason_code or "") for k in ("BLACKOUT", "EVENT")):
-                    gate_id = StandardGateName.EVENT_RISK
-                elif any(k in (g3.reason_code or "") for k in ("RVOL", "VOLUME", "LIQUIDITY", "IMPACT")):
-                    gate_id = StandardGateName.LIQUIDITY
-                elif "NOISE" in (g3.reason_code or ""):
-                    gate_id = StandardGateName.REWARD_TO_RISK
+                if "NOISE" in (g3.reason_code or "") and dir_eval == TradeDirection.LONG:
+                    # Downgraded from hard veto to position sizing risk dampener for long entries
+                    metrics["stop_inside_volatility_noise"] = True
+                    metrics["noise_sizing_haircut"] = 0.70
+                    passed_gates.append(StandardGateName.EVENT_RISK)
+                    passed_gates.append(StandardGateName.LIQUIDITY)
                 else:
-                    gate_id = StandardGateName.DATA_QUALITY
-                failed_gates.append(gate_id)
-                # Map reason code
-                if g3.reason_code == "EARNINGS_BLACKOUT":
-                    rc = StandardReasonCode.EARNINGS_BLACKOUT_ACTIVE
-                elif g3.reason_code in ("EVENT_RISK_BLACKOUT", "EVENT_RISK"):
-                    rc = StandardReasonCode.EVENT_RISK_BLACKOUT
-                elif g3.reason_code == "EX_DIVIDEND_BLACKOUT":
-                    rc = StandardReasonCode.EX_DIVIDEND_BLACKOUT
-                elif g3.reason_code == "STOP_INSIDE_NOISE_ZONE":
-                    rc = StandardReasonCode.STOP_INSIDE_VOLATILITY_NOISE
-                elif g3.reason_code in ("LOW_RVOL", "LOW_DOLLAR_VOLUME", "LOW_LIQUIDITY", "LIQUIDITY_INSUFFICIENT"):
-                    rc = StandardReasonCode.LIQUIDITY_INSUFFICIENT
-                else:
-                    rc = g3.reason_code or "RESTRICTION_ACTIVE"
-                reason_codes.append(rc)
+                    if any(k in (g3.reason_code or "") for k in ("BLACKOUT", "EVENT")):
+                        gate_id = StandardGateName.EVENT_RISK
+                    elif any(k in (g3.reason_code or "") for k in ("RVOL", "VOLUME", "LIQUIDITY", "IMPACT")):
+                        gate_id = StandardGateName.LIQUIDITY
+                    elif "NOISE" in (g3.reason_code or ""):
+                        gate_id = StandardGateName.REWARD_TO_RISK
+                    else:
+                        gate_id = StandardGateName.DATA_QUALITY
+                    failed_gates.append(gate_id)
+                    # Map reason code
+                    if g3.reason_code == "EARNINGS_BLACKOUT":
+                        rc = StandardReasonCode.EARNINGS_BLACKOUT_ACTIVE
+                    elif g3.reason_code in ("EVENT_RISK_BLACKOUT", "EVENT_RISK"):
+                        rc = StandardReasonCode.EVENT_RISK_BLACKOUT
+                    elif g3.reason_code == "EX_DIVIDEND_BLACKOUT":
+                        rc = StandardReasonCode.EX_DIVIDEND_BLACKOUT
+                    elif g3.reason_code == "STOP_INSIDE_NOISE_ZONE":
+                        rc = StandardReasonCode.STOP_INSIDE_VOLATILITY_NOISE
+                    elif g3.reason_code in ("LOW_RVOL", "LOW_DOLLAR_VOLUME", "LOW_LIQUIDITY", "LIQUIDITY_INSUFFICIENT"):
+                        rc = StandardReasonCode.LIQUIDITY_INSUFFICIENT
+                    else:
+                        rc = g3.reason_code or "RESTRICTION_ACTIVE"
+                    reason_codes.append(rc)
 
-                return StructuredDecision(
-                    run_id=run_id_val,
-                    ticker=ticker_val,
-                    decision="HOLD",
-                    composite_score=composite_score,
-                    model_status=eff_model_status,
-                    passed_gates=passed_gates,
-                    failed_gates=failed_gates,
-                    data_quality_status=data_quality_status,
-                    position_action=PositionAction.NO_ACTION.value,
-                    reason_codes=reason_codes,
-                    metrics=g3.metrics,
-                )
+                    return StructuredDecision(
+                        run_id=run_id_val,
+                        ticker=ticker_val,
+                        decision="HOLD",
+                        composite_score=composite_score,
+                        model_status=eff_model_status,
+                        passed_gates=passed_gates,
+                        failed_gates=failed_gates,
+                        data_quality_status=data_quality_status,
+                        position_action=PositionAction.NO_ACTION.value,
+                        reason_codes=reason_codes,
+                        metrics=g3.metrics,
+                    )
             else:
                 passed_gates.append(StandardGateName.EVENT_RISK)
                 passed_gates.append(StandardGateName.LIQUIDITY)
@@ -766,6 +1225,7 @@ class StructuredDecisionEngine:
                 data_completeness=data_completeness,
                 policy=self.policy,
                 is_certified_dip_buy=is_certified_dip_buy,
+                candidate_type=candidate_type,
             )
             if not g5.passed:
                 failed_gates.append(StandardGateName.CONFIDENCE_HURDLE)
@@ -842,6 +1302,10 @@ class StructuredDecisionEngine:
             )
 
         elif cand_dec == "SELL":
+            is_certified_ext_sell = (
+                candidate_type == "EXTENSION_SELL"
+                or catalyst_path == "EXTENSION_SELL"
+            )
             # 1. Gate 4: Short Ceiling & Borrow Availability
             g4_s = SellExitSymmetryGate.evaluate(
                 candidate_decision="SELL",
@@ -852,6 +1316,7 @@ class StructuredDecisionEngine:
                 composite_score=composite_score,
                 borrow_available=borrow_available,
                 policy=self.policy,
+                is_certified_extension_sell=is_certified_ext_sell,
             )
             if not g4_s.passed:
                 if g4_s.reason_code == "BORROW_UNAVAILABLE":
@@ -920,12 +1385,18 @@ class StructuredDecisionEngine:
                 passed_gates.append(StandardGateName.REWARD_TO_RISK)
 
             # 3. Gate 5: Gated Confidence
+            is_certified_ext_sell = (
+                candidate_type == "EXTENSION_SELL"
+                or catalyst_path == "EXTENSION_SELL"
+            )
             g5_s = GatedConfidenceGate.evaluate(
                 candidate_decision="SELL",
                 composite_score=composite_score,
                 pillar_scores=pillar_scores,
                 data_completeness=data_completeness,
                 policy=self.policy,
+                is_certified_dip_buy=is_certified_ext_sell,
+                candidate_type=candidate_type,
             )
             if not g5_s.passed:
                 failed_gates.append(StandardGateName.CONFIDENCE_HURDLE)
@@ -1035,6 +1506,11 @@ def build_structured_decision(
     risk_fraction: Optional[float] = None,
     mandate: Optional[Any] = None,
     policy: Optional[TradingPolicy] = None,
+    candidate_action: Optional[str] = None,
+    candidate_type: Optional[str] = None,
+    model_decision: Optional[str] = None,
+    setup_evidence: Optional[Dict[str, Any]] = None,
+    is_extreme_volatility: bool = False,
 ) -> StructuredDecision:
     """Convenience helper to evaluate and build a StructuredDecision."""
     engine = StructuredDecisionEngine(policy)
@@ -1070,4 +1546,9 @@ def build_structured_decision(
         portfolio_equity=portfolio_equity,
         risk_fraction=risk_fraction,
         mandate=mandate,
+        candidate_action=candidate_action,
+        candidate_type=candidate_type,
+        model_decision=model_decision,
+        setup_evidence=setup_evidence,
+        is_extreme_volatility=is_extreme_volatility,
     )

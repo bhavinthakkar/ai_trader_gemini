@@ -55,6 +55,7 @@ from structured_decision import (
     StandardReasonCode,
     StructuredDecision,
     build_structured_decision,
+    qualify_candidate_setup,
 )
 
 _POLICY = load_policy_config()
@@ -234,6 +235,7 @@ def normalize_master_trader_json(
     else:
         decision = "HOLD"
     original_decision = decision
+    model_decision = decision  # Preserved as explicit separate model suggestion (Step 2 Contract)
     decision_origin = "MODEL"
 
     # Normalize model confidence -- kept as a reference; the authoritative `confidence`
@@ -304,12 +306,15 @@ def normalize_master_trader_json(
         ("valuation_history_score", "valuation_history", "valuation_history"),
         ("peer_valuation_score", "peer_valuation", "peer_valuation"),
     ):
-        if det_key in deterministic_scores:
+        if det_key in deterministic_scores and deterministic_scores.get(det_key) is not None:
             det_val = deterministic_scores.get(det_key)
             pillar_scores[out_key] = _to_float(det_val, None) if det_val is not None else None
-        elif model_key in deterministic_scores:
+        elif model_key in deterministic_scores and deterministic_scores.get(model_key) is not None:
             det_val = deterministic_scores.get(model_key)
             pillar_scores[out_key] = _to_float(det_val, None) if det_val is not None else None
+        elif model_key in raw_pillars and raw_pillars.get(model_key) is not None:
+            model_val = raw_pillars.get(model_key)
+            pillar_scores[out_key] = _to_float(model_val, None) if model_val is not None else None
         elif deterministic_scores:
             # Deterministic scores dictionary was provided but this pillar was missing/excluded
             pillar_scores[out_key] = None
@@ -1036,16 +1041,63 @@ def normalize_master_trader_json(
 
     forward_pe = m_data.get("forward_pe", "N/A")
 
-    # Structured Decision Contract (Step 6.4)
-    run_id_val = str(data.get("run_id") or m_data.get("run_id") or f"run-{stock}-{int(time.time())}")
-    structured_dec = build_structured_decision(
+    # Explicit Candidate Qualification & Structured Decision Contract (Step 2)
+    position_state = "LONG" if is_explicit_holding else "FLAT"
+
+    # For short trades, use structural short stop and short target if available
+    cand_short_stop = structural_short_stop if (structural_short_stop is not None and structural_short_stop > price_v) else (_to_float(m_data.get("suggested_short_stop_loss"), None) or stop_v)
+    cand_short_target = structural_short_target if (structural_short_target is not None and structural_short_target < price_v) else (_to_float(m_data.get("suggested_short_target_price"), None) or target_v)
+
+    # 5d drawdown
+    dd_5d = _to_float(m_data.get("drawdown_5d_pct"), None)
+    if dd_5d is None and m_data.get("change_5d_pct") is not None:
+        try:
+            dd_5d = abs(float(str(m_data.get("change_5d_pct")).replace("%", "")))
+        except (ValueError, TypeError):
+            dd_5d = None
+
+    eff_catalyst_path = catalyst_direction if catalyst_path else None
+    cand_act, cand_typ, cand_ev = qualify_candidate_setup(
         ticker=stock,
-        candidate_decision=original_decision,
         composite_score=decision_composite,
-        position_state="LONG" if is_explicit_holding else "FLAT",
+        position_state=position_state,
         current_price=price_v,
         stop_loss=stop_v,
         target_price=target_v,
+        atr=atr_v,
+        rsi14=rsi14,
+        drawdown_5d_pct=dd_5d,
+        pillar_scores=pillar_scores,
+        reward_risk_ratio=rr,
+        short_reward_risk_ratio=short_rr,
+        catalyst_path=eff_catalyst_path,
+        catalyst_setup=catalyst_setup,
+        is_value_trap=is_value_trap,
+        model_decision=model_decision,
+        primary_driver=primary_driver,
+        policy=active_policy,
+    )
+    candidate_action = cand_act
+    candidate_type = cand_typ
+    setup_evidence = cand_ev
+
+    # Determine effective stop and target for the candidate action
+    if candidate_action == "SELL" and not is_explicit_holding:
+        eval_stop = cand_short_stop
+        eval_target = cand_short_target
+    else:
+        eval_stop = stop_v
+        eval_target = target_v
+
+    run_id_val = str(data.get("run_id") or m_data.get("run_id") or f"run-{stock}-{int(time.time())}")
+    structured_dec = build_structured_decision(
+        ticker=stock,
+        candidate_decision=candidate_action,
+        composite_score=decision_composite,
+        position_state=position_state,
+        current_price=price_v,
+        stop_loss=eval_stop,
+        target_price=eval_target,
         atr=atr_v,
         pillar_scores=pillar_scores,
         data_completeness=data_completeness,
@@ -1059,26 +1111,87 @@ def normalize_master_trader_json(
         avg_dollar_volume_20d=avg_dollar_vol_20d_val,
         borrow_available=True,
         has_critical_evidence_veto=bool(evidence_veto_reasons),
-        catalyst_path="DIP_BUY" if catalyst_path else None,
+        catalyst_path=eff_catalyst_path,
         rsi14=rsi14,
-        drawdown_5d_pct=m_data.get("drawdown_5d_pct"),
+        drawdown_5d_pct=dd_5d,
         valuation_history_score=pillar_scores.get("valuation_history"),
         is_value_trap=is_value_trap,
         model_status=model_status or ("IN_SCOPE" if is_in_scope else "OUT_OF_SCOPE"),
         run_id=run_id_val,
         policy=active_policy,
+        candidate_action=candidate_action,
+        candidate_type=candidate_type,
+        model_decision=model_decision,
+        setup_evidence=setup_evidence,
+        is_extreme_volatility=bool(vol_regime_info.get("is_extreme")),
     )
     if no_trade_reason and no_trade_reason == "SCHEMA_INVALID":
         structured_dec.failed_gates = ["SCHEMA_VALIDATION"]
         structured_dec.reason_codes = ["SCHEMA_VALIDATION_FAILED"]
+        structured_dec.rejection_reasons = ["SCHEMA_VALIDATION_FAILED"]
         structured_dec.decision = "HOLD"
         structured_dec.position_action = "NO_ACTION"
 
+    # One Authoritative Decision Contract: Structured Decision is Final Action
+    final_decision = structured_dec.decision
+    decision = final_decision
+    position_action = structured_dec.position_action
+    rejection_reasons = list(structured_dec.rejection_reasons)
+    gate_results = {
+        "passed_gates": list(structured_dec.passed_gates),
+        "failed_gates": list(structured_dec.failed_gates),
+        "reason_codes": list(structured_dec.reason_codes),
+        "data_quality_status": str(structured_dec.data_quality_status),
+    }
+
+    if structured_dec.failed_gates:
+        decision_origin = "GATE"
+        if not no_trade_reason and structured_dec.reason_codes:
+            rc = structured_dec.reason_codes[0]
+            if rc in ("VOLATILITY_REGIME", StandardReasonCode.VOLATILITY_REGIME):
+                no_trade_reason = "VOLATILITY_REGIME"
+            elif rc in ("EVENT_RISK_BLACKOUT", StandardReasonCode.EVENT_RISK_BLACKOUT):
+                no_trade_reason = "EVENT_RISK"
+            elif rc in ("EARNINGS_BLACKOUT_ACTIVE", StandardReasonCode.EARNINGS_BLACKOUT_ACTIVE):
+                no_trade_reason = "EARNINGS_BLACKOUT"
+            elif rc in ("CONFIDENCE_BELOW_HURDLE", StandardReasonCode.CONFIDENCE_BELOW_HURDLE):
+                no_trade_reason = "CONFIDENCE_HURDLE"
+            else:
+                no_trade_reason = rc
+    elif candidate_type.startswith("MODEL_DISCRETIONARY"):
+        decision_origin = "MODEL"
+    elif final_decision == "HOLD" and candidate_type == "NO_SETUP":
+        decision_origin = "NO_SETUP"
+        if not no_trade_reason:
+            no_trade_reason = "INSUFFICIENT_EVIDENCE"
+    else:
+        decision_origin = "QUANT_DETERMINISTIC"
+
+    if final_decision == "HOLD":
+        confidence = round(min(confidence, 0.60), 2)
+
+    # Realign internal action with authoritative decision
+    if final_decision in ("BUY", "DEEP BUY"):
+        internal_action = InternalActionType.COVER_SHORT.value if (is_explicit_holding and sell_type == "COVER_SHORT") else InternalActionType.BUY.value
+    elif final_decision == "BOOK PROFIT":
+        internal_action = InternalActionType.SELL_TO_CLOSE.value
+    elif final_decision == "SELL":
+        internal_action = InternalActionType.SELL_TO_CLOSE.value if (is_explicit_holding or sell_type == "LONG_EXIT") else InternalActionType.OPEN_SHORT.value
+    else:
+        internal_action = InternalActionType.HOLD.value
 
     # Backward compatibility for SQLite DB string storage
     return {
         "stock": _ensure_str(stock),
-        "decision": decision,
+        "decision": final_decision,
+        "final_decision": final_decision,
+        "model_decision": model_decision,
+        "candidate_action": candidate_action,
+        "candidate_type": candidate_type,
+        "setup_evidence": setup_evidence,
+        "gate_results": gate_results,
+        "rejection_reasons": rejection_reasons,
+        "position_action": position_action,
         "decision_origin": decision_origin,
         "confidence": confidence,
         "signal_strength": confidence,
