@@ -298,7 +298,7 @@ def normalize_master_trader_json(
     pillar_input_tracking = deterministic_scores.get("pillar_input_tracking") or {}
     fq_info = deterministic_scores.get("financial_quality") or {}
     fq_score = deterministic_scores.get("financial_quality_score")
-    is_value_trap = bool(deterministic_scores.get("is_value_trap", False))
+    is_value_trap = bool(deterministic_scores.get("is_value_trap", False) or m_data.get("is_value_trap", False))
     value_trap_reasons = deterministic_scores.get("value_trap_reasons", [])
 
     pillar_scores = {}
@@ -420,7 +420,7 @@ def normalize_master_trader_json(
 
     # Options Implied Volatility & Expected Move metrics
     options_data = gloomberb_payload.get("options") or {}
-    iv_val = options_data.get("implied_volatility_pct")
+    iv_val = options_data.get("implied_volatility_pct") or m_data.get("implied_volatility_pct") or m_data.get("iv_pct")
     if iv_val is None:
         iv_val = QuantitativeScoringService._clean_float(
             options_data.get("implied_volatility") or m_data.get("implied_volatility"), None
@@ -606,10 +606,30 @@ def normalize_master_trader_json(
         DIP_BUY: ("BUY", "DEEP BUY"),
         EXTENSION_SELL: ("SELL", "BOOK PROFIT"),
     }.get(catalyst_direction, ())
+
+    # Decouple deterministic catalyst setup generation from model's directional opinion (Step 4)
+    catalyst_certificate_verified = (
+        catalyst_qualified
+        and (catalyst_direction in (DIP_BUY, EXTENSION_SELL))
+        and primary_driver != "MACRO_EVENT"
+    )
+
+    raw_model_intent = str(data.get("decision") or "").upper()
+    opposing_intent = (
+        (raw_model_intent in ("SELL", "BOOK PROFIT") and catalyst_direction == DIP_BUY)
+        or (raw_model_intent in ("BUY", "DEEP BUY") and catalyst_direction == EXTENSION_SELL)
+    )
+    is_catalyst_eligible_driver = primary_driver in ("NEWS_CATALYST", None, "", "CATALYST")
+
+    if catalyst_certificate_verified and not opposing_intent and is_catalyst_eligible_driver:
+        eff_catalyst_path = catalyst_direction
+    else:
+        eff_catalyst_path = None
+
     # MACRO_EVENT is never unlocks-able: the certificate is built from ticker-specific news, so a
     # macro-tagged trade is a misclassification of a move this system most wants to refuse.
     catalyst_path = (
-        catalyst_qualified
+        catalyst_certificate_verified
         and decision in catalyst_allows
         and primary_driver == "NEWS_CATALYST"
     )
@@ -1068,7 +1088,7 @@ def normalize_master_trader_json(
         except (ValueError, TypeError):
             dd_5d = None
 
-    eff_catalyst_path = catalyst_direction if catalyst_path else None
+    # eff_catalyst_path is computed above with decoupling and driver consistency checks
     cand_act, cand_typ, cand_ev = qualify_candidate_setup(
         ticker=stock,
         composite_score=decision_composite,

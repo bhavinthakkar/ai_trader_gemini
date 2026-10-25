@@ -361,7 +361,13 @@ def qualify_candidate_setup(
 
     # 2. Refusal of unverified news / macro external events
     p_driver = str(primary_driver or "").strip().upper()
-    if p_driver in ("NEWS_CATALYST", "MACRO_EVENT") and not catalyst_path:
+    cat_dir = str(catalyst_path).strip().upper() if catalyst_path else None
+    if p_driver == "MACRO_EVENT":
+        cat_dir = None
+    elif not cat_dir and catalyst_setup and catalyst_setup.get("qualified"):
+        cat_dir = str(catalyst_setup.get("direction", "")).strip().upper()
+
+    if p_driver in ("NEWS_CATALYST", "MACRO_EVENT") and not cat_dir:
         return (
             "HOLD",
             "NO_SETUP",
@@ -369,12 +375,8 @@ def qualify_candidate_setup(
         )
 
     # 3. Flat Position Candidate Setup Qualification
-    cat_dir = str(catalyst_path).strip().upper() if catalyst_path else None
-    if not cat_dir and p_driver == "NEWS_CATALYST" and catalyst_setup and catalyst_setup.get("qualified"):
-        cat_dir = str(catalyst_setup.get("direction", "")).strip().upper()
-
-    # A. Certified Catalyst Dip Buy
-    if cat_dir == "DIP_BUY" and c_score is not None and c_score >= pol.scores.dip_buy_minimum and not is_value_trap:
+    # A. Certified Catalyst Dip Buy (Step 4: Decoupled from model decision)
+    if cat_dir == "DIP_BUY" and m_dec not in ("SELL", "BOOK PROFIT"):
         act = "DEEP BUY" if m_dec == "DEEP BUY" else "BUY"
         return (
             act,
@@ -434,6 +436,7 @@ def qualify_candidate_setup(
         pullback_ev = pullback_setup.get("evidence") or {}
         pullback_act = pullback_setup.get("candidate_action") or "BUY"
         pullback_typ = pullback_setup.get("candidate_type") or "PULLBACK_BUY"
+        pullback_cond = pullback_setup.get("conditions_met") or {}
     else:
         pullback_res = evaluate_pullback_setup(
             technical_data=tech_map,
@@ -452,9 +455,17 @@ def qualify_candidate_setup(
         pullback_ev = pullback_res.evidence
         pullback_act = pullback_res.candidate_action
         pullback_typ = pullback_res.candidate_type
+        pullback_cond = pullback_res.conditions_met
 
-    if pullback_is_qual:
-        return (pullback_act, pullback_typ, pullback_ev)
+    # Qualify pullback candidate: fully qualified OR technical pullback pattern met
+    is_pullback_cand = pullback_is_qual or (
+        bool(pullback_cond.get("pullback_area_tested"))
+        and bool(pullback_cond.get("stabilization_confirmed"))
+        and bool(pullback_cond.get("volume_and_relative_strength"))
+    )
+
+    if is_pullback_cand:
+        return ("BUY", "PULLBACK_BUY", pullback_ev)
 
     # E. Other Quantitative Long Setups (composite score >= buy_minimum, default 60.0)
     if c_score is not None and c_score >= pol.scores.buy_minimum and not is_value_trap:
