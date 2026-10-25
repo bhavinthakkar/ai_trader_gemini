@@ -57,6 +57,10 @@ from structured_decision import (
     build_structured_decision,
     qualify_candidate_setup,
 )
+from quant.entry_setups import (
+    PullbackSetupResult,
+    evaluate_pullback_setup,
+)
 
 _POLICY = load_policy_config()
 WATCHLIST = ["000660.KS"]
@@ -589,6 +593,14 @@ def normalize_master_trader_json(
     catalyst_qualified = bool(catalyst_setup.get("qualified"))
     catalyst_direction = catalyst_setup.get("direction")
 
+    # Dedicated Trend Pullback Candidate Setup (Step 3: Qualified independently without news)
+    pullback_setup = evaluate_pullback_setup(
+        technical_data=m_data,
+        deterministic_scores=deterministic_scores,
+        policy=active_policy,
+        is_value_trap=is_value_trap,
+    )
+
     # A certificate only unlocks the direction it proves: DIP_BUY unlocks BUY/DEEP BUY; EXTENSION_SELL unlocks SELL/BOOK PROFIT.
     catalyst_allows = {
         DIP_BUY: ("BUY", "DEEP BUY"),
@@ -1076,6 +1088,8 @@ def normalize_master_trader_json(
         model_decision=model_decision,
         primary_driver=primary_driver,
         policy=active_policy,
+        technical_data=m_data,
+        pullback_setup=pullback_setup.to_dict(),
     )
     candidate_action = cand_act
     candidate_type = cand_typ

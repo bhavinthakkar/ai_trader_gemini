@@ -29,13 +29,17 @@ class TestAuthoritativeDecisionContract(unittest.TestCase):
         # Baseline healthy market snapshot that clears all technical & liquidity gates
         self.base_m_data = {
             "current_price": 100.0,
+            "ema20": 98.5,
+            "ema50": 95.0,
+            "ema200": 88.0,
+            "change_5d_pct": -3.5,
             "atr": 2.5,
             "suggested_stop_loss": 95.0,        # Risk = 5.0
             "suggested_target_price": 112.5,     # Reward = 12.5 -> RR = 2.5 >= 1.2
-            "rsi14": 48.0,                      # Pullback in uptrend (35 < RSI <= 55)
-            "rvol_20d": 1.5,
-            "high_20d": 113.0,
-            "low_20d": 93.0,
+            "rsi14": 48.0,                      # Pullback in uptrend (40 <= RSI <= 55)
+            "rvol_20d": 1.3,
+            "high_20d": 104.0,
+            "low_20d": 94.0,
             "avg_dollar_vol_20d": 50_000_000.0,
             "days_to_earnings": 30,
             "deterministic_data_completeness": 0.95,

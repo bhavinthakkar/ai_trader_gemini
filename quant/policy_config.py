@@ -73,6 +73,61 @@ class DipBuyConfig:
 
 
 @dataclass
+class PullbackConfig:
+    """Distinct trend pullback candidate setup specification (Step 3)."""
+    enabled: bool = True
+
+    # 1. Intact Longer-Term Trend Definition
+    composite_minimum: float = 60.0
+    min_trend_score: float = 60.0
+    require_above_ema50: bool = True
+    require_ema50_above_ema200: bool = True
+
+    # 2. Pullback Area Definition (Price level / Moving Average)
+    anchor_ema: str = "ema20"
+    max_distance_to_anchor_atr: float = 1.50
+    min_pullback_drop_pct: float = 1.5
+    max_pullback_drop_pct: float = 8.0
+    min_range_proximity: float = 0.20
+    max_range_proximity: float = 0.75
+
+    # 3. Stabilization / Reclaim Confirmation
+    rsi_min: float = 40.0
+    rsi_max: float = 55.0
+    require_stabilization: bool = True
+    min_reward_risk: float = 1.20
+
+    # 4. Volume & Relative-Strength Conditions
+    max_pullback_rvol: float = 1.50
+    min_sector_relative_score: float = 50.0
+    min_market_alpha_score: float = 50.0
+
+    # 5. Maximum Extension, Event & Volatility Exclusions
+    max_extension_atr: float = 2.0
+    exclude_earnings_blackout: bool = True
+    max_vol_factor: float = 2.50
+    forbid_value_trap: bool = True
+
+    def validate(self) -> None:
+        if self.min_pullback_drop_pct > self.max_pullback_drop_pct:
+            raise ValueError(
+                f"Invalid pullback drop bounds: min {self.min_pullback_drop_pct}% > max {self.max_pullback_drop_pct}%"
+            )
+        if self.rsi_min > self.rsi_max:
+            raise ValueError(
+                f"Invalid pullback RSI bounds: min {self.rsi_min} > max {self.rsi_max}"
+            )
+        if self.min_range_proximity > self.max_range_proximity:
+            raise ValueError(
+                f"Invalid range proximity bounds: min {self.min_range_proximity} > max {self.max_range_proximity}"
+            )
+        if self.max_distance_to_anchor_atr <= 0.0:
+            raise ValueError(f"max_distance_to_anchor_atr must be positive, got {self.max_distance_to_anchor_atr}")
+        if self.min_reward_risk <= 0.0:
+            raise ValueError(f"min_reward_risk must be positive, got {self.min_reward_risk}")
+
+
+@dataclass
 class TradeQualityConfig:
     """Trade quality, setup geometry, execution assumptions, and liquidity constraints."""
     reward_risk_minimum: float = 1.20
@@ -335,6 +390,7 @@ class TradingPolicy:
     policy_name: str = "Institutional Deterministic Compliance Policy"
     scores: ScoresConfig = field(default_factory=ScoresConfig)
     dip_buy: DipBuyConfig = field(default_factory=DipBuyConfig)
+    pullback: PullbackConfig = field(default_factory=PullbackConfig)
     trade_quality: TradeQualityConfig = field(default_factory=TradeQualityConfig)
     events: EventsConfig = field(default_factory=EventsConfig)
     volatility: VolatilityConfig = field(default_factory=VolatilityConfig)
@@ -350,6 +406,7 @@ class TradingPolicy:
         """Validates all sub-configurations and cross-rule consistency."""
         self.scores.validate()
         self.dip_buy.validate()
+        self.pullback.validate()
         self.trade_quality.validate()
         self.events.validate()
         self.volatility.validate()
@@ -461,6 +518,7 @@ def load_policy_config(config_path: Optional[str] = None) -> TradingPolicy:
         # Parse sections with safe defaults
         scores_data = raw_data.get("scores", {})
         dip_buy_data = raw_data.get("dip_buy", {})
+        pullback_data = raw_data.get("pullback", {})
         tq_data = raw_data.get("trade_quality", {})
         events_data = raw_data.get("events", {})
         vol_data = raw_data.get("volatility", {})
@@ -476,6 +534,7 @@ def load_policy_config(config_path: Optional[str] = None) -> TradingPolicy:
             policy_name=str(raw_data.get("policy_name", "Institutional Policy")),
             scores=ScoresConfig(**scores_data),
             dip_buy=DipBuyConfig(**dip_buy_data),
+            pullback=PullbackConfig(**pullback_data),
             trade_quality=TradeQualityConfig(**tq_data),
             events=EventsConfig(**events_data),
             volatility=VolatilityConfig(**vol_data),

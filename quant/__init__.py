@@ -159,6 +159,16 @@ from quant.order_execution import (
     PositionReconciler,
     SimulatedBroker,
 )
+from quant.policy_config import (
+    TradingPolicy,
+    PullbackConfig,
+    get_default_policy,
+    load_policy_config,
+)
+from quant.entry_setups import (
+    PullbackSetupResult,
+    evaluate_pullback_setup,
+)
 from quant.shadow_trading import (
     DriftStatus,
     PromotionStatus,
@@ -255,6 +265,12 @@ __all__ = [
     "StructuredDecisionEngine",
     "build_structured_decision",
     "qualify_candidate_setup",
+    "TradingPolicy",
+    "PullbackConfig",
+    "get_default_policy",
+    "load_policy_config",
+    "PullbackSetupResult",
+    "evaluate_pullback_setup",
     "BindingConstraint",
     "InvestmentMandate",
     "PositionSizingResult",

@@ -39,6 +39,7 @@ import uuid
 
 from quant.policy_config import TradingPolicy, get_default_policy, load_policy_config
 from quant.trade_geometry import TradeDirection, ExecutionCostModel
+from quant.entry_setups import evaluate_pullback_setup, PullbackSetupResult
 from quant.compliance_gates import (
     GateStatus,
     GateResult,
@@ -248,6 +249,11 @@ def qualify_candidate_setup(
     model_decision: Optional[str] = None,
     primary_driver: Optional[str] = None,
     policy: Optional[TradingPolicy] = None,
+    technical_data: Optional[Dict[str, Any]] = None,
+    market_data: Optional[Dict[str, Any]] = None,
+    deterministic_scores: Optional[Dict[str, Any]] = None,
+    pullback_setup: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
 ) -> Tuple[str, str, Dict[str, Any]]:
     """
     Deterministically qualifies candidate_action, candidate_type, and setup_evidence.
@@ -411,19 +417,47 @@ def qualify_candidate_setup(
             },
         )
 
-    # D. Quantitative Long Setups (composite score >= buy_minimum, default 60.0)
+    # D. Quantitative Pullback Setup (Step 3: Separate Pullback Candidate Rule)
+    tech_map = dict(technical_data or market_data or {})
+    scores_map = dict(deterministic_scores or {})
+    if pillar_scores:
+        for k, v in pillar_scores.items():
+            if f"{k}_score" not in scores_map:
+                scores_map[f"{k}_score"] = v
+            if k not in scores_map:
+                scores_map[k] = v
+    if c_score is not None and "composite_quantitative_score" not in scores_map:
+        scores_map["composite_quantitative_score"] = c_score
+
+    if pullback_setup and isinstance(pullback_setup, dict):
+        pullback_is_qual = bool(pullback_setup.get("qualified"))
+        pullback_ev = pullback_setup.get("evidence") or {}
+        pullback_act = pullback_setup.get("candidate_action") or "BUY"
+        pullback_typ = pullback_setup.get("candidate_type") or "PULLBACK_BUY"
+    else:
+        pullback_res = evaluate_pullback_setup(
+            technical_data=tech_map,
+            deterministic_scores=scores_map,
+            policy=pol,
+            current_price=c_price,
+            composite_score=c_score,
+            trend_score=trend_sc,
+            atr=atr,
+            rsi14=c_rsi,
+            drawdown_5d_pct=c_dd5,
+            reward_risk_ratio=c_rr,
+            is_value_trap=is_value_trap,
+        )
+        pullback_is_qual = pullback_res.qualified
+        pullback_ev = pullback_res.evidence
+        pullback_act = pullback_res.candidate_action
+        pullback_typ = pullback_res.candidate_type
+
+    if pullback_is_qual:
+        return (pullback_act, pullback_typ, pullback_ev)
+
+    # E. Other Quantitative Long Setups (composite score >= buy_minimum, default 60.0)
     if c_score is not None and c_score >= pol.scores.buy_minimum and not is_value_trap:
-        if c_rsi is not None and 35.0 < c_rsi <= 55.0:
-            return (
-                "BUY",
-                "PULLBACK_BUY",
-                {
-                    "trigger": "pullback_in_uptrend",
-                    "composite_score": c_score,
-                    "rsi14": c_rsi,
-                    "reward_risk_ratio": c_rr,
-                },
-            )
         if val_sc is not None and val_sc >= 65.0:
             return (
                 "BUY",

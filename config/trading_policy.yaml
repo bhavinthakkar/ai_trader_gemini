@@ -49,6 +49,46 @@ dip_buy:
   catalyst_confidence_ceiling: 0.85
 
 # =============================================================================
+# 2b. TREND PULLBACK CANDIDATE SETUP SPECIFICATION
+# =============================================================================
+# Distinct from catalyst dip-buys: buys an orderly, low-volume consolidation /
+# moving average test within an established multi-month uptrend, without requiring
+# any adverse news catalyst.
+pullback:
+  enabled: true
+
+  # 1. Intact Longer-Term Trend Definition
+  composite_minimum: 60.0
+  min_trend_score: 60.0
+  require_above_ema50: true
+  require_ema50_above_ema200: true
+
+  # 2. Pullback Area Definition (Price level / Moving Average)
+  anchor_ema: "ema20"
+  max_distance_to_anchor_atr: 1.50
+  min_pullback_drop_pct: 1.5
+  max_pullback_drop_pct: 8.0
+  min_range_proximity: 0.20
+  max_range_proximity: 0.75
+
+  # 3. Stabilization / Reclaim Confirmation
+  rsi_min: 40.0
+  rsi_max: 55.0
+  require_stabilization: true
+  min_reward_risk: 1.20
+
+  # 4. Volume & Relative-Strength Conditions
+  max_pullback_rvol: 1.50
+  min_sector_relative_score: 50.0
+  min_market_alpha_score: 50.0
+
+  # 5. Maximum Extension, Event & Volatility Exclusions
+  max_extension_atr: 2.0
+  exclude_earnings_blackout: true
+  max_vol_factor: 2.50
+  forbid_value_trap: true
+
+# =============================================================================
 # 3. TRADE QUALITY & SETUP GEOMETRY
 # =============================================================================
 trade_quality:
