@@ -397,7 +397,7 @@ with col6:
 st.markdown("---")
 
 # Main Content Tabs
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "📊 Latest Signals",
     "🔍 Stock Deep-Dive",
     "🤖 ML Alpha Pipeline",
@@ -405,7 +405,8 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📜 Signal History Log",
     "🎯 Model Outcome Tracking",
     "📁 Portfolio Risk Review",
-    "⚡ Shadow Execution Desk"
+    "⚡ Shadow Execution Desk",
+    "🔬 Baseline Decision Audit",
 ])
 
 @st.cache_data(ttl=120)
@@ -1526,5 +1527,151 @@ with tab8:
             })
         df_shadow = pd.DataFrame(log_rows)
         st.dataframe(df_shadow, width="stretch", hide_index=True)
+
+
+with tab9:
+    st.subheader("🔬 Baseline Decision Audit & Component Breakdown")
+    st.caption("Point-in-Time baseline of recent signals, model proposals, quant scores, candidate setups, compliance gates, and root-cause explanations for HOLD decisions.")
+
+    baseline_path = os.path.join(BASE_DIR, "data", "baseline_signals_audit.json")
+    baseline_records = []
+    if os.path.exists(baseline_path):
+        try:
+            with open(baseline_path, "r", encoding="utf-8") as f:
+                baseline_records = json.load(f)
+        except Exception as e:
+            st.error(f"Error loading baseline file: {e}")
+
+    if not baseline_records:
+        st.info("No baseline audit records found in `data/baseline_signals_audit.json`.")
+    else:
+        # High-level KPIs
+        total_b = len(baseline_records)
+        no_setup_count = sum(1 for r in baseline_records if r.get("hold_classification") == "NO_SETUP_QUALIFIED")
+        gate_failed_count = sum(1 for r in baseline_records if r.get("hold_classification") == "GATE_FAILED")
+        actions_count = sum(1 for r in baseline_records if str(r.get("hold_classification", "")).startswith("ACTION_"))
+        model_hold_count = sum(1 for r in baseline_records if r.get("hold_classification") == "MODEL_PROPOSED_HOLD")
+
+        kpi_c1, kpi_c2, kpi_c3, kpi_c4 = st.columns(4)
+        kpi_c1.metric("Total Baseline Signals", total_b)
+        kpi_c2.metric("🛑 No Setup Qualified", f"{no_setup_count} ({no_setup_count/total_b*100:.0f}%)" if total_b else "0")
+        kpi_c3.metric("⚠️ Gate Failed", f"{gate_failed_count} ({gate_failed_count/total_b*100:.0f}%)" if total_b else "0")
+        kpi_c4.metric("🟢 Certified Actions (BUY/SELL)", f"{actions_count} ({actions_count/total_b*100:.0f}%)" if total_b else "0")
+
+        # Filters
+        f_col1, f_col2, f_col3 = st.columns([1.5, 1.5, 1])
+        with f_col1:
+            cat_choice = st.selectbox(
+                "Filter by Classification:",
+                ["All Signals", "🛑 No Setup Qualified", "⚠️ Gate Failed", "🟢 Certified Actions (BUY/SELL)", "💡 Model Discretionary HOLD"],
+                key="baseline_cat_filter"
+            )
+        with f_col2:
+            sym_search = st.text_input("Search Ticker:", "", key="baseline_sym_search").strip().upper()
+        with f_col3:
+            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            with open(baseline_path, "r", encoding="utf-8") as f:
+                raw_json_str = f.read()
+            st.download_button(
+                "📥 Download JSON",
+                data=raw_json_str,
+                file_name="baseline_signals_audit.json",
+                mime="application/json",
+                use_container_width=True
+            )
+
+        # Filter records
+        filtered_records = baseline_records
+        if cat_choice == "🛑 No Setup Qualified":
+            filtered_records = [r for r in filtered_records if r.get("hold_classification") == "NO_SETUP_QUALIFIED"]
+        elif cat_choice == "⚠️ Gate Failed":
+            filtered_records = [r for r in filtered_records if r.get("hold_classification") == "GATE_FAILED"]
+        elif cat_choice == "🟢 Certified Actions (BUY/SELL)":
+            filtered_records = [r for r in filtered_records if str(r.get("hold_classification", "")).startswith("ACTION_")]
+        elif cat_choice == "💡 Model Discretionary HOLD":
+            filtered_records = [r for r in filtered_records if r.get("hold_classification") == "MODEL_PROPOSED_HOLD"]
+
+        if sym_search:
+            filtered_records = [r for r in filtered_records if sym_search in r.get("symbol", "").upper()]
+
+        # Format rows for table
+        table_rows = []
+        for r in filtered_records:
+            passed_g = r.get("passed_gates") or []
+            if isinstance(passed_g, str):
+                try:
+                    passed_g = json.loads(passed_g)
+                except Exception:
+                    passed_g = [passed_g]
+            failed_g = r.get("failed_gates") or []
+            if isinstance(failed_g, str):
+                try:
+                    failed_g = json.loads(failed_g)
+                except Exception:
+                    failed_g = [failed_g]
+            reasons = r.get("reason_codes") or []
+            if isinstance(reasons, str):
+                try:
+                    reasons = json.loads(reasons)
+                except Exception:
+                    reasons = [reasons]
+
+            gates_str = ""
+            if failed_g:
+                gates_str = "Failed: " + ", ".join(failed_g)
+            elif reasons and reasons != ["NO_TRADE_DEFAULT"]:
+                gates_str = ", ".join(reasons)
+            elif passed_g:
+                gates_str = "Passed: " + ", ".join(passed_g)
+            else:
+                gates_str = "—"
+
+            q_score = r.get("quant_score")
+            q_disp = f"{q_score:.1f}" if q_score is not None else "—"
+
+            dc = r.get("data_completeness")
+            dc_disp = f"{int(dc * 100)}%" if dc is not None else "—"
+
+            h_class = r.get("hold_classification", "")
+            if h_class == "NO_SETUP_QUALIFIED":
+                h_disp = "🛑 No Setup Qualified"
+            elif h_class == "GATE_FAILED":
+                h_disp = "⚠️ Gate Failed"
+            elif h_class == "ACTION_BUY":
+                h_disp = "🟢 Certified BUY"
+            elif h_class == "ACTION_SELL":
+                h_disp = "🔴 Certified SELL"
+            elif h_class == "MODEL_PROPOSED_HOLD":
+                h_disp = "💡 Model HOLD"
+            else:
+                h_disp = h_class
+
+            table_rows.append({
+                "ID": r.get("id"),
+                "Timestamp": r.get("timestamp"),
+                "Symbol": r.get("symbol"),
+                "Model Proposal": r.get("model_decision"),
+                "Quant Score": q_disp,
+                "Data Compl.": dc_disp,
+                "Candidate Setup": r.get("candidate_setup"),
+                "Active Gates / Reasons": gates_str,
+                "Final Action": r.get("final_action"),
+                "Hold Classification": h_disp,
+                "Root Cause Explanation": r.get("root_cause_explanation"),
+            })
+
+        df_b = pd.DataFrame(table_rows)
+        st.dataframe(df_b, width="stretch", hide_index=True)
+
+        # Drill-down inspection
+        st.markdown("#### 🔍 Baseline Signal Inspection")
+        sig_ids = [f"#{r['id']} {r['symbol']} ({r['timestamp']})" for r in filtered_records]
+        if sig_ids:
+            selected_sig_str = st.selectbox("Select signal to view full structured contract:", sig_ids, key="sel_baseline_sig")
+            sel_id = int(selected_sig_str.split(" ")[0].replace("#", ""))
+            sel_rec = next((r for r in filtered_records if r["id"] == sel_id), None)
+            if sel_rec:
+                with st.expander("📄 View Full JSON Contract", expanded=True):
+                    st.json(sel_rec)
 
 
