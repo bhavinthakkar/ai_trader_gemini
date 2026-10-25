@@ -228,6 +228,11 @@ def calculate_risk_based_position_size(
     days_to_ex_dividend: Optional[int] = None,
     days_to_earnings: Optional[int] = None,
     stop_inside_expected_move: bool = False,
+    existing_shares: int = 0,
+    existing_risk_dollars: float = 0.0,
+    open_order_shares: int = 0,
+    open_order_risk_dollars: float = 0.0,
+    open_orders: Optional[List[Any]] = None,
 ) -> PositionSizingResult:
     """
     Calculates deterministic risk-based position size under formal investment mandate caps.
@@ -712,12 +717,31 @@ def calculate_risk_based_position_size(
 
     equity_at_risk_dollars = E * r
 
-    # 6. Preliminary Risk Size: N_risk = floor( (E * r) / (|P - S| + C + G) )
-    n_risk = math.floor(equity_at_risk_dollars / effective_per_share_risk)
+    # Deduct existing risk and open orders risk from the single risk budget (Step 5)
+    eff_open_shares = open_order_shares
+    eff_open_risk = open_order_risk_dollars
+    if open_orders:
+        for o in open_orders:
+            info = PortfolioSnapshot._parse_order(o)
+            if info["is_open"] and info["ticker"] == ticker.upper():
+                order_dir = "LONG" if info["side"] in ("BUY", "LONG", "BUY_TO_COVER") else "SHORT"
+                if order_dir == dir_norm:
+                    eff_open_shares += info["shares"]
+                    if info["price"] > 0 and info["stop_loss"] > 0:
+                        per_sh_r = abs(info["price"] - info["stop_loss"]) + C + G
+                        eff_open_risk += info["shares"] * per_sh_r
+
+    available_risk_dollars = max(0.0, equity_at_risk_dollars - existing_risk_dollars - eff_open_risk)
+
+    # 6. Preliminary Risk Size: N_risk = floor( available_risk_dollars / (|P - S| + C + G) )
+    n_risk = math.floor(available_risk_dollars / effective_per_share_risk)
 
     # 7. Additional Limit Caps
-    # 7A. Maximum Position Cap: N_position_cap = floor( (E * max_position_pct) / P )
-    n_position_cap = math.floor((E * active_mandate.max_position_pct) / entry_price)
+    # 7A. Maximum Position Cap: N_position_cap = floor( max(0, E * max_position_pct - committed_mv) / P )
+    committed_ticker_mv = (existing_shares + eff_open_shares) * entry_price
+    max_position_dollars = E * active_mandate.max_position_pct
+    available_position_dollars = max(0.0, max_position_dollars - committed_ticker_mv)
+    n_position_cap = math.floor(available_position_dollars / entry_price)
 
     # 7B. Liquidity Cap: N_liquidity_cap = floor( ADV_shares * max_adv_pct )
     if adv_shares_20d is not None and adv_shares_20d > 0.0:

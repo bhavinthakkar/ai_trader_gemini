@@ -322,6 +322,35 @@ class PortfolioRiskConfig:
 
 
 @dataclass
+class StagedEntriesConfig:
+    """Staged entries and risk budget governance specification (Step 5)."""
+    enabled: bool = True
+    max_tranches: int = 3
+    tranche_weights: List[float] = field(default_factory=lambda: [0.50, 0.30, 0.20])
+    min_tranche_risk_dollars: float = 25.0
+    require_profit_for_addition: bool = True
+    min_profit_atr_for_addition: float = 0.50
+    min_addition_composite_score: float = 60.0
+    max_adverse_excursion_atr: float = 1.0
+    exclude_during_event_blackout: bool = True
+
+    def validate(self) -> None:
+        if self.max_tranches < 1:
+            raise ValueError(f"max_tranches must be >= 1, got {self.max_tranches}")
+        if not self.tranche_weights:
+            raise ValueError("tranche_weights cannot be empty")
+        weight_sum = sum(self.tranche_weights)
+        if not (0.98 <= weight_sum <= 1.02):
+            raise ValueError(f"tranche_weights must sum to 1.0, got {weight_sum}")
+        if any(w <= 0.0 for w in self.tranche_weights):
+            raise ValueError("All tranche_weights must be strictly positive")
+        if self.min_profit_atr_for_addition < 0.0:
+            raise ValueError("min_profit_atr_for_addition cannot be negative")
+        if self.max_adverse_excursion_atr < 0.0:
+            raise ValueError("max_adverse_excursion_atr cannot be negative")
+
+
+@dataclass
 class ExecutionConfig:
     """Order execution validation, operational safety, and fill assumptions (Step 7.3)."""
     max_quote_staleness_seconds: float = 300.0  # Max market quote staleness threshold in seconds
@@ -399,6 +428,7 @@ class TradingPolicy:
     policy: PolicyGovernanceConfig = field(default_factory=PolicyGovernanceConfig)
     signal_strength: SignalStrengthConfig = field(default_factory=SignalStrengthConfig)
     portfolio_risk: PortfolioRiskConfig = field(default_factory=PortfolioRiskConfig)
+    staged_entries: StagedEntriesConfig = field(default_factory=StagedEntriesConfig)
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     shadow_trading: ShadowTradingConfig = field(default_factory=ShadowTradingConfig)
 
@@ -411,6 +441,7 @@ class TradingPolicy:
         self.events.validate()
         self.volatility.validate()
         self.portfolio_risk.validate()
+        self.staged_entries.validate()
         self.execution.validate()
         self.shadow_trading.validate()
 
@@ -527,6 +558,7 @@ def load_policy_config(config_path: Optional[str] = None) -> TradingPolicy:
         pol_data = raw_data.get("policy", {})
         ss_data = raw_data.get("signal_strength", {})
         pr_data = raw_data.get("portfolio_risk", {})
+        staged_data = raw_data.get("staged_entries", {})
         exec_data = raw_data.get("execution", {})
 
         policy = TradingPolicy(
@@ -543,6 +575,7 @@ def load_policy_config(config_path: Optional[str] = None) -> TradingPolicy:
             policy=PolicyGovernanceConfig(**pol_data),
             signal_strength=SignalStrengthConfig(**ss_data),
             portfolio_risk=PortfolioRiskConfig(**pr_data),
+            staged_entries=StagedEntriesConfig(**staged_data),
             execution=ExecutionConfig(**exec_data),
             shadow_trading=ShadowTradingConfig(**raw_data.get("shadow_trading", {})),
         )

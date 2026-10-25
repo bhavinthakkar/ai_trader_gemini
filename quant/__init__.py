@@ -162,12 +162,22 @@ from quant.order_execution import (
 from quant.policy_config import (
     TradingPolicy,
     PullbackConfig,
+    StagedEntriesConfig,
     get_default_policy,
     load_policy_config,
 )
 from quant.entry_setups import (
     PullbackSetupResult,
     evaluate_pullback_setup,
+)
+from quant.staged_entries import (
+    TrancheStatus,
+    TrancheRejectionReason,
+    TranchePlan,
+    StagedEntryPlan,
+    StagedTrancheEvaluation,
+    build_staged_entry_plan,
+    evaluate_staged_tranche_addition,
 )
 from quant.shadow_trading import (
     DriftStatus,
@@ -316,6 +326,14 @@ __all__ = [
     "ShadowTradingEngine",
     "ShadowMetricsAnalyzer",
     "ShadowPromotionEvaluator",
+    "StagedEntriesConfig",
+    "TrancheStatus",
+    "TrancheRejectionReason",
+    "TranchePlan",
+    "StagedEntryPlan",
+    "StagedTrancheEvaluation",
+    "build_staged_entry_plan",
+    "evaluate_staged_tranche_addition",
 ]
 
 

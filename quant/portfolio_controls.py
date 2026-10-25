@@ -275,10 +275,128 @@ class PortfolioSnapshot:
     cash: float
     peak_equity: float
     positions: Dict[str, Position] = field(default_factory=dict)
+    open_orders: List[Any] = field(default_factory=list)
 
     def __post_init__(self):
         if self.peak_equity <= 0.0 and self.portfolio_equity > 0.0:
             self.peak_equity = self.portfolio_equity
+
+    @staticmethod
+    def _parse_order(order: Any) -> Dict[str, Any]:
+        """Extracts normalized fields from an open order dictionary, dataclass, or object."""
+        if isinstance(order, dict):
+            sym = str(order.get("ticker") or order.get("symbol") or "").strip().upper()
+            shares = int(
+                order.get("remaining_shares")
+                if "remaining_shares" in order
+                else (order.get("shares") or order.get("requested_shares", 0))
+            )
+            px = float(order.get("limit_price") or order.get("signal_price") or order.get("price", 0.0) or 0.0)
+            sl = float(order.get("stop_loss_price") or order.get("stop_loss", 0.0) or 0.0)
+            side = str(order.get("side") or order.get("direction", "BUY")).strip().upper()
+            status = str(order.get("status", "OPEN")).strip().upper()
+            is_open = order.get("is_open", status not in ("FILLED", "CANCELLED", "REJECTED"))
+            sector = order.get("sector")
+            factor_tags = order.get("factor_tags")
+        else:
+            sym = str(getattr(order, "ticker", getattr(order, "symbol", "")) or "").strip().upper()
+            shares = int(
+                getattr(order, "remaining_shares", getattr(order, "requested_shares", getattr(order, "shares", 0)))
+            )
+            px = float(
+                getattr(order, "limit_price", None)
+                or getattr(order, "signal_price", None)
+                or getattr(order, "price", 0.0)
+                or 0.0
+            )
+            sl = float(getattr(order, "stop_loss_price", None) or getattr(order, "stop_loss", 0.0) or 0.0)
+            side = str(getattr(order, "side", getattr(order, "direction", "BUY"))).strip().upper()
+            status = str(getattr(order, "status", "OPEN")).strip().upper()
+            is_open = getattr(order, "is_open", status not in ("FILLED", "CANCELLED", "REJECTED"))
+            sector = getattr(order, "sector", None)
+            factor_tags = getattr(order, "factor_tags", None)
+        return {
+            "ticker": sym,
+            "shares": max(0, shares),
+            "price": max(0.0, px),
+            "stop_loss": max(0.0, sl),
+            "side": side,
+            "is_open": is_open,
+            "sector": sector,
+            "factor_tags": factor_tags,
+        }
+
+    @property
+    def total_open_orders_market_value(self) -> float:
+        """Total gross market value committed across all open orders."""
+        val = 0.0
+        for o in self.open_orders:
+            info = self._parse_order(o)
+            if info["is_open"]:
+                val += info["shares"] * info["price"]
+        return round(val, 2)
+
+    def get_open_orders_committed_cash(self) -> float:
+        """Cash committed to pending open buy orders."""
+        cash = 0.0
+        for o in self.open_orders:
+            info = self._parse_order(o)
+            if info["is_open"] and info["side"] in ("BUY", "LONG"):
+                cash += info["shares"] * info["price"]
+        return round(cash, 2)
+
+    def get_ticker_open_orders_shares(self, ticker: str, direction: str = "LONG") -> int:
+        """Total unexecuted shares in open orders for a specific ticker."""
+        sym = (ticker or "").strip().upper()
+        dir_norm = direction.strip().upper()
+        total_sh = 0
+        for o in self.open_orders:
+            info = self._parse_order(o)
+            if info["is_open"] and info["ticker"] == sym:
+                order_dir = "LONG" if info["side"] in ("BUY", "LONG", "BUY_TO_COVER") else "SHORT"
+                if order_dir == dir_norm:
+                    total_sh += info["shares"]
+        return total_sh
+
+    def get_ticker_open_orders_market_value(self, ticker: str) -> float:
+        """Total market value committed to open orders for a specific ticker."""
+        sym = (ticker or "").strip().upper()
+        mv = 0.0
+        for o in self.open_orders:
+            info = self._parse_order(o)
+            if info["is_open"] and info["ticker"] == sym:
+                mv += info["shares"] * info["price"]
+        return round(mv, 2)
+
+    def get_sector_open_orders_market_value(self, sector: str) -> float:
+        """Total market value committed to open orders within a specific sector."""
+        sec_norm = (sector or "").strip().lower()
+        mv = 0.0
+        for o in self.open_orders:
+            info = self._parse_order(o)
+            if info["is_open"]:
+                order_sec = info["sector"]
+                if not order_sec:
+                    order_sec, _ = resolve_instrument_taxonomy(info["ticker"])
+                if (order_sec or "").strip().lower() == sec_norm:
+                    mv += info["shares"] * info["price"]
+        return round(mv, 2)
+
+    def get_ticker_open_orders_risk(
+        self, ticker: str, cost_per_share: float = 0.0, gap_reserve: float = 0.0
+    ) -> float:
+        """Total risk dollars committed to open orders for a specific ticker."""
+        sym = (ticker or "").strip().upper()
+        risk = 0.0
+        for o in self.open_orders:
+            info = self._parse_order(o)
+            if info["is_open"] and info["ticker"] == sym:
+                px = info["price"]
+                sl = info["stop_loss"]
+                if px > 0.0 and sl > 0.0:
+                    per_sh_risk = abs(px - sl) + cost_per_share + gap_reserve
+                    risk += info["shares"] * per_sh_risk
+        return round(risk, 2)
 
     @property
     def drawdown_pct(self) -> float:
@@ -863,16 +981,18 @@ class PortfolioRiskEngine:
         n_risk = math.floor(equity_at_risk / eff_risk_per_share)
 
         # 6. Limit Caps & Headroom Calculations
-        # 6A. Maximum Single-Stock Exposure Cap
+        # 6A. Maximum Single-Stock Exposure Cap (including existing position and open orders)
         current_ticker_val = 0.0
         if sym in snapshot.positions:
             current_ticker_val = snapshot.positions[sym].market_value
+        current_ticker_val += snapshot.get_ticker_open_orders_market_value(sym)
         max_single_stock_dollars = E * pr.max_single_stock_pct
         single_stock_headroom = max(0.0, max_single_stock_dollars - current_ticker_val)
         n_single_stock_cap = math.floor(single_stock_headroom / entry_price)
 
-        # 6B. Sector Concentration Cap
+        # 6B. Sector Concentration Cap (including open orders)
         current_sector_val = snapshot.get_sector_exposure_dollars(resolved_sector)
+        current_sector_val += snapshot.get_sector_open_orders_market_value(resolved_sector)
         max_sector_dollars = E * pr.max_sector_pct
         sector_headroom = max(0.0, max_sector_dollars - current_sector_val)
         n_sector_cap = math.floor(sector_headroom / entry_price)
@@ -889,9 +1009,10 @@ class PortfolioRiskEngine:
         n_factor_cap = min(factor_caps) if factor_caps else 10_000_000_000
         factor_headroom = min_factor_headroom if factor_caps else max_single_stock_dollars
 
-        # 6D. Total Gross Exposure Cap
+        # 6D. Total Gross Exposure Cap (including open orders)
+        total_gross_committed = snapshot.gross_exposure_dollars + snapshot.total_open_orders_market_value
         max_gross_dollars = E * pr.max_gross_exposure_pct
-        gross_headroom = max(0.0, max_gross_dollars - snapshot.gross_exposure_dollars)
+        gross_headroom = max(0.0, max_gross_dollars - total_gross_committed)
         n_gross_cap = math.floor(gross_headroom / entry_price)
 
         # 6E. Total Net Exposure Cap
@@ -903,9 +1024,10 @@ class PortfolioRiskEngine:
             net_headroom = max(0.0, max_net_dollars + curr_net)
         n_net_cap = math.floor(net_headroom / entry_price)
 
-        # 6F. Cash Reserve & Margin Collateral Cap
+        # 6F. Cash Reserve & Margin Collateral Cap (accounting for committed cash in open orders)
         min_cash_required = E * pr.min_cash_reserve_pct
-        available_free_cash = max(0.0, snapshot.cash - min_cash_required)
+        committed_open_cash = snapshot.get_open_orders_committed_cash()
+        available_free_cash = max(0.0, snapshot.cash - min_cash_required - committed_open_cash)
         if dir_norm == "LONG":
             n_cash_cap = math.floor(available_free_cash / entry_price)
         else:

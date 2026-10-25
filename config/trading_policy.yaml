@@ -292,6 +292,30 @@ portfolio_risk:
   short_forbid_high_quality_value: true
 
 # =============================================================================
+# 10b. STAGED ENTRIES & RISK BUDGET GOVERNANCE (STEP 5)
+# =============================================================================
+# Sizes staged entries against one fixed risk budget for the total position.
+# Decides maximum position risk in advance; prohibits treating each tranche as an independent risk allowance.
+staged_entries:
+  enabled: true
+  # Maximum number of staged entry tranches per position
+  max_tranches: 3
+  # Advance planned tranche risk allocation weights (must sum to 1.0)
+  tranche_weights: [0.50, 0.30, 0.20]
+  # Minimum risk budget in dollars required to justify executing a tranche
+  min_tranche_risk_dollars: 25.0
+  # Strict Invariant: Averaging down a losing position is unconditionally prohibited
+  require_profit_for_addition: true
+  # Minimum unrealized profit in ATR multiples required to authorize subsequent tranche
+  min_profit_atr_for_addition: 0.50
+  # Minimum composite score required to qualify an additional tranche
+  min_addition_composite_score: 60.0
+  # Maximum adverse excursion in ATR from entry before addition is cancelled
+  max_adverse_excursion_atr: 1.0
+  # Exclude staged additions during earnings or binary corporate event blackout
+  exclude_during_event_blackout: true
+
+# =============================================================================
 # 10. ORDER EXECUTION & OPERATIONAL SAFETY CONTROLS (Step 7.3)
 # =============================================================================
 execution:
