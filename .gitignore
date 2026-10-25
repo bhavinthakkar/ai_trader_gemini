@@ -1,5 +1,6 @@
 .env
 venv/
+models/timestral_cache/
 __pycache__/
 *.pyc
 .pytest_cache/

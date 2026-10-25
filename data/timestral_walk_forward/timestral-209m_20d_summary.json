@@ -1,0 +1,131 @@
+{
+  "model_id": "mistralai/Timestral-209M",
+  "forecast_horizon_trading_days": 20,
+  "stride_trading_days": 21,
+  "tickers": [
+    "AAPL",
+    "AMD",
+    "AMZN",
+    "AVGO",
+    "GOOGL",
+    "JPM",
+    "META",
+    "MSFT",
+    "NVDA",
+    "SPY",
+    "XOM"
+  ],
+  "forecast_count": 1287,
+  "timestral_20d_return_mae": 0.07171655888151339,
+  "zero_return_baseline_20d_mae": 0.07087546611803992,
+  "trailing_20d_momentum_baseline_mae": 0.09581789584360817,
+  "timestral_directional_accuracy": 0.5998445998445998,
+  "trailing_20d_momentum_directional_accuracy": 0.560994560994561,
+  "timestral_daily_q10_q90_coverage": 0.801048951048951,
+  "per_ticker": {
+    "AAPL": {
+      "forecast_count": 117,
+      "timestral_20d_return_mae": 0.06615816415117175,
+      "zero_return_baseline_20d_mae": 0.06730522723027478,
+      "trailing_20d_momentum_baseline_mae": 0.08669146391281518,
+      "timestral_directional_accuracy": 0.6324786324786325,
+      "trailing_20d_momentum_directional_accuracy": 0.5470085470085471,
+      "timestral_daily_q10_q90_coverage": 0.7952991452991452
+    },
+    "AMD": {
+      "forecast_count": 117,
+      "timestral_20d_return_mae": 0.1323688080263368,
+      "zero_return_baseline_20d_mae": 0.12420751058372617,
+      "trailing_20d_momentum_baseline_mae": 0.1836666039794821,
+      "timestral_directional_accuracy": 0.47863247863247865,
+      "trailing_20d_momentum_directional_accuracy": 0.49572649572649574,
+      "timestral_daily_q10_q90_coverage": 0.808974358974359
+    },
+    "AMZN": {
+      "forecast_count": 117,
+      "timestral_20d_return_mae": 0.06254639530091118,
+      "zero_return_baseline_20d_mae": 0.06345013186405593,
+      "trailing_20d_momentum_baseline_mae": 0.0840062715845294,
+      "timestral_directional_accuracy": 0.5982905982905983,
+      "trailing_20d_momentum_directional_accuracy": 0.5470085470085471,
+      "timestral_daily_q10_q90_coverage": 0.805982905982906
+    },
+    "AVGO": {
+      "forecast_count": 117,
+      "timestral_20d_return_mae": 0.08208852361774459,
+      "zero_return_baseline_20d_mae": 0.07872547954288305,
+      "trailing_20d_momentum_baseline_mae": 0.11665037698116512,
+      "timestral_directional_accuracy": 0.5982905982905983,
+      "trailing_20d_momentum_directional_accuracy": 0.49572649572649574,
+      "timestral_daily_q10_q90_coverage": 0.7965811965811965
+    },
+    "GOOGL": {
+      "forecast_count": 117,
+      "timestral_20d_return_mae": 0.05860101733779097,
+      "zero_return_baseline_20d_mae": 0.05838157064818903,
+      "trailing_20d_momentum_baseline_mae": 0.07376471352878738,
+      "timestral_directional_accuracy": 0.5811965811965812,
+      "trailing_20d_momentum_directional_accuracy": 0.5470085470085471,
+      "timestral_daily_q10_q90_coverage": 0.7974358974358975
+    },
+    "JPM": {
+      "forecast_count": 117,
+      "timestral_20d_return_mae": 0.051700001589499923,
+      "zero_return_baseline_20d_mae": 0.05039133092958019,
+      "trailing_20d_momentum_baseline_mae": 0.07448984347712556,
+      "timestral_directional_accuracy": 0.5982905982905983,
+      "trailing_20d_momentum_directional_accuracy": 0.5213675213675214,
+      "timestral_daily_q10_q90_coverage": 0.8085470085470086
+    },
+    "META": {
+      "forecast_count": 117,
+      "timestral_20d_return_mae": 0.07522147105466027,
+      "zero_return_baseline_20d_mae": 0.07901372776211175,
+      "trailing_20d_momentum_baseline_mae": 0.09513925143573496,
+      "timestral_directional_accuracy": 0.6495726495726496,
+      "trailing_20d_momentum_directional_accuracy": 0.6495726495726496,
+      "timestral_daily_q10_q90_coverage": 0.7931623931623931
+    },
+    "MSFT": {
+      "forecast_count": 117,
+      "timestral_20d_return_mae": 0.05425232778163446,
+      "zero_return_baseline_20d_mae": 0.05453694185743553,
+      "trailing_20d_momentum_baseline_mae": 0.07220338236725848,
+      "timestral_directional_accuracy": 0.5897435897435898,
+      "trailing_20d_momentum_directional_accuracy": 0.6324786324786325,
+      "timestral_daily_q10_q90_coverage": 0.7918803418803418
+    },
+    "NVDA": {
+      "forecast_count": 117,
+      "timestral_20d_return_mae": 0.11119854553954583,
+      "zero_return_baseline_20d_mae": 0.11251524826155856,
+      "trailing_20d_momentum_baseline_mae": 0.14821551452997608,
+      "timestral_directional_accuracy": 0.6581196581196581,
+      "trailing_20d_momentum_directional_accuracy": 0.5555555555555556,
+      "timestral_daily_q10_q90_coverage": 0.8047008547008547
+    },
+    "SPY": {
+      "forecast_count": 117,
+      "timestral_20d_return_mae": 0.032779227725362466,
+      "zero_return_baseline_20d_mae": 0.03319635011207337,
+      "trailing_20d_momentum_baseline_mae": 0.04321212114057171,
+      "timestral_directional_accuracy": 0.717948717948718,
+      "trailing_20d_momentum_directional_accuracy": 0.6410256410256411,
+      "timestral_daily_q10_q90_coverage": 0.8025641025641026
+    },
+    "XOM": {
+      "forecast_count": 117,
+      "timestral_20d_return_mae": 0.061967665571989135,
+      "zero_return_baseline_20d_mae": 0.05790660850655081,
+      "trailing_20d_momentum_baseline_mae": 0.07595731134224397,
+      "timestral_directional_accuracy": 0.49572649572649574,
+      "trailing_20d_momentum_directional_accuracy": 0.5384615384615384,
+      "timestral_daily_q10_q90_coverage": 0.8064102564102564
+    }
+  },
+  "evaluation_start": "2017-01-13T00:00:00",
+  "evaluation_end": "2026-10-22T00:00:00",
+  "created_at_utc": "2026-10-25T18:42:58.341162+00:00",
+  "data_source": "Yahoo Finance auto-adjusted daily Close",
+  "data_caveat": "Exploratory historical evaluation: current Yahoo Finance adjusted history is not a point-in-time vendor snapshot; this report is not evidence of investable performance."
+}

@@ -1,0 +1,28 @@
+{
+  "model_id": "mistralai/Timestral-209M",
+  "forecast_horizon_trading_days": 20,
+  "matched_forecasts": 555,
+  "decision_dates": 56,
+  "tickers": [
+    "AAPL",
+    "AMD",
+    "AMZN",
+    "AVGO",
+    "GOOGL",
+    "JPM",
+    "META",
+    "MSFT",
+    "NVDA",
+    "XOM"
+  ],
+  "timestral_relative_return_mae": 0.06786421365273203,
+  "zero_excess_return_baseline_mae": 0.06699805234229221,
+  "timestral_relative_return_directional_accuracy": 0.5351351351351351,
+  "timestral_vs_realized_excess_spearman": 0.06839986494558865,
+  "existing_ml_vs_realized_excess_spearman": 0.06964134917211065,
+  "timestral_top_minus_bottom_quintile_excess_return": -0.006816735845382463,
+  "existing_ml_top_minus_bottom_quintile_excess_return": 0.022523368133731347,
+  "evaluation_start": "2022-01-31",
+  "evaluation_end": "2026-08-31",
+  "comparison_caveat": "The ML artifact is point-in-time, but Timestral inputs use current Yahoo Finance auto-adjusted history; historical corporate-action adjustments may differ from the prices available at each decision date. Shadow evaluation only."
+}

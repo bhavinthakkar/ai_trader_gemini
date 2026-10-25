@@ -671,6 +671,22 @@ Use any of the local aliases:
 
 These aliases send JSON chat-completion requests to `${LLAMACPP_BASE_URL:-http://127.0.0.1:11434/v1}` and automatically use a compact prompt profile sized for the local 8K context. The client serializes requests because the server has one slot and enforces a 2048-token output reserve plus a safety margin.
 
+### **Run a Local Timestral-209M Forecast Evaluation (Shadow Mode)**
+
+Timestral is a local time-series forecaster, separate from the chat-model providers. It forecasts daily log returns and does not feed the trading decision pipeline. The first run downloads the 209M weights into `models/timestral_cache/` (about 800 MB).
+
+```bash
+./venv/bin/python timestral_walk_forward.py --tickers AAPL,MSFT,NVDA,SPY --start 2015-01-01
+```
+
+The evaluator uses monthly, non-overlapping 20-trading-day forecast windows and compares the model with zero-return and trailing-20-day momentum baselines. It writes detailed predictions and summary metrics to `data/timestral_walk_forward/`. Yahoo Finance's current adjusted history is not a point-in-time vendor snapshot, so these results are exploratory and are not evidence of investable performance.
+
+To align Timestral forecasts to the existing point-in-time LambdaMART validation dates and compare cross-sectional rankings:
+
+```bash
+./venv/bin/python timestral_walk_forward.py --compare-existing-ml
+```
+
 The auto-started server is launched with the equivalent of:
 ```bash
 ./llama.cpp/build/bin/llama-server \

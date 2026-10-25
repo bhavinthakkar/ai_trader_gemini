@@ -8,6 +8,7 @@ requests>=2.31.0
 python-dotenv>=1.0.0
 pandas>=2.0.0
 numpy>=1.24.0
+timestral @ git+https://github.com/mistralai/timestral.git@a534bdbd244d64f3d9d743f46c7bf6fc330ed4ff
 streamlit>=1.30.0
 ta>=0.11.0
 finnhub-python>=2.4.18
