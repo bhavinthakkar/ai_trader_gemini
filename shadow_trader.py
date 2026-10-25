@@ -83,7 +83,7 @@ def run_shadow_universe_session(
     session_id: Optional[str] = None,
     persist_db: bool = False,
     db_path: Optional[str] = None,
-    simulate_forward_outcomes: bool = True,
+    simulate_forward_outcomes: bool = False,
     baseline_features: Optional[Dict[str, List[float]]] = None,
 ) -> Tuple[List[ShadowDecisionRecord], ShadowMetricsReport, PromotionDecision]:
     """
@@ -174,6 +174,7 @@ def run_shadow_universe_session(
         session_id=sid,
         ledger=engine.ledger,
         portfolio=port,
+        source_type="SYNTHETIC_SIMULATION",
     )
 
     # 3. Predefined Institutional Promotion Gate Evaluation
@@ -301,7 +302,7 @@ def main() -> int:
         session_id=args.session_id or None,
         persist_db=args.persist_db,
         db_path=db_path,
-        simulate_forward_outcomes=True,
+        simulate_forward_outcomes=False,
     )
 
     if args.format == "json":

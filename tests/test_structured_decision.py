@@ -407,6 +407,21 @@ class TestStructuredDecisionMandatoryGates(unittest.TestCase):
         self.assertEqual(dec.decision, "SELL")
         self.assertEqual(dec.position_action, PositionAction.CLOSE_LONG.value)
 
+    def test_explicit_book_profit_on_flat_position_is_blocked(self):
+        dec = self.engine.evaluate(
+            ticker="FLAT_PROFIT",
+            candidate_decision="BOOK PROFIT",
+            composite_score=72.0,
+            position_state="FLAT",
+            current_price=100.0,
+            stop_loss=95.0,
+            target_price=105.0,
+            atr=2.0,
+        )
+        self.assertEqual(dec.decision, "HOLD")
+        self.assertEqual(dec.position_action, PositionAction.NO_ACTION.value)
+        self.assertIn("POSITION_REQUIRED_FOR_PROFIT_TAKING", dec.reason_codes)
+
 
 class TestSeparationOfDecisionFromExplanation(unittest.TestCase):
     """

@@ -78,6 +78,8 @@ class TestAuthoritativeDecisionContract(unittest.TestCase):
         self.assertEqual(res["decision"], "BUY")
         self.assertEqual(res["final_decision"], "BUY")
         self.assertEqual(res["position_action"], "OPEN_LONG")
+        self.assertEqual(res["recommendation"], "BUY")
+        self.assertIsNone(res["staged_entry_plan"])
 
         # Contract assertion: Model's raw suggestion preserved separately
         self.assertEqual(res["model_decision"], "HOLD")

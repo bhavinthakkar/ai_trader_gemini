@@ -133,6 +133,8 @@ class HistoricalSetupMetrics:
     missed_rebounds_count: int
     missed_rebounds_rate_pct: float
     annualized_turnover_pct: float
+    trade_pnl_sum: float = 0.0
+    pnl_reconciliation_error: float = 0.0
     period_breakdown: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -150,6 +152,8 @@ class HistoricalEvaluationReport:
     catalyst_dips: HistoricalSetupMetrics
     combined: HistoricalSetupMetrics
     passed_oos_gate: bool
+    production_rule_fidelity: bool = False
+    validation_scope: str = "HISTORICAL_PROXY"
     oos_gate_checks: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     remediation_notes: List[str] = field(default_factory=list)
 
@@ -338,7 +342,7 @@ def simulate_setup_backtest(
             exit_comm = max(cfg.min_commission, rem_sh * cfg.commission_per_share) if rem_sh > 0 else 0.0
             exit_proceeds = rem_sh * (p_closed.exit_price or 0.0) - exit_comm
 
-            net_pnl = trim_pnl + (exit_proceeds - (rem_sh * p_closed.entry_price))
+            net_pnl = trim_pnl + (exit_proceeds - (rem_sh * p_closed.entry_price)) - p_closed.entry_commission
             gross_pnl = trim_pnl + (rem_sh * ((p_closed.exit_price or 0.0) - p_closed.entry_price))
 
             p_closed.gross_pnl = round(gross_pnl, 2)
@@ -445,9 +449,22 @@ def simulate_setup_backtest(
                     ):
                         candidates.append((sym, "CATALYST_DIP_BUY", float(c_val), float(atr_val), composite_proxy))
 
-        # 4. Rank Candidates by Score and Size Positions
-        candidates.sort(key=lambda x: x[4], reverse=True)
-        for sym, stype, c_val, atr_val, score in candidates[:slots_available]:
+        # A ticker can qualify for both setups on the same bar. The portfolio
+        # holds one position per ticker, so select exactly one candidate before
+        # sizing. Otherwise the second entry overwrites the first in `positions`
+        # while leaving the first entry cost stranded in cash accounting.
+        best_by_ticker: Dict[str, Tuple[str, float, float, float]] = {}
+        for sym, stype, c_val, atr_val, score in candidates:
+            incumbent = best_by_ticker.get(sym)
+            if incumbent is None or score > incumbent[3]:
+                best_by_ticker[sym] = (stype, c_val, atr_val, score)
+
+        ranked_candidates = [
+            (sym, *candidate)
+            for sym, candidate in best_by_ticker.items()
+        ]
+        ranked_candidates.sort(key=lambda x: x[4], reverse=True)
+        for sym, stype, c_val, atr_val, score in ranked_candidates[:slots_available]:
             stop_dist = max(cfg.atr_stop_multiple * atr_val, cfg.min_stop_distance_pct * c_val)
             if stop_dist <= 0 or pd.isna(stop_dist):
                 continue
@@ -514,7 +531,7 @@ def simulate_setup_backtest(
             trim_pnl = pos.realized_trim_pnl
             exit_proceeds = rem_sh * exit_fill - comm
 
-            net_pnl = trim_pnl + (exit_proceeds - (rem_sh * pos.entry_price))
+            net_pnl = trim_pnl + (exit_proceeds - (rem_sh * pos.entry_price)) - pos.entry_commission
             gross_pnl = trim_pnl + (rem_sh * (exit_fill - pos.entry_price))
             pos.gross_pnl = round(gross_pnl, 2)
             pos.net_pnl = round(net_pnl, 2)
@@ -574,8 +591,10 @@ def compute_setup_metrics(
     win_rate = (len(winning) / n_trades) * 100.0
 
     gross_pnl = sum(t.gross_pnl for t in trades)
-    net_pnl = sum(t.net_pnl for t in trades)
     final_equity = daily_equity[-1][1]
+    # The equity curve is the portfolio cash ledger. Trade-level PnL is
+    # independently summed below and must reconcile to this value.
+    net_pnl = final_equity - initial_equity
 
     # Time Horizon in Years
     t_start = daily_equity[0][0]
@@ -603,6 +622,7 @@ def compute_setup_metrics(
     gross_gains = sum(t.net_pnl for t in winning)
     gross_losses = abs(sum(t.net_pnl for t in losing))
     profit_factor = (gross_gains / gross_losses) if gross_losses > 0 else (2.0 if gross_gains > 0 else 0.0)
+    trade_pnl_sum = sum(t.net_pnl for t in trades)
 
     # Stop-outs and Profit Retained
     stop_outs = sum(1 for t in trades if t.was_stopped_out)
@@ -672,6 +692,8 @@ def compute_setup_metrics(
         missed_rebounds_count=missed_rebounds,
         missed_rebounds_rate_pct=round(missed_rebound_rate, 2),
         annualized_turnover_pct=round(annual_turnover, 2),
+        trade_pnl_sum=round(trade_pnl_sum, 2),
+        pnl_reconciliation_error=round(trade_pnl_sum - net_pnl, 2),
         period_breakdown=period_stats,
     )
 
@@ -679,6 +701,7 @@ def compute_setup_metrics(
 def run_historical_setups_evaluation(
     prices_path: Optional[Path] = None,
     config: Optional[HistoricalEvaluationConfig] = None,
+    policy: Optional[TradingPolicy] = None,
     export_json: bool = True,
     json_path: Optional[Path] = None,
 ) -> HistoricalEvaluationReport:
@@ -690,6 +713,8 @@ def run_historical_setups_evaluation(
     And verifies the Out-of-Sample Historical Promotion Gate.
     """
     cfg = config or HistoricalEvaluationConfig()
+    active_policy = policy or get_default_policy()
+    promotion_cfg = active_policy.shadow_trading
     _, matrices = load_price_and_indicator_matrix(prices_path=prices_path)
 
     # 1. Evaluate Pullbacks Alone
@@ -705,41 +730,84 @@ def run_historical_setups_evaluation(
     comb_metrics = compute_setup_metrics(comb_trades, comb_eq, comb_cand, setup_type="COMBINED", initial_equity=cfg.initial_equity)
 
     # 4. Out-of-Sample Institutional Gate Checks
+    max_drawdown = max(
+        pb_metrics.max_drawdown_pct,
+        dip_metrics.max_drawdown_pct,
+        comb_metrics.max_drawdown_pct,
+    )
+    max_stop_out = max(
+        pb_metrics.stop_out_rate_pct,
+        dip_metrics.stop_out_rate_pct,
+        comb_metrics.stop_out_rate_pct,
+    )
+    min_profit_retained = min(
+        pb_metrics.profit_retained_after_trims_pct,
+        dip_metrics.profit_retained_after_trims_pct,
+        comb_metrics.profit_retained_after_trims_pct,
+    )
+    holdout_net = {
+        "pullback": pb_metrics.period_breakdown.get("2025_2026_holdout", {}).get("net_pnl", 0.0),
+        "catalyst_dip": dip_metrics.period_breakdown.get("2025_2026_holdout", {}).get("net_pnl", 0.0),
+        "combined": comb_metrics.period_breakdown.get("2025_2026_holdout", {}).get("net_pnl", 0.0),
+    }
+    pnl_reconciliation_ok = all(
+        abs(m.pnl_reconciliation_error) <= max(1.0, m.total_trades_executed * 0.02)
+        for m in (pb_metrics, dip_metrics, comb_metrics)
+    )
+
+    # This evaluator only has adjusted prices and technical proxies. It has no
+    # point-in-time adverse-news, valuation, or live portfolio evidence, so its
+    # results are useful for research but cannot certify the production rules.
+    production_rule_fidelity = False
     gate_checks = {
         "min_trades_statistical_significance": {
-            "required": 50,
+            "required": promotion_cfg.min_historical_trades,
             "actual": comb_metrics.total_trades_executed,
-            "passed": comb_metrics.total_trades_executed >= 50,
+            "passed": comb_metrics.total_trades_executed >= promotion_cfg.min_historical_trades,
         },
         "pullback_positive_expectancy": {
-            "required": "> 0.0%",
+            "required": f">= {promotion_cfg.min_pullback_cagr_pct:.2f}% CAGR",
             "actual": f"{pb_metrics.cagr_pct:+.2f}%",
-            "passed": pb_metrics.net_pnl > 0.0,
+            "passed": pb_metrics.cagr_pct >= promotion_cfg.min_pullback_cagr_pct,
         },
         "catalyst_dip_positive_expectancy": {
-            "required": "> 0.0%",
+            "required": f">= {promotion_cfg.min_catalyst_dip_cagr_pct:.2f}% CAGR",
             "actual": f"{dip_metrics.cagr_pct:+.2f}%",
-            "passed": dip_metrics.net_pnl > 0.0 or dip_metrics.total_trades_executed >= 30,
+            "passed": dip_metrics.cagr_pct >= promotion_cfg.min_catalyst_dip_cagr_pct,
         },
         "max_historical_drawdown_within_bounds": {
-            "required": "<= 20.0%",
-            "actual": f"{pb_metrics.max_drawdown_pct:.2f}%",
-            "passed": pb_metrics.max_drawdown_pct <= 20.0,
+            "required": f"<= {promotion_cfg.max_historical_drawdown_pct:.2f}% across all modes",
+            "actual": f"{max_drawdown:.2f}%",
+            "passed": max_drawdown <= promotion_cfg.max_historical_drawdown_pct,
         },
         "profit_retained_after_trims": {
-            "required": ">= 50.0%",
-            "actual": f"{pb_metrics.profit_retained_after_trims_pct:.1f}%",
-            "passed": pb_metrics.profit_retained_after_trims_pct >= 50.0,
+            "required": f">= {promotion_cfg.min_profit_retained_after_trims_pct:.1f}% across all modes",
+            "actual": f"{min_profit_retained:.1f}%",
+            "passed": min_profit_retained >= promotion_cfg.min_profit_retained_after_trims_pct,
         },
         "controlled_stop_out_rate": {
-            "required": "<= 50.0%",
-            "actual": f"{pb_metrics.stop_out_rate_pct:.1f}%",
-            "passed": pb_metrics.stop_out_rate_pct <= 50.0,
+            "required": f"<= {promotion_cfg.max_stop_out_rate_pct:.1f}% across all modes",
+            "actual": f"{max_stop_out:.1f}%",
+            "passed": max_stop_out <= promotion_cfg.max_stop_out_rate_pct,
         },
         "holdout_positive_return": {
-            "required": "> 0.0 net PnL",
-            "actual": pb_metrics.period_breakdown.get("2025_2026_holdout", {}).get("net_pnl", 0.0),
-            "passed": pb_metrics.period_breakdown.get("2025_2026_holdout", {}).get("net_pnl", 0.0) > 0.0,
+            "required": "> 0.0 net PnL for each setup and combined strategy" if promotion_cfg.require_holdout_positive_pnl else "not required",
+            "actual": holdout_net,
+            "passed": (not promotion_cfg.require_holdout_positive_pnl) or all(v > 0.0 for v in holdout_net.values()),
+        },
+        "pnl_equity_reconciliation": {
+            "required": "trade PnL reconciles to final equity within $1 or $0.02/trade",
+            "actual": {
+                "pullback_error": pb_metrics.pnl_reconciliation_error,
+                "catalyst_dip_error": dip_metrics.pnl_reconciliation_error,
+                "combined_error": comb_metrics.pnl_reconciliation_error,
+            },
+            "passed": pnl_reconciliation_ok,
+        },
+        "production_rule_fidelity": {
+            "required": "point-in-time replay of production rules and data",
+            "actual": "technical proxy; no point-in-time catalyst or valuation inputs",
+            "passed": production_rule_fidelity,
         },
     }
 
@@ -759,6 +827,8 @@ def run_historical_setups_evaluation(
         catalyst_dips=dip_metrics,
         combined=comb_metrics,
         passed_oos_gate=all_passed,
+        production_rule_fidelity=production_rule_fidelity,
+        validation_scope="HISTORICAL_PROXY",
         oos_gate_checks=gate_checks,
         remediation_notes=remediation_notes,
     )

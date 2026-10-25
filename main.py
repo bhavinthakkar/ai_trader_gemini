@@ -1153,6 +1153,8 @@ def normalize_master_trader_json(
         model_status=model_status or ("IN_SCOPE" if is_in_scope else "OUT_OF_SCOPE"),
         run_id=run_id_val,
         policy=active_policy,
+        portfolio_equity=_to_float(m_data.get("portfolio_equity", data.get("portfolio_equity")), None),
+        risk_fraction=active_policy.portfolio_risk.max_risk_fraction_per_trade,
         candidate_action=candidate_action,
         candidate_type=candidate_type,
         model_decision=model_decision,
@@ -1170,6 +1172,11 @@ def normalize_master_trader_json(
     final_decision = structured_dec.decision
     decision = final_decision
     position_action = structured_dec.position_action
+    recommendation = (
+        "BUY" if final_decision in ("BUY", "DEEP BUY")
+        else "SELL" if final_decision in ("SELL", "BOOK PROFIT")
+        else "HOLD"
+    )
     rejection_reasons = list(structured_dec.rejection_reasons)
     gate_results = {
         "passed_gates": list(structured_dec.passed_gates),
@@ -1215,8 +1222,27 @@ def normalize_master_trader_json(
         internal_action = InternalActionType.HOLD.value
 
     # Backward compatibility for SQLite DB string storage
+    staged_entry_plan = None
+    if final_decision in ("BUY", "DEEP BUY"):
+        equity_for_plan = _to_float(m_data.get("portfolio_equity", data.get("portfolio_equity")), None)
+        if equity_for_plan and equity_for_plan > 0 and price_v > 0 and eval_stop and eval_stop < price_v:
+            from quant.staged_entries import build_staged_entry_plan
+
+            staged_entry_plan = build_staged_entry_plan(
+                entry_price=price_v,
+                stop_loss=eval_stop,
+                ticker=stock,
+                portfolio_equity=equity_for_plan,
+                risk_fraction=active_policy.portfolio_risk.max_risk_fraction_per_trade,
+                atr=atr_v if atr_v > 0 else None,
+                avg_dollar_volume_20d=avg_dollar_vol_20d_val,
+                composite_score=decision_composite,
+                policy=active_policy,
+            ).to_dict()
+
     return {
         "stock": _ensure_str(stock),
+        "recommendation": recommendation,
         "decision": final_decision,
         "final_decision": final_decision,
         "model_decision": model_decision,
@@ -1226,6 +1252,7 @@ def normalize_master_trader_json(
         "gate_results": gate_results,
         "rejection_reasons": rejection_reasons,
         "position_action": position_action,
+        "staged_entry_plan": staged_entry_plan,
         "decision_origin": decision_origin,
         "confidence": confidence,
         "signal_strength": confidence,

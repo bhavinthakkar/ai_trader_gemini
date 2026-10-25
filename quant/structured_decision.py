@@ -457,12 +457,9 @@ def qualify_candidate_setup(
         pullback_typ = pullback_res.candidate_type
         pullback_cond = pullback_res.conditions_met
 
-    # Qualify pullback candidate: fully qualified OR technical pullback pattern met
-    is_pullback_cand = pullback_is_qual or (
-        bool(pullback_cond.get("pullback_area_tested"))
-        and bool(pullback_cond.get("stabilization_confirmed"))
-        and bool(pullback_cond.get("volume_and_relative_strength"))
-    )
+    # A pullback is a candidate only when the complete rule qualifies it.
+    # Partial technical conditions must not bypass trend or exclusion failures.
+    is_pullback_cand = pullback_is_qual
 
     if is_pullback_cand:
         return ("BUY", "PULLBACK_BUY", pullback_ev)
@@ -1332,6 +1329,21 @@ class StructuredDecisionEngine:
 
         elif cand_dec in ("BOOK PROFIT", "TAKE PROFIT", "BOOK_PROFIT", "TAKE_PROFIT"):
             # Profit-Taking / Exit Certification (Step 5.4)
+            if not is_open_long:
+                return StructuredDecision(
+                    run_id=run_id_val,
+                    ticker=ticker_val,
+                    decision="HOLD",
+                    composite_score=composite_score,
+                    model_status=eff_model_status,
+                    passed_gates=passed_gates,
+                    failed_gates=["POSITION_REQUIRED_FOR_PROFIT_TAKING"],
+                    data_quality_status=data_quality_status,
+                    position_action=PositionAction.NO_ACTION.value,
+                    reason_codes=["POSITION_REQUIRED_FOR_PROFIT_TAKING"],
+                    rejection_reasons=["Profit taking requires an open long position."],
+                    metrics={"profit_taking": False},
+                )
             return StructuredDecision(
                 run_id=run_id_val,
                 ticker=ticker_val,

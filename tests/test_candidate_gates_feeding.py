@@ -129,6 +129,38 @@ class TestCandidateFeedingIntoGates:
         assert StandardGateName.REWARD_TO_RISK in out["gate_results"]["passed_gates"]
         assert StandardReasonCode.BUY_ORDER_CERTIFIED in out["gate_results"]["reason_codes"]
 
+    def test_pullback_rule_failure_cannot_be_labeled_as_pullback_candidate(self):
+        """A weak trend score cannot pass via the pullback partial-condition shortcut."""
+        policy = load_policy_config()
+        m_data = _make_valid_market_data(
+            current_price=100.0,
+            ema20=99.5,
+            ema50=95.0,
+            ema200=90.0,
+            change_5d_pct=-4.0,
+            deterministic_5pillar_scores={
+                "composite_quantitative_score": 64.0,
+                "trend": 50.0,  # Pullback rule requires >= 60.
+                "valuation_history_score": 60.0,
+                "peer_valuation_score": 60.0,
+                "sector": 60.0,
+                "alpha": 60.0,
+            },
+        )
+        out = normalize_master_trader_json(
+            data=_make_model_data(decision="HOLD", primary_driver="TECHNICAL_PULLBACK"),
+            symbol="AAPL",
+            m_data=m_data,
+            macro_data={},
+            gloomberb_payload={},
+            policy=policy,
+        )
+
+        assert out["candidate_type"] != "PULLBACK_BUY"
+        if out["decision"] == "BUY":
+            # A separate composite route may still qualify on its own rules.
+            assert out["candidate_type"] in ("QUANT_COMPOSITE_BUY", "MODEL_DISCRETIONARY_BUY")
+
     def test_pullback_candidate_rejected_by_buy_floor_when_score_below_standard_minimum(self):
         """Pullback setup with score 56.0 reaches gates but is rejected by BUY_FLOOR because 56.0 < 60.0 (does NOT lower standard floor)."""
         policy = load_policy_config()
@@ -159,12 +191,11 @@ class TestCandidateFeedingIntoGates:
         )
 
         assert out["model_decision"] == "HOLD"
-        assert out["candidate_action"] == "BUY"
-        assert out["candidate_type"] == "PULLBACK_BUY"
+        # Weak relative strength means no complete setup; the old partial-rule
+        # shortcut incorrectly sent this candidate into BUY_FLOOR.
+        assert out["candidate_action"] == "HOLD"
+        assert out["candidate_type"] == "NO_SETUP"
         assert out["final_decision"] == "HOLD"
-        assert StandardGateName.BUY_FLOOR in out["gate_results"]["failed_gates"]
-        assert StandardReasonCode.SCORE_BELOW_BUY_THRESHOLD in out["gate_results"]["reason_codes"]
-        assert StandardReasonCode.SCORE_BELOW_BUY_THRESHOLD in out["rejection_reasons"]
 
     def test_catalyst_dip_candidate_reaches_gates_and_certifies_when_model_says_hold(self):
         """Certified catalyst dip buy with score 54.0 (>= 52.0 dip floor) reaches gates and certifies BUY when model says HOLD."""
@@ -391,10 +422,10 @@ class TestCandidateFeedingIntoGates:
             policy=policy,
         )
 
-        assert out["candidate_action"] == "BUY"
+        assert out["candidate_action"] == "HOLD"
+        assert out["candidate_type"] == "NO_SETUP"
         assert out["final_decision"] == "HOLD"
-        assert StandardGateName.BUY_FLOOR in out["gate_results"]["failed_gates"]
-        assert StandardReasonCode.VALUE_TRAP_DETECTED in out["gate_results"]["reason_codes"]
+        assert out["candidate_type"] != "PULLBACK_BUY"
 
     def test_macro_event_driver_never_unlocks_candidate(self):
         """Primary driver MACRO_EVENT is refused regardless of news headlines or catalyst certificates."""

@@ -210,6 +210,7 @@ class ShadowMetricsReport:
     kill_switch_trips: int = 0
     max_portfolio_drawdown_pct: float = 0.0
     risk_compliance_status: str = "PASS"
+    source_type: str = "LIVE_SHADOW"
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -672,6 +673,7 @@ class ShadowMetricsAnalyzer:
         session_id: str = "SHADOW_SESSION",
         ledger: Optional[ExecutionLedger] = None,
         portfolio: Optional[PortfolioSnapshot] = None,
+        source_type: str = "LIVE_SHADOW",
     ) -> ShadowMetricsReport:
         """
         Performs full calculation of all 8 shadow trading measurement areas.
@@ -680,6 +682,7 @@ class ShadowMetricsAnalyzer:
             return ShadowMetricsReport(
                 session_id=session_id,
                 total_observations=0,
+                source_type=source_type,
                 reproducibility_status="INSUFFICIENT_OBSERVATIONS",
             )
 
@@ -856,6 +859,7 @@ class ShadowMetricsAnalyzer:
         return ShadowMetricsReport(
             session_id=session_id,
             total_observations=n,
+            source_type=source_type,
             reproducibility_rate=reproducibility_res["reproducibility_rate"],
             composite_exact_match_rate=reproducibility_res["composite_match_rate"],
             gate_match_rate=reproducibility_res["gate_match_rate"],
@@ -988,6 +992,21 @@ class ShadowPromotionEvaluator:
         failed_criteria: List[str] = []
         remediation_step: Optional[str] = None
         remediation_guidance: Optional[str] = None
+
+        if report.source_type != "LIVE_SHADOW":
+            return PromotionDecision(
+                is_promoted=False,
+                status=PromotionStatus.REJECTED_FOR_PROMOTION.value,
+                failed_criteria=[
+                    f"Evidence source {report.source_type!r} is not an independently collected live shadow campaign"
+                ],
+                remediation_step="COLLECT_CAUSAL_LIVE_SHADOW_EVIDENCE",
+                remediation_guidance=(
+                    "Run the production decision pipeline on timestamped live observations, record the decisions first, "
+                    "and attach outcomes only after the forward evaluation window closes."
+                ),
+                metrics_summary=report.to_dict(),
+            )
 
         # 1. Observation Sample Size Check
         if report.total_observations < cfg.min_observations_for_promotion:
@@ -1175,6 +1194,20 @@ class DualPromotionEvaluator:
             hist_checks = {}
             hist_summary = {}
 
+        production_rule_fidelity = bool(
+            getattr(historical_report, "production_rule_fidelity", False)
+            if not isinstance(historical_report, dict)
+            else historical_report.get("production_rule_fidelity", False)
+        )
+        if not production_rule_fidelity:
+            hist_passed = False
+            hist_checks = dict(hist_checks)
+            hist_checks["production_rule_fidelity"] = {
+                "required": "point-in-time replay of production rules and data",
+                "actual": "historical proxy or fidelity not certified",
+                "passed": False,
+            }
+
         passed_criteria: List[str] = []
         failed_criteria: List[str] = []
 
@@ -1253,9 +1286,8 @@ def run_shadow_trading_evaluation(
     evaluation_window_sessions: int = 20,
 ) -> Tuple[ShadowMetricsReport, PromotionDecision]:
     """
-    Executes an empirical shadow trading verification campaign using current/recent market data.
-    Feeds live/historical quotes into ShadowTradingEngine, simulates execution fills,
-    attaches realized forward price movement, and computes comprehensive ShadowMetricsReport.
+    Replays historical data causally for research. This is not a live shadow campaign
+    and cannot satisfy promotion evidence requirements.
     """
     import pandas as pd
     from quant.candidate_generation import get_default_focused_paths
@@ -1316,8 +1348,21 @@ def run_shadow_trading_evaluation(
                 atr_14d=round(c_val * 0.02, 2),
             )
 
-            # Qualification & directional setup proposal
-            action = "BUY" if fwd_ret_pct > 0.0 else "HOLD"
+            # Build the decision only from information available at this timestamp.
+            # The forward return below is attached strictly as a later outcome label.
+            hist = close.loc[:d, sym].dropna()
+            spy_hist = close.loc[:d, "SPY"].dropna()
+            if len(hist) < 200 or len(spy_hist) < 20:
+                continue
+            ema20 = float(hist.ewm(span=20, adjust=False).mean().iloc[-1])
+            ema50 = float(hist.ewm(span=50, adjust=False).mean().iloc[-1])
+            ema200 = float(hist.ewm(span=200, adjust=False).mean().iloc[-1])
+            rel_strength = (float(hist.iloc[-1]) / float(hist.iloc[-21]) - 1.0) - (
+                float(spy_hist.iloc[-1]) / float(spy_hist.iloc[-21]) - 1.0
+            )
+            uptrend = c_val > ema200 and ema50 > ema200
+            pullback = c_val <= ema20 * 1.015 and c_val >= ema50 * 0.97
+            action = "BUY" if uptrend and pullback and rel_strength > 0.0 else "HOLD"
             score = 75.0 if action == "BUY" else 54.0
 
             rec = engine.execute_shadow_decision(
@@ -1328,7 +1373,7 @@ def run_shadow_trading_evaluation(
                 candidate_decision=action,
                 composite_score=score,
                 session_id=session_id,
-                persist_db=persist_db,
+                persist_db=False,
                 db_path=db_path,
             )
 
@@ -1348,6 +1393,7 @@ def run_shadow_trading_evaluation(
         session_id=session_id,
         ledger=engine.ledger,
         portfolio=portfolio,
+        source_type="HISTORICAL_REPLAY",
     )
 
     evaluator = ShadowPromotionEvaluator(policy=pol)
@@ -1387,6 +1433,7 @@ def run_dual_promotion_evaluation(
     # 1. Historical Evaluation Report
     hist_rep = historical_report or run_historical_setups_evaluation(
         prices_path=prices_path,
+        policy=pol,
         export_json=export_json,
     )
 

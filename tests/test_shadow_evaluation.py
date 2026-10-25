@@ -188,8 +188,12 @@ def test_separate_pullback_and_catalyst_dip_reporting():
     assert rep.pullbacks.profit_retained_after_trims_pct >= 50.0
     assert rep.catalyst_dips.profit_retained_after_trims_pct >= 50.0
 
-    # OOS Gate passed
-    assert rep.passed_oos_gate is True
+    # The corrected combined book reconciles, but the strategy fails the
+    # drawdown hurdle and this technical proxy cannot certify production rules.
+    assert rep.combined.pnl_reconciliation_error <= 0.05
+    assert rep.oos_gate_checks["max_historical_drawdown_within_bounds"]["passed"] is False
+    assert rep.oos_gate_checks["production_rule_fidelity"]["passed"] is False
+    assert rep.passed_oos_gate is False
 
 
 # =============================================================================
@@ -202,6 +206,7 @@ def test_dual_evaluator_promotes_when_both_pillars_pass(policy):
 
     mock_hist = {
         "passed_oos_gate": True,
+        "production_rule_fidelity": True,
         "oos_gate_checks": {
             "min_trades": {"passed": True, "required": 50, "actual": 250},
             "pullback_expectancy": {"passed": True, "required": "> 0.0%", "actual": "+4.5%"},
@@ -230,12 +235,33 @@ def test_dual_evaluator_promotes_when_both_pillars_pass(policy):
     assert len(decision.failed_criteria) == 0
 
 
+def test_historical_replay_shadow_metrics_cannot_promote(policy):
+    report = ShadowMetricsReport(
+        session_id="REPLAY_ONLY",
+        total_observations=100,
+        source_type="HISTORICAL_REPLAY",
+        reproducibility_rate=1.0,
+        freshness_pass_rate=1.0,
+        spearman_ic=0.5,
+        directional_accuracy=0.9,
+        net_avg_return_pct=2.0,
+        overall_psi=0.01,
+        temporal_leakage_rate=0.0,
+        reconciliation_error_rate=0.0,
+    )
+    decision = ShadowPromotionEvaluator(policy=policy).evaluate(report)
+    assert decision.is_promoted is False
+    assert decision.status == PromotionStatus.REJECTED_FOR_PROMOTION.value
+    assert "HISTORICAL_REPLAY" in decision.failed_criteria[0]
+
+
 def test_dual_evaluator_rejects_when_backtest_passes_but_shadow_fails(policy):
     """Verifies that good backtest results ALONE cannot promote when shadow trading fails."""
     dual_eval = DualPromotionEvaluator(policy=policy)
 
     mock_hist = {
         "passed_oos_gate": True,
+        "production_rule_fidelity": True,
         "oos_gate_checks": {"drawdown": {"passed": True, "actual": "12.0%", "required": "<= 20%"}},
     }
 
@@ -346,7 +372,8 @@ def test_run_dual_promotion_evaluation_integration(policy):
             json_path=json_out,
         )
 
-        assert hist_rep.passed_oos_gate is True
+        assert hist_rep.passed_oos_gate is False
+        assert shadow_rep.source_type == "HISTORICAL_REPLAY"
         assert shadow_rep.total_observations >= 20
         assert shadow_rep.reproducibility_rate >= 0.99
         assert shadow_rep.freshness_pass_rate >= 0.99
@@ -354,11 +381,13 @@ def test_run_dual_promotion_evaluation_integration(policy):
         assert shadow_rep.net_avg_return_pct >= 0.0
         assert shadow_rep.reconciliation_error_rate == 0.0
 
-        assert dual_dec.is_promoted is True
-        assert dual_dec.status == DualPromotionStatus.PROMOTED_TO_PRODUCTION.value
+        assert dual_dec.is_promoted is False
+        assert dual_dec.status in (
+            DualPromotionStatus.REJECTED_HISTORICAL_OOS_FAILED.value,
+            DualPromotionStatus.REJECTED_DUAL_FAILURE.value,
+        )
         assert os.path.isfile(json_out)
 
         with open(json_out, "r", encoding="utf-8") as f:
             saved_data = json.load(f)
-            assert saved_data["dual_promotion_decision"]["is_promoted"] is True
-            assert saved_data["dual_promotion_decision"]["status"] == "PROMOTED_TO_PRODUCTION"
+            assert saved_data["dual_promotion_decision"]["is_promoted"] is False
