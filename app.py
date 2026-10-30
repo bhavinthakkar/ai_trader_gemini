@@ -588,16 +588,18 @@ with tab1:
             col_renames["model_used"] = "Model"
             col_renames["timestamp"] = "Timestamp"
 
-            df_table = df_display[cols_to_use].rename(columns=col_renames)
+            cols_to_show = [c for c in cols_to_use if c in df_display.columns]
+            df_table = df_display[cols_to_show].rename(columns=col_renames)
 
-            def format_decision(val):
-                if val == "BUY":
-                    return "🟢 BUY"
-                elif val == "SELL":
-                    return "🔴 SELL"
-                return "⚪ HOLD"
+            if "Decision" in df_table.columns:
+                def format_decision(val):
+                    if val == "BUY":
+                        return "🟢 BUY"
+                    elif val == "SELL":
+                        return "🔴 SELL"
+                    return "⚪ HOLD"
 
-            df_table["Decision"] = df_table["Decision"].apply(format_decision)
+                df_table["Decision"] = df_table["Decision"].apply(format_decision)
             st.dataframe(df_table, width="stretch", hide_index=True)
         else:
             st.warning("No signals match the selected filters.")

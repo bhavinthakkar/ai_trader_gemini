@@ -1068,6 +1068,8 @@ NON_VETO_REASON_CODES = {
 
 def is_signal_vetoed(signal: Dict[str, Any]) -> bool:
     """True if a directional model decision was blocked/vetoed by compliance safety gates."""
+    if hasattr(signal, "to_dict"):
+        signal = signal.to_dict()
     if not isinstance(signal, dict):
         return False
     origin = str(signal.get("decision_origin") or "").upper()
@@ -1113,6 +1115,8 @@ def format_compliance_gate_action(signal: Dict[str, Any]) -> str:
     If vetoed: '🛡️ VETO: <REASON>'
     If cleared: '🟢 PASSED'
     """
+    if hasattr(signal, "to_dict"):
+        signal = signal.to_dict()
     if not isinstance(signal, dict):
         return "🟢 PASSED"
 
@@ -1146,6 +1150,8 @@ def format_compliance_gate_action(signal: Dict[str, Any]) -> str:
 
 def format_model_recommendation(signal: Dict[str, Any]) -> str:
     """Returns the model's main recommendation formatted with indicator emoji."""
+    if hasattr(signal, "to_dict"):
+        signal = signal.to_dict()
     if not isinstance(signal, dict):
         return "⚪ HOLD"
     val = str(signal.get("model_decision") or signal.get("decision") or "HOLD").upper()
@@ -1158,6 +1164,8 @@ def format_model_recommendation(signal: Dict[str, Any]) -> str:
 
 def format_executed_action(signal: Dict[str, Any]) -> str:
     """Returns the effective execution action after safety gate adjudication."""
+    if hasattr(signal, "to_dict"):
+        signal = signal.to_dict()
     if not isinstance(signal, dict):
         return "⚪ NO_ACTION"
     pos = str(signal.get("position_action") or "").upper()

@@ -323,5 +323,72 @@ class TestDashboard(unittest.TestCase):
         self.assertEqual(nvd_item["currency_symbol"], "€")
 
 
+    def test_app_signal_table_columns_safely_handled(self):
+        import pandas as pd
+        from quant.compliance_gates import (
+            format_compliance_gate_action,
+            format_model_recommendation,
+            format_executed_action,
+        )
+
+        sample_signal = {
+            "symbol": "AAPL",
+            "decision": "BUY",
+            "model_decision": "BUY",
+            "confidence": 0.85,
+            "reason": "Strong momentum",
+            "ml_score": 75.0,
+            "timestamp": "2026-10-30 08:00:00",
+        }
+        df_display = pd.DataFrame([sample_signal])
+        df_display["model_rec_col"] = df_display.apply(format_model_recommendation, axis=1)
+        df_display["compliance_gate_col"] = df_display.apply(format_compliance_gate_action, axis=1)
+        df_display["final_action_col"] = df_display.apply(format_executed_action, axis=1)
+        df_display["decision_reasoning_col"] = df_display.apply(lambda r: r.get("decision_reasoning") or r.get("reason") or "—", axis=1)
+
+        cols_to_use = [
+            "symbol",
+            "model_rec_col",
+            "compliance_gate_col",
+            "final_action_col",
+            "decision_reasoning_col",
+            "ml_indicator_col",
+            "ml_score_col",
+            "confidence",
+        ]
+        col_renames = {
+            "symbol": "Ticker",
+            "model_rec_col": "🤖 Model Recommendation",
+            "compliance_gate_col": "🛡️ Safety Gate (Veto Action)",
+            "final_action_col": "Final Executed Action",
+            "decision_reasoning_col": "💡 Decision Reasoning",
+            "ml_indicator_col": "🤖 ML Signal",
+            "ml_score_col": "🤖 ML Score (Rank)",
+            "confidence": "Confidence",
+        }
+        cols_to_use.extend(["pe_and_peg", "model_used", "timestamp"])
+        col_renames["pe_and_peg"] = "Fwd Valuation"
+        col_renames["model_used"] = "Model"
+        col_renames["timestamp"] = "Timestamp"
+
+        cols_to_show = [c for c in cols_to_use if c in df_display.columns]
+        df_table = df_display[cols_to_show].rename(columns=col_renames)
+
+        if "Decision" in df_table.columns:
+            def format_decision(val):
+                if val == "BUY":
+                    return "🟢 BUY"
+                elif val == "SELL":
+                    return "🔴 SELL"
+                return "⚪ HOLD"
+            df_table["Decision"] = df_table["Decision"].apply(format_decision)
+
+        # Assert no KeyError raised and expected columns present
+        self.assertIn("Ticker", df_table.columns)
+        self.assertIn("🤖 Model Recommendation", df_table.columns)
+        self.assertIn("Final Executed Action", df_table.columns)
+        self.assertEqual(df_table["🤖 Model Recommendation"].iloc[0], "🟢 BUY")
+
+
 if __name__ == "__main__":
     unittest.main()
