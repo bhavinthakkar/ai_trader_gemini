@@ -1,5 +1,5 @@
 {
-  "evaluated_at": "2026-10-25 17:00:28 UTC",
+  "evaluated_at": "2026-10-30 08:35:47 UTC",
   "start_date": "2022-01-01",
   "end_date": "2026-10-14",
   "total_trading_days": 1196,
@@ -11,44 +11,46 @@
     "losing_trades": 235,
     "win_rate_pct": 47.19,
     "gross_pnl": 23702.26,
-    "net_pnl": 23253.57,
+    "net_pnl": 22804.65,
     "initial_equity": 100000.0,
     "final_equity": 122804.65,
     "cagr_pct": 4.41,
     "sharpe_ratio": 0.39,
     "sortino_ratio": 0.44,
-    "profit_factor": 1.18,
+    "profit_factor": 1.17,
     "max_drawdown_pct": 14.93,
     "stop_out_count": 201,
     "stop_out_rate_pct": 45.17,
-    "profit_retained_after_trims_pct": 65.18,
+    "profit_retained_after_trims_pct": 65.11,
     "missed_rebounds_count": 28,
     "missed_rebounds_rate_pct": 13.93,
     "annualized_turnover_pct": 1589.62,
+    "trade_pnl_sum": 22804.64,
+    "pnl_reconciliation_error": -0.01,
     "period_breakdown": {
       "2022_bear_shock": {
         "trades": 35,
         "win_rate_pct": 11.4,
-        "net_pnl": -14397.3,
+        "net_pnl": -14432.52,
         "profit_factor": 0.12
       },
       "2023_recovery": {
         "trades": 105,
         "win_rate_pct": 48.6,
-        "net_pnl": 9718.32,
+        "net_pnl": 9611.75,
         "profit_factor": 1.43
       },
       "2024_bull_expansion": {
         "trades": 127,
         "win_rate_pct": 51.2,
-        "net_pnl": 11619.37,
+        "net_pnl": 11490.89,
         "profit_factor": 1.32
       },
       "2025_2026_holdout": {
         "trades": 178,
         "win_rate_pct": 50.6,
-        "net_pnl": 16313.18,
-        "profit_factor": 1.3
+        "net_pnl": 16134.52,
+        "profit_factor": 1.29
       }
     }
   },
@@ -60,7 +62,7 @@
     "losing_trades": 103,
     "win_rate_pct": 46.63,
     "gross_pnl": 13041.18,
-    "net_pnl": 12844.58,
+    "net_pnl": 12646.85,
     "initial_equity": 100000.0,
     "final_equity": 112646.85,
     "cagr_pct": 2.53,
@@ -70,123 +72,150 @@
     "max_drawdown_pct": 11.84,
     "stop_out_count": 90,
     "stop_out_rate_pct": 46.63,
-    "profit_retained_after_trims_pct": 63.31,
+    "profit_retained_after_trims_pct": 63.25,
     "missed_rebounds_count": 17,
     "missed_rebounds_rate_pct": 18.89,
     "annualized_turnover_pct": 675.47,
+    "trade_pnl_sum": 12646.85,
+    "pnl_reconciliation_error": 0.0,
     "period_breakdown": {
       "2022_bear_shock": {
         "trades": 28,
         "win_rate_pct": 21.4,
-        "net_pnl": -9497.13,
+        "net_pnl": -9525.98,
         "profit_factor": 0.3
       },
       "2023_recovery": {
         "trades": 46,
         "win_rate_pct": 54.3,
-        "net_pnl": 5575.35,
+        "net_pnl": 5528.5,
         "profit_factor": 1.6
       },
       "2024_bull_expansion": {
         "trades": 40,
         "win_rate_pct": 57.5,
-        "net_pnl": 8700.54,
-        "profit_factor": 1.53
+        "net_pnl": 8658.03,
+        "profit_factor": 1.52
       },
       "2025_2026_holdout": {
         "trades": 79,
         "win_rate_pct": 45.6,
-        "net_pnl": 8065.82,
-        "profit_factor": 1.26
+        "net_pnl": 7986.3,
+        "profit_factor": 1.25
       }
     }
   },
   "combined": {
     "setup_type": "COMBINED",
-    "total_candidates_evaluated": 17636,
-    "total_trades_executed": 483,
+    "total_candidates_evaluated": 17611,
+    "total_trades_executed": 485,
     "winning_trades": 220,
-    "losing_trades": 263,
-    "win_rate_pct": 45.55,
-    "gross_pnl": 15084.12,
-    "net_pnl": 14600.07,
+    "losing_trades": 265,
+    "win_rate_pct": 45.36,
+    "gross_pnl": 19255.61,
+    "net_pnl": 18278.81,
     "initial_equity": 100000.0,
-    "final_equity": 73455.04,
-    "cagr_pct": -6.27,
-    "sharpe_ratio": -0.36,
-    "sortino_ratio": -0.34,
-    "profit_factor": 1.14,
-    "max_drawdown_pct": 35.09,
-    "stop_out_count": 228,
-    "stop_out_rate_pct": 47.2,
-    "profit_retained_after_trims_pct": 65.89,
+    "final_equity": 118278.81,
+    "cagr_pct": 3.59,
+    "sharpe_ratio": 0.33,
+    "sortino_ratio": 0.4,
+    "profit_factor": 1.13,
+    "max_drawdown_pct": 22.36,
+    "stop_out_count": 230,
+    "stop_out_rate_pct": 47.42,
+    "profit_retained_after_trims_pct": 65.54,
     "missed_rebounds_count": 29,
-    "missed_rebounds_rate_pct": 12.72,
-    "annualized_turnover_pct": 1571.16,
+    "missed_rebounds_rate_pct": 12.61,
+    "annualized_turnover_pct": 1711.21,
+    "trade_pnl_sum": 18278.83,
+    "pnl_reconciliation_error": 0.02,
     "period_breakdown": {
       "2022_bear_shock": {
         "trades": 57,
         "win_rate_pct": 15.8,
-        "net_pnl": -17774.95,
+        "net_pnl": -20276.35,
         "profit_factor": 0.16
       },
       "2023_recovery": {
         "trades": 106,
         "win_rate_pct": 50.9,
-        "net_pnl": 10382.47,
-        "profit_factor": 1.56
+        "net_pnl": 11325.52,
+        "profit_factor": 1.55
       },
       "2024_bull_expansion": {
-        "trades": 128,
-        "win_rate_pct": 50.0,
-        "net_pnl": 9220.18,
-        "profit_factor": 1.31
+        "trades": 129,
+        "win_rate_pct": 49.6,
+        "net_pnl": 8446.06,
+        "profit_factor": 1.23
       },
       "2025_2026_holdout": {
-        "trades": 192,
-        "win_rate_pct": 48.4,
-        "net_pnl": 12772.37,
-        "profit_factor": 1.38
+        "trades": 193,
+        "win_rate_pct": 48.2,
+        "net_pnl": 18783.6,
+        "profit_factor": 1.31
       }
     }
   },
-  "passed_oos_gate": true,
+  "passed_oos_gate": false,
+  "production_rule_fidelity": false,
+  "validation_scope": "HISTORICAL_PROXY",
   "oos_gate_checks": {
     "min_trades_statistical_significance": {
       "required": 50,
-      "actual": 483,
+      "actual": 485,
       "passed": true
     },
     "pullback_positive_expectancy": {
-      "required": "> 0.0%",
+      "required": ">= 0.00% CAGR",
       "actual": "+4.41%",
       "passed": true
     },
     "catalyst_dip_positive_expectancy": {
-      "required": "> 0.0%",
+      "required": ">= 0.00% CAGR",
       "actual": "+2.53%",
       "passed": true
     },
     "max_historical_drawdown_within_bounds": {
-      "required": "<= 20.0%",
-      "actual": "14.93%",
-      "passed": true
+      "required": "<= 20.00% across all modes",
+      "actual": "22.36%",
+      "passed": false
     },
     "profit_retained_after_trims": {
-      "required": ">= 50.0%",
-      "actual": "65.2%",
+      "required": ">= 50.0% across all modes",
+      "actual": "63.2%",
       "passed": true
     },
     "controlled_stop_out_rate": {
-      "required": "<= 50.0%",
-      "actual": "45.2%",
+      "required": "<= 50.0% across all modes",
+      "actual": "47.4%",
       "passed": true
     },
     "holdout_positive_return": {
-      "required": "> 0.0 net PnL",
-      "actual": 16313.18,
+      "required": "> 0.0 net PnL for each setup and combined strategy",
+      "actual": {
+        "pullback": 16134.52,
+        "catalyst_dip": 7986.3,
+        "combined": 18783.6
+      },
       "passed": true
+    },
+    "pnl_equity_reconciliation": {
+      "required": "trade PnL reconciles to final equity within $1 or $0.02/trade",
+      "actual": {
+        "pullback_error": -0.01,
+        "catalyst_dip_error": 0.0,
+        "combined_error": 0.02
+      },
+      "passed": true
+    },
+    "production_rule_fidelity": {
+      "required": "point-in-time replay of production rules and data",
+      "actual": "technical proxy; no point-in-time catalyst or valuation inputs",
+      "passed": false
     }
   },
-  "remediation_notes": []
+  "remediation_notes": [
+    "Historical Gate Failure in max_historical_drawdown_within_bounds: actual 22.36% vs req <= 20.00% across all modes",
+    "Historical Gate Failure in production_rule_fidelity: actual technical proxy; no point-in-time catalyst or valuation inputs vs req point-in-time replay of production rules and data"
+  ]
 }

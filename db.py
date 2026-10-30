@@ -134,7 +134,8 @@ def init_db(db_path=DB_PATH):
             "setup_evidence": "TEXT",
             "gate_results": "TEXT",
             "rejection_reasons": "TEXT",
-            "final_decision": "TEXT"
+            "final_decision": "TEXT",
+            "decision_reasoning": "TEXT"
         }
 
         cursor.execute("PRAGMA table_info(signals);")
@@ -498,8 +499,9 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
             rejection_reasons = _ensure_str(item.get("rejection_reasons") or [])
             final_decision = _ensure_str(item.get("final_decision") or decision, "HOLD")
 
-            # Backward-compatible text summaries
-            reason = _ensure_str(item.get("reason") or bull_case)
+            # Backward-compatible text summaries & decision reasoning
+            reason = _ensure_str(item.get("decision_reasoning") or item.get("reason") or bull_case)
+            decision_reasoning = _ensure_str(item.get("decision_reasoning") or reason)
             inst_data = _ensure_str(item.get("institutional_data", ""))
             macro_data = _ensure_str(item.get("macro_data", item.get("marco_data", "")))
             news = _ensure_str(item.get("news", ""))
@@ -530,8 +532,9 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                     ml_score, ml_predicted_return, ml_rank, ml_universe_size, ml_signal_label, ml_disposition,
                     run_id, model_status, passed_gates, failed_gates, data_quality_status, position_action, reason_codes, structured_decision,
                     danelfin_score, danelfin_signal, danelfin_details,
-                    model_decision, candidate_action, candidate_type, setup_evidence, gate_results, rejection_reasons, final_decision
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    model_decision, candidate_action, candidate_type, setup_evidence, gate_results, rejection_reasons, final_decision,
+                    decision_reasoning
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 timestamp, stock, decision, confidence, reason, inst_data, macro_data, news,
                 bank_coverage, risk_info, pe_peg, model_used, raw_json,
@@ -553,7 +556,8 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                 ml_score, ml_predicted_return, ml_rank, ml_universe_size, ml_signal_label, ml_disposition,
                 run_id, model_status, passed_gates, failed_gates, data_quality_status, position_action, reason_codes, structured_decision,
                 danelfin_score, danelfin_signal, danelfin_details,
-                model_decision, candidate_action, candidate_type, setup_evidence, gate_results, rejection_reasons, final_decision
+                model_decision, candidate_action, candidate_type, setup_evidence, gate_results, rejection_reasons, final_decision,
+                decision_reasoning
             ))
 
             signal_id = cursor.lastrowid
@@ -764,6 +768,29 @@ def _enrich_signal_dict(s: dict) -> dict:
                     s["position_sizing"] = parsed_payload.get("position_sizing")
             except Exception:
                 pass
+
+    # Enrich decision_reasoning from explicit field, raw payload, or reason
+    dec_reasoning = s.get("decision_reasoning")
+    raw_j = s.get("raw_json")
+    parsed_payload = None
+    if raw_j:
+        try:
+            parsed_payload = json.loads(raw_j) if isinstance(raw_j, str) else raw_j
+        except Exception:
+            pass
+
+    if not dec_reasoning and parsed_payload and isinstance(parsed_payload, dict):
+        dec_reasoning = (
+            parsed_payload.get("decision_reasoning")
+            or parsed_payload.get("decision_rationale")
+            or (parsed_payload.get("forecast_20d", {}).get("rationale") if isinstance(parsed_payload.get("forecast_20d"), dict) else None)
+        )
+    if not dec_reasoning:
+        dec_reasoning = s.get("reason")
+    s["decision_reasoning"] = dec_reasoning or ""
+    if dec_reasoning and (not s.get("reason") or s.get("reason") == s.get("bull_case")):
+        s["reason"] = dec_reasoning
+
     return s
 
 
@@ -803,6 +830,22 @@ def get_summary_stats(db_path=DB_PATH, max_age_days: int | None = 7) -> dict:
     buy_count = sum(1 for s in latest if s["decision"] == "BUY")
     sell_count = sum(1 for s in latest if s["decision"] == "SELL")
     hold_count = sum(1 for s in latest if s["decision"] == "HOLD")
+
+    from quant.compliance_gates import is_signal_vetoed
+    model_buy_count = sum(
+        1 for s in latest
+        if str(s.get("model_decision") or s.get("decision") or "").upper() in ("BUY", "DEEP BUY")
+    )
+    model_sell_count = sum(
+        1 for s in latest
+        if str(s.get("model_decision") or s.get("decision") or "").upper() in ("SELL", "BOOK PROFIT")
+    )
+    model_hold_count = sum(
+        1 for s in latest
+        if str(s.get("model_decision") or s.get("decision") or "").upper() == "HOLD"
+    )
+    vetoed_count = sum(1 for s in latest if is_signal_vetoed(s))
+
     hold_origin_counts = {}
     for signal in latest:
         if signal["decision"] != "HOLD":
@@ -823,6 +866,10 @@ def get_summary_stats(db_path=DB_PATH, max_age_days: int | None = 7) -> dict:
         "buy_count": buy_count,
         "sell_count": sell_count,
         "hold_count": hold_count,
+        "model_buy_count": model_buy_count,
+        "model_sell_count": model_sell_count,
+        "model_hold_count": model_hold_count,
+        "vetoed_count": vetoed_count,
         "hold_origin_counts": hold_origin_counts,
         "last_run": last_run or "N/A"
     }

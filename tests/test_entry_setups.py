@@ -16,6 +16,7 @@ Verifies:
 """
 
 import unittest
+from datetime import datetime, timezone
 from main import normalize_master_trader_json
 from quant.entry_setups import evaluate_pullback_setup, PullbackSetupResult
 from quant.policy_config import get_default_policy, TradingPolicy, PullbackConfig
@@ -281,7 +282,8 @@ class TestEntrySetups(unittest.TestCase):
           Qualifies for PULLBACK_BUY; fails CATALYST_DIP_BUY (no news, drop not severe enough, RSI not oversold).
         """
         # Case A: Adverse News Dislocation Setup
-        news = [{"title": "AAPL supplier halts shipments", "published_at": "2026-10-25T08:00:00Z"}]
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        news = [{"title": "AAPL supplier halts shipments", "published_at": now_str}]
         cat_tech = dict(
             self.base_pullback_tech,
             change_5d_pct=-8.0,

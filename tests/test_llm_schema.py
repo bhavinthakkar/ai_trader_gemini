@@ -447,6 +447,23 @@ class TestLLMEvidenceSchema(unittest.TestCase):
         self.assertEqual(errors_profit, [])
         self.assertEqual(norm_profit["decision"], "BOOK PROFIT")
 
+        # I. Traditional signal with decision_reasoning normalizes and preserves rationale
+        trad_reason = dict(trad_payload)
+        trad_reason["decision"] = "HOLD"
+        trad_reason["decision_reasoning"] = "Quant score is strong at 73.16 but technical trend is below EMA50, warranting waiting for confirmation."
+        norm_reason, errors_reason = validate_signal_json(
+            trad_reason,
+            required_horizon_sessions=20,
+            require_forecast_20d=True,
+            expected_ticker="MSFT",
+        )
+        self.assertEqual(errors_reason, [])
+        self.assertEqual(norm_reason["decision_reasoning"], "Quant score is strong at 73.16 but technical trend is below EMA50, warranting waiting for confirmation.")
+
+        normalized_res = normalize_master_trader_json(norm_reason, "MSFT")
+        self.assertEqual(normalized_res["decision_reasoning"], "Quant score is strong at 73.16 but technical trend is below EMA50, warranting waiting for confirmation.")
+        self.assertEqual(normalized_res["reason"], "Quant score is strong at 73.16 but technical trend is below EMA50, warranting waiting for confirmation.")
+
 
 if __name__ == "__main__":
     unittest.main()

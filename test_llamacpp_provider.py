@@ -167,11 +167,13 @@ def load_config_from_values(**overrides):
 
 
 class ModelRegistryTests(unittest.TestCase):
-    def test_registry_contains_anthropic_haiku(self):
-        for key in ("claude-haiku-5-5", "haiku", "haike"):
+    def test_registry_contains_recursive_flint_and_no_claude(self):
+        for key in ("flint", "recursive/flint-v1.0:free"):
             self.assertIn(key, MODEL_REGISTRY)
-            self.assertEqual(MODEL_REGISTRY[key]["provider"], "anthropic")
-            self.assertEqual(MODEL_REGISTRY[key]["model"], "claude-haiku-5-5")
+            self.assertEqual(MODEL_REGISTRY[key]["provider"], "openrouter")
+            self.assertEqual(MODEL_REGISTRY[key]["model"], "recursive/flint-v1.0:free")
+        for key in ("claude-haiku-5-5", "haiku", "haike", "claude", "anthropic"):
+            self.assertNotIn(key, MODEL_REGISTRY)
 
     def test_registry_contains_optional_openrouter(self):
         for key in ("openrouter/free", "free", "openrouter"):

@@ -7,12 +7,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-ANTHROPIC_READ_TIMEOUT = int(os.getenv("ANTHROPIC_READ_TIMEOUT", "300"))
-ANTHROPIC_CONNECT_TIMEOUT = int(os.getenv("ANTHROPIC_CONNECT_TIMEOUT", "30"))
-ANTHROPIC_TOTAL_TIMEOUT = int(os.getenv("ANTHROPIC_TOTAL_TIMEOUT", "600"))
-ANTHROPIC_PROGRESS_INTERVAL = int(os.getenv("ANTHROPIC_PROGRESS_INTERVAL", "15"))
-ANTHROPIC_MAX_TOKENS = int(os.getenv("ANTHROPIC_MAX_TOKENS", "4096"))
-
 OPENROUTER_READ_TIMEOUT = int(os.getenv("OPENROUTER_READ_TIMEOUT", "300"))
 OPENROUTER_CONNECT_TIMEOUT = int(os.getenv("OPENROUTER_CONNECT_TIMEOUT", "30"))
 OPENROUTER_TOTAL_TIMEOUT = int(os.getenv("OPENROUTER_TOTAL_TIMEOUT", "600"))
@@ -67,84 +61,30 @@ def _collect_sse_content(response, label, deadline, progress_interval, total_bud
     return "".join(parts)
 
 
-def _collect_anthropic_sse_content(response, label, deadline, progress_interval, total_budget) -> str:
-    parts = []
-    started = time.monotonic()
-    last_report = started
-    token_count = 0
-
-    for raw_line in response.iter_lines():
-        now = time.monotonic()
-        if now > deadline:
-            raise TimeBudgetExceeded(
-                f"{label} exceeded the {total_budget}s total budget"
-            )
-        if now - last_report >= progress_interval:
-            last_report = now
-            print(f"[llm_service] {label} still generating: {now - started:.0f}s elapsed, "
-                  f"~{token_count} content tokens received")
-        if not raw_line:
-            continue
-        line = raw_line.decode("utf-8", "ignore") if isinstance(raw_line, bytes) else raw_line
-        line = line.strip()
-        if not line.startswith("data:"):
-            continue
-        data = line[len("data:"):].strip()
-        if data == "[DONE]":
-            break
-        try:
-            chunk = json.loads(data)
-        except ValueError:
-            continue
-
-        chunk_type = chunk.get("type")
-        if chunk_type == "content_block_delta":
-            delta = chunk.get("delta") or {}
-            piece = delta.get("text") or ""
-            if piece:
-                parts.append(piece)
-                token_count += 1
-        elif chunk_type == "message_stop":
-            break
-        for choice in chunk.get("choices") or []:
-            piece = (choice.get("delta") or {}).get("content") or ""
-            if piece:
-                parts.append(piece)
-                token_count += 1
-            if choice.get("finish_reason"):
-                return "".join(parts)
-    return "".join(parts)
-
-
 MODEL_REGISTRY = {
-    # Anthropic Claude Haiku 5.5 (Primary / Default)
-    "claude-haiku-5-5": {
-        "provider": "anthropic",
-        "model": "claude-haiku-5-5",
-        "label": "Anthropic Claude Haiku 5.5 (claude-haiku-5-5)",
+    # Recursive: Flint (free) via OpenRouter (Primary / Default)
+    "flint": {
+        "provider": "openrouter",
+        "model": "recursive/flint-v1.0:free",
+        "fallbacks": [
+            "openrouter/free",
+            "xingchen-agi/xing4.0-29b-a4b:free",
+            "liquid/lfm-2.5-2.6b:free",
+        ],
+        "label": "Recursive: Flint (free) (recursive/flint-v1.0:free)",
     },
-    "haiku": {
-        "provider": "anthropic",
-        "model": "claude-haiku-5-5",
-        "label": "Anthropic Claude Haiku 5.5 (claude-haiku-5-5)",
-    },
-    "haike": {
-        "provider": "anthropic",
-        "model": "claude-haiku-5-5",
-        "label": "Anthropic Claude Haiku 5.5 (claude-haiku-5-5)",
-    },
-    "claude": {
-        "provider": "anthropic",
-        "model": "claude-haiku-5-5",
-        "label": "Anthropic Claude Haiku 5.5 (claude-haiku-5-5)",
-    },
-    "anthropic": {
-        "provider": "anthropic",
-        "model": "claude-haiku-5-5",
-        "label": "Anthropic Claude Haiku 5.5 (claude-haiku-5-5)",
+    "recursive/flint-v1.0:free": {
+        "provider": "openrouter",
+        "model": "recursive/flint-v1.0:free",
+        "fallbacks": [
+            "openrouter/free",
+            "xingchen-agi/xing4.0-29b-a4b:free",
+            "liquid/lfm-2.5-2.6b:free",
+        ],
+        "label": "Recursive: Flint (free) (recursive/flint-v1.0:free)",
     },
 
-    # OpenRouter Models (Optional Provider)
+    # OpenRouter Free Models Auto-Router (Optional Provider)
     "openrouter/free": {
         "provider": "openrouter",
         "model": "openrouter/free",
@@ -186,16 +126,6 @@ MODEL_REGISTRY = {
         "label": "OpenRouter Free (Auto-routed, free)",
     },
     "xingchen-agi/xing4.0-29b-a4b:free": {
-        "provider": "openrouter",
-        "model": "openrouter/free",
-        "fallbacks": [
-            "recursive/flint-v1.0:free",
-            "xingchen-agi/xing4.0-29b-a4b:free",
-            "liquid/lfm-2.5-2.6b:free",
-        ],
-        "label": "OpenRouter Free (Auto-routed, free)",
-    },
-    "flint": {
         "provider": "openrouter",
         "model": "openrouter/free",
         "fallbacks": [
@@ -299,149 +229,42 @@ def extract_json(text: str):
 
 def normalize_model_key(model_choice: str) -> str:
     if not model_choice:
-        return "claude-haiku-5-5"
+        return "flint"
     key = str(model_choice).strip().lower()
+    if key in [
+        "flint", "flint-v1.0", "recursive/flint-v1.0:free", "recursive", "flint-free", "default"
+    ]:
+        return "flint"
     if key in [
         "claude-haiku-5-5", "claude-5-5-haiku", "claude-haiku",
         "haiku", "haike", "haiku-5.5", "haike-5.5",
-        "claude", "anthropic", "default"
+        "claude", "anthropic"
     ]:
-        return "claude-haiku-5-5"
+        return "flint"
     if key in [
         "openrouter/free", "free", "openrouter", "auto", "or",
         "xingchen", "xing", "xing4", "xingchen-agi/xing4.0-29b-a4b:free",
-        "flint", "flint-v1.0", "recursive/flint-v1.0:free",
         "ultra", "kimi", "ling", "nemotron", "gemini", "qwen", "minimax", "minimax-m3", "m3",
         "bunny", "space-bunny", "space-bunny-alpha", "sb", "stealth/space-bunny-alpha"
     ]:
         return "openrouter/free"
     if key in MODEL_REGISTRY:
         return key
-    # Default to Anthropic Claude Haiku 5.5
-    return "claude-haiku-5-5"
+    # Default to Recursive: Flint (free)
+    return "flint"
 
 
 def get_model_label(model_choice: str) -> str:
     key = normalize_model_key(model_choice)
     if key in MODEL_REGISTRY:
         return MODEL_REGISTRY[key]["label"]
-    return "Anthropic Claude Haiku 5.5 (claude-haiku-5-5)"
+    return "Recursive: Flint (free) (recursive/flint-v1.0:free)"
 
 
 def uses_compact_prompt_profile(model_choice: str) -> bool:
     if not model_choice:
         return False
     return str(model_choice).strip().lower() in ["qwen", "llamacpp", "qwen-llamacpp"]
-
-
-def _query_anthropic(
-    config: dict,
-    system_instruction: str,
-    user_prompt: str,
-    temperature: float = None,
-    reasoning_effort: str = None,
-) -> str:
-    """Executes a query against Anthropic's Messages API."""
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY environment variable is not set in .env")
-
-    target_model = config["model"]
-
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": target_model,
-        "max_tokens": ANTHROPIC_MAX_TOKENS,
-        "system": system_instruction,
-        "messages": [
-            {"role": "user", "content": user_prompt}
-        ],
-        "stream": True,
-    }
-
-    # Haiku 5.5 uses adaptive thinking or disabled thinking. Temperature is deprecated on Haiku 5.5.
-    if reasoning_effort and str(reasoning_effort).strip().lower() in ["low", "medium", "high", "adaptive"]:
-        payload["thinking"] = {"type": "adaptive"}
-    else:
-        payload["thinking"] = {"type": "disabled"}
-
-    chain_deadline = time.monotonic() + ANTHROPIC_TOTAL_TIMEOUT
-    last_error = None
-
-    for attempt in range(2):
-        if time.monotonic() > chain_deadline:
-            raise TimeBudgetExceeded(f"Anthropic total budget of {ANTHROPIC_TOTAL_TIMEOUT}s exhausted.")
-        try:
-            response = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers=headers,
-                json=payload,
-                timeout=(ANTHROPIC_CONNECT_TIMEOUT, ANTHROPIC_READ_TIMEOUT),
-                stream=True,
-            )
-            if response.status_code == 200:
-                content_type = response.headers.get("content-type", "")
-                if "text/event-stream" in content_type:
-                    cleaned = clean_think_tags(_collect_anthropic_sse_content(
-                        response, target_model, chain_deadline,
-                        ANTHROPIC_PROGRESS_INTERVAL, ANTHROPIC_TOTAL_TIMEOUT
-                    ))
-                else:
-                    data = response.json()
-                    parts = []
-                    for block in data.get("content") or []:
-                        if block.get("type") == "text":
-                            parts.append(block.get("text", ""))
-                    cleaned = clean_think_tags("".join(parts))
-
-                try:
-                    _ = extract_json(cleaned)
-                    return cleaned
-                except Exception as parse_err:
-                    print(f"[llm_service] Anthropic model '{target_model}' returned "
-                          f"non-JSON/invalid output ({parse_err}).")
-                    last_error = parse_err
-                    if attempt == 0:
-                        time.sleep(1)
-                        continue
-                    break
-            elif response.status_code == 429:
-                if attempt == 0:
-                    print(f"[llm_service] Anthropic model '{target_model}' rate limited (429). Retrying in 2s...")
-                    time.sleep(2)
-                    continue
-                else:
-                    last_error = RuntimeError(f"Anthropic API call failed (429): {response.text}")
-                    break
-            elif response.status_code in [500, 529]:
-                if attempt == 0:
-                    print(f"[llm_service] Anthropic model '{target_model}' overloaded/server error ({response.status_code}). Retrying in 2s...")
-                    time.sleep(2)
-                    continue
-                else:
-                    last_error = RuntimeError(f"Anthropic API call failed ({response.status_code}): {response.text}")
-                    break
-            else:
-                last_error = RuntimeError(f"Anthropic API call failed ({response.status_code}): {response.text}")
-                break
-        except TimeBudgetExceeded as e:
-            last_error = e
-            break
-        except requests.exceptions.RequestException as e:
-            last_error = e
-            if attempt == 0:
-                print(f"[llm_service] Anthropic connection error ({e}). Retrying in 2s...")
-                time.sleep(2)
-                continue
-            break
-
-    if last_error:
-        raise last_error
-    raise RuntimeError("Anthropic query failed.")
 
 
 def _query_openrouter(
@@ -550,28 +373,17 @@ def _query_openrouter(
 def query_llm(
     system_instruction: str,
     user_prompt: str,
-    model_choice: str = "claude-haiku-5-5",
+    model_choice: str = "flint",
     temperature: float = None,
     reasoning_budget: int = None,
     reasoning_effort: str = None
 ) -> str:
     """
     Executes an LLM chat query.
-    Defaults to Anthropic Claude Haiku 5.5, while keeping OpenRouter available as an optional provider.
+    Defaults to Recursive: Flint (free) from OpenRouter.
     """
-    key = normalize_model_key(model_choice or "claude-haiku-5-5")
-    config = MODEL_REGISTRY.get(key, MODEL_REGISTRY["claude-haiku-5-5"])
-    provider = config.get("provider", "anthropic")
-
-    if provider == "anthropic":
-        return _query_anthropic(
-            config=config,
-            system_instruction=system_instruction,
-            user_prompt=user_prompt,
-            temperature=temperature,
-            reasoning_effort=reasoning_effort,
-        )
-
+    key = normalize_model_key(model_choice or "flint")
+    config = MODEL_REGISTRY.get(key, MODEL_REGISTRY["flint"])
     return _query_openrouter(
         config=config,
         system_instruction=system_instruction,

@@ -12,6 +12,7 @@ Verifies that:
 7. Full persistence into SQLite database retains all contract fields for the dashboard.
 """
 
+from datetime import datetime, timezone
 import json
 import tempfile
 import unittest
@@ -144,10 +145,11 @@ class TestAuthoritativeDecisionContract(unittest.TestCase):
         """
         Verifies that certified catalyst dip buys retain the correct contract taxonomy.
         """
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         fresh_news = [{
             "title": "NVDA slips on export restriction rumor",
             "summary": "Short-term headline dip for NVDA guidance",
-            "published_at": "2026-10-25T10:00:00Z",
+            "published_at": now_str,
             "category": "News",
         }]
 

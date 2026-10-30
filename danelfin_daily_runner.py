@@ -13,7 +13,7 @@ Features:
 
 Usage:
   python danelfin_daily_runner.py [model] [--limit 25] [--delay 2.0] [--dry-run]
-  python danelfin_daily_runner.py haiku --limit 25
+  python danelfin_daily_runner.py flint --limit 25
   python danelfin_daily_runner.py free --limit 10
 """
 
@@ -35,7 +35,7 @@ load_dotenv()
 
 
 def run_daily_danelfin_pipeline(
-    model: str = "haiku",
+    model: str = "flint",
     limit: int = 25,
     delay: float = 2.0,
     dry_run: bool = False,
@@ -100,7 +100,7 @@ def main():
         "model_arg",
         nargs="?",
         default=None,
-        help="AI Model (e.g. haiku, free, nemotron, super, qwen, gemini)"
+        help="AI Model (e.g. flint, free, nemotron, super, qwen, gemini)"
     )
     parser.add_argument(
         "-m", "--model",
@@ -143,8 +143,11 @@ def main():
 
     args = parser.parse_args()
 
-    raw_model = args.model_opt or args.model_arg or "haiku"
+    raw_model = args.model_opt or args.model_arg or "flint"
     model_choice = str(raw_model).strip().lower()
+    if model_choice in ["haiku", "haiku-5.5", "haike", "haike-5.5", "claude", "claude-haiku", "claude-haiku-5-5", "claude-5-5-haiku", "anthropic"]:
+        print("[Danelfin] Notice: Claude LLM has been replaced; automatically redirecting to 'flint' (Recursive: Flint (free) from OpenRouter).")
+        model_choice = "flint"
 
     if model_choice not in VALID_MODELS:
         print(f"\n❌ ERROR: Invalid model choice '{raw_model}'!")

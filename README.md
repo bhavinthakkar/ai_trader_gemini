@@ -624,15 +624,16 @@ When the total budget is hit the current model is abandoned and the fallback is 
 
 > Note: `kimi` currently points at `moonshotai/kimi-k3`, which the NVIDIA gateway is returning `504` for (after ~300s, at every reasoning effort). The retired `moonshotai/kimi-k2-instruct` and `kimi-k2-thinking` return `410 Gone`, and `moonshotai/kimi-k2.6` returns `404`. Use `free` or `super` until Kimi is served again.
 
-To reach OpenRouter's free-model router instead, pass `openrouter` (or `openrouter/free`). Or use the fast, high-context **inclusionAI: Ling 3.1 Flash** model via `ling`.
+The primary default model is **Recursive: Flint (free)** (`recursive/flint-v1.0:free` via OpenRouter). To reach OpenRouter's free-model router instead, pass `openrouter` (or `openrouter/free`). Or use `flint`.
 
-### **Run Pipeline with inclusionAI Ling 3.1 Flash (`ling`)**
+### **Run Pipeline with Recursive: Flint (free) (Default)**
 ```bash
-./venv/bin/python main.py ling NVDA
+./venv/bin/python main.py flint NVDA
 ```
 ```bash
-./venv/bin/python main.py ling AAPL,TSLA
+./venv/bin/python main.py AAPL
 ```
+*(Or analyze multiple tickers with `python main.py NVDA,TSLA`)*
 
 ### **Run Pipeline with OpenRouter Free Models Router (`openrouter/free`)**
 ```bash
@@ -816,29 +817,34 @@ Access the dashboard locally at `http://localhost:8501` or via local network at 
 
 ### **🍓 Raspberry Pi & Linux Autostart (systemd)**
 
-To keep the FastAPI REST backend, Streamlit dashboard, and Expo Metro bundler running 24/7 across reboots and automatically restart them on crash:
+To keep the FastAPI REST backend, Streamlit dashboard, daily Danelfin analysis, and Expo Metro bundler running 24/7 across reboots and automatically restart them on crash:
 
 ```bash
-# Install and enable all services on boot (API, Web, Scanner Timer, and Mobile Bundler)
+# Install and enable all services on boot (API, Web, Scanner Timer, Danelfin Timer, First-Boot Runner, Mobile Bundler)
 sudo bash systemd/install_services.sh
 
 # Monitor service status and logs
 sudo systemctl status ai-trader-api
 sudo systemctl status ai-trader-web
-sudo systemctl status ai-trader-mobile
+sudo systemctl status ai-trader-danelfin-daily.timer
+sudo systemctl status ai-trader-danelfin-first-boot.service
+tail -f logs/danelfin_daily.log
 journalctl -u ai-trader-api -f
 journalctl -u ai-trader-web -f
-journalctl -u ai-trader-mobile -f
 
 # Uninstall services
 sudo bash systemd/uninstall_services.sh
 ```
 
+> **First Boot & Daily Schedule**:
+> - `ai-trader-danelfin-first-boot.service` executes immediately on the first boot (without waiting for the timer). Upon completion, it flags `data/.first_boot_done`.
+> - `ai-trader-danelfin-daily.timer` triggers automatically every Monday–Friday at 22:30 UTC post-market close, catching up if the Pi was offline.
+
 ---
 
 ## 🛠️ Technology Stack
 
-* **LLM Reasoning**: inclusionAI Ling 3.1 Flash (`inclusionai/ling-3.1-flash` via OpenRouter, free, 262k context window), OpenRouter Free Models Router (`openrouter/free`, 200k context window), Moonshot AI Kimi-K3 (`moonshotai/kimi-k3` via NVIDIA NIM), NVIDIA Nemotron-3 Ultra 550B (`nvidia/nemotron-3-ultra-550b-a55b`) & Super 120B (`nvidia/nemotron-3-super-120b`), the `free` preset (Ultra 550B first, Super 120B fallback on stall), Gemini 3.1 Pro, and local Qwen 2.5 14B through Vulkan-enabled llama.cpp (`qwen` / `llamacpp` / `qwen-llamacpp`, 8K compact profile).
+* **LLM Reasoning**: Recursive: Flint (free) (`recursive/flint-v1.0:free` via OpenRouter, free default, 262k context window), OpenRouter Free Models Router (`openrouter/free`, 200k context window), Moonshot AI Kimi-K3 (`moonshotai/kimi-k3` via NVIDIA NIM), NVIDIA Nemotron-3 Ultra 550B (`nvidia/nemotron-3-ultra-550b-a55b`) & Super 120B (`nvidia/nemotron-3-super-120b`), the `free` preset (Ultra 550B first, Super 120B fallback on stall), Gemini 3.1 Pro, and local Qwen 2.5 14B through Vulkan-enabled llama.cpp (`qwen` / `llamacpp` / `qwen-llamacpp`, 8K compact profile).
 * **Vector Embeddings**: FastEmbed (`BAAI/bge-small-en-v1.5`, 384-dimensional dense vectors).
 * **CLI Terminal Feed**: Official `gloom-sh/gloomberb` CLI.
 * **Macro Data**: FRED API (US Treasury Yield Curve) & CNN Fear & Greed Index.

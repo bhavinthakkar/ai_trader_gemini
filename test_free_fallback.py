@@ -57,7 +57,7 @@ class FreeRoutingTests(unittest.TestCase):
             self.assertEqual(MODEL_REGISTRY[normalize_model_key(alias)]["provider"], "openrouter")
 
     def test_other_legacy_aliases_redirect_to_openrouter_free(self):
-        for alias in ("ultra", "kimi", "ling", "nemotron", "gemini", "qwen", "flint", "xingchen"):
+        for alias in ("ultra", "kimi", "ling", "nemotron", "gemini", "qwen", "xingchen"):
             self.assertEqual(normalize_model_key(alias), "openrouter/free")
             self.assertEqual(MODEL_REGISTRY[normalize_model_key(alias)]["provider"], "openrouter")
 

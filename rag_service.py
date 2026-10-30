@@ -36,6 +36,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Quantitative 5-Pillar Scoring Engine
 from quantitative_scoring_service import QuantitativeScoringService
+from quant.composite_score import blend_quant_and_ml_scores
 
 # Step 4.1 Auditable Evidence Record
 from evidence_record import (
@@ -169,22 +170,19 @@ You are provided with a high-conviction market analysis payload assembled via Me
    - Price, RSI14, EMA20, EMA50, ATR volatility parameters.
    - Forward P/E, Trailing P/E, P/S, EV/EBITDA, P/FCF.
    - Deterministic 5-Pillar Scores: Trend (25%), Sector (20%), Market Alpha (20%), Valuation History (15%), Peer Valuation (20%), and Weighted Composite Score (0-100).
+   - Deterministic Quant Score (0-100) and 20-Session ML Alpha Score (0-100), combined into the Blended Decision Composite.
 2. CATEGORIZED RETRIEVED EVIDENCE (RAG): Qualitative text passages retrieved across 6 explicit sub-questions (Material Events, Bullish Drivers, Bearish Risks, Guidance Changes, Valuation Concerns, Macro Risks).
 
-CRITICAL QUANTITATIVE SCORE MANDATE:
-- ANCHOR YOUR DECISION AND SCORES STRICTLY AROUND THE DETERMINISTIC COMPOSITE QUANTITATIVE SCORE:
-  - Composite Score >= 70.0: Strong quantitative alignment for BUY (confirm with fundamental RAG evidence).
-  - Composite Score 45.0 - 69.9: Neutral / Mixed alignment. Default to HOLD unless an extraordinary high-reliability SEC/Earnings catalyst exists.
-  - Composite Score < 45.0: Weak / Overvalued alignment. Default to SELL or HOLD.
-- The reported composite_quantitative_score is ALREADY volatility-adjusted: it is the raw_composite multiplied by vol_factor (1.00 calm / 0.95 normal / 0.85 elevated / 0.70 extreme ATR%). A momentum stock with extreme volatility shows a dampened score BY DESIGN -- do not mentally 'un-dampen' it or restore the raw_composite when forming your decision. High volatility is itself a reason to cap conviction.
-- DO NOT turn isolated positive facts into an unearned BUY decision if the composite quantitative score is neutral or weak.
+QUANTITATIVE SCORE INTELLIGENCE:
+- Synthesize all provided score values:
+  - Deterministic Quant Score (0-100) measures 5-pillar quantitative strength across Trend, Sector Relative Strength, Market Alpha, Valuation History, and Peer Valuation, adjusted for volatility and financial quality.
+  - 20-Session ML Alpha Score (0-100) measures machine learning cross-sectional predictive alpha over the next 20 sessions (with percentile rank and predicted excess return).
+  - Blended Decision Composite (0-100) represents the weighted combination of the Deterministic Quant Score and ML Alpha Score.
+- The reported scores reflect objective quantitative alignment. Weigh these quantitative scores alongside qualitative RAG evidence, news catalysts, and risk factors when forming your decision.
 
-REWARD:RISK & SETUP GEOMETRY MANDATE:
-- The payload's setup_geometry block reports the trade's reward_risk_ratio computed from CONSERVATIVE channel-anchored levels: structural_stop = min(price - 1.5*ATR, 20d low - 0.5*ATR) and structural_target = min(price + 2.5*ATR, 20d high + 0.5*ATR), plus the breakeven_win_rate = 1/(1+RR) required to be profitable on average.
-- BUY REQUIRES reward_risk_ratio >= 1.5. Never issue BUY on a setup whose 20-session forecast reward does not clear the stop by at least 1.5x, regardless of the quantitative composite score.
-- distance_to_resistance_atr tells you how many ATRs price sits below the 20-day high. Values below ~1.0 mean the profit zone is thin and the entry is likely a chase of an extended move -- downgrade conviction; a price near the top of its 20d range with thin reward:risk is a poor BUY regardless of trend momentum.
-- If wall_street_target_rr < 1.0 (the Wall Street mean target sits BELOW the entry price), that is a hard contradiction to any BUY thesis -- street consensus sees no upside above your entry. Flag it in key_risks and downgrade conviction.
-- Treat wall_street_mean_target_12m as a 12-month directional reference only. NEVER use it to inflate a 20-session reward:risk calculation or to justify a trade.
+REWARD:RISK & SETUP GEOMETRY:
+- The setup_geometry block reports the trade's reward_risk_ratio computed from channel-anchored levels: structural_stop = min(price - 1.5*ATR, 20d low - 0.5*ATR) and structural_target = min(price + 2.5*ATR, 20d high + 0.5*ATR), plus the breakeven_win_rate = 1/(1+RR).
+- Evaluate whether the potential reward justifies the risk before initiating a directional trade. Consider distance_to_resistance_atr and compare entry price with Wall Street consensus targets. Treat wall_street_mean_target_12m as a 12-month directional reference.
 
 EXPLICIT SOURCE RELIABILITY HIERARCHY MANDATE:
 - Every retrieved passage contains a [Metadata] header specifying its source and Reliability Score (1.00 to 0.30):
@@ -202,11 +200,10 @@ TEMPORAL REASONING & PUBLICATION DATE MANDATE:
 - Historical Precedents (>30 days): Older articles and filings provide historical context; never report prior-quarter results or stale headlines as immediate breaking events.
 - Earnings Context Disambiguation: Check 'days_to_earnings'. If an earnings report is upcoming (e.g. days_to_earnings <= 3), do NOT mistake news or commentary from the PREVIOUS quarter's earnings for the outcome of the UPCOMING earnings report.
 
-BINARY EVENT-RISK & IMPLIED VOLATILITY MANDATE:
-- If days_to_earnings <= 3:
-  - An earnings report within 3 days is a binary gap-risk event. BUY is MECHANICALLY ENFORCED to HOLD in normalize; do not issue a BUY output for this symbol -- it will be overridden.
-  - Backward-looking technical trend momentum (Trend Score = 100) does NOT guarantee post-earnings continuation and can reverse instantly.
-  - If your quant analysis strongly disagrees with the mechanical hold, document why in key_risks and retain the HOLD; do not attempt to circumvent the earnings gate.
+EVENT-RISK & IMPLIED VOLATILITY EVALUATION:
+- Check 'days_to_earnings' and options implied volatility (IV):
+  - An earnings report within 3 days introduces binary gap risk. Carefully weigh whether the risk profile favors an active entry or holding through the event.
+  - Evaluate option-implied expected move against structural stop distance to determine if stop placement is vulnerable to normal volatility noise.
 
 DECISION ORIGIN MANDATE:
 - Classify primary_driver BEFORE deciding. A trade's edge must come from PRICE STRUCTURE + QUANT COMPOSITE + SETUP GEOMETRY, not from a headline.
@@ -289,6 +286,7 @@ Output MUST be a valid JSON object matching the requested schema.
   * SELL: Structural breakdown, stop breach, or bearish short setup.
 - If days_to_earnings <= 3, fresh entries are permitted in event-sized mode with a 50% haircut if score >= 60; otherwise return HOLD.
 - When an ML score is supplied, include ml_signal_assessment with a SUPPORTIVE, CONFLICTING, or NEUTRAL disposition and a concise reason.
+- You MUST provide an explicit `decision_reasoning` field containing a comprehensive, clear explanation for WHY this specific decision (BUY, DEEP BUY, HOLD, BOOK PROFIT, SELL) was made, synthesizing quantitative scores, market momentum, risk profile, and catalysts.
 - The system may issue an explicit no_trade_reason code on a forced downgrade: INSUFFICIENT_EVIDENCE, EARNINGS_BLACKOUT, LOW_LIQUIDITY, RR_TOO_LOW, SCHEMA_INVALID.
 - Output must parse as valid JSON with exactly the keys above; schema violations trigger an automatic corrective retry then a deterministic HOLD.
 
@@ -296,6 +294,7 @@ Schema:
 {
   "stock": "Ticker Symbol",
   "decision": "BUY|DEEP BUY|HOLD|BOOK PROFIT|SELL",
+  "decision_reasoning": "Explicit, comprehensive explanation of why this final decision was made, detailing the synthesis of quantitative scores, setup geometry, risk gates, and qualitative catalysts",
   "primary_driver": "QUANT_STRUCTURE|FUNDAMENTAL|NEWS_CATALYST|MACRO_EVENT|EARNINGS_CATALYST",
   "confidence": 0.70,
   "buy_score": 0.20,
@@ -374,18 +373,19 @@ Schema:
     LOCAL_QWEN_SYSTEM_INSTRUCTION = """
 You are a senior quantitative analyst and trading risk manager. Forecast relative stock performance over the next 20 trading sessions (about one month) using only supplied market, company, macro, and source data. Never invent missing inputs.
 
-DECISION RULES:
-- Treat the deterministic quantitative score, setup geometry, and reward/risk as authoritative for directional execution. The 20-session ML score is an ordinal cross-sectional rank (50 = cohort median, not zero excess return). Directional BUY requires deterministic quantitative score >= 50.0 (or hybrid composite >= 60).
-- 5-STATE DECISION TAXONOMY (choose exactly one for "decision"):
-  * BUY: Momentum breakout / trend continuation (composite >= 60, R:R >= 1.20).
-  * DEEP BUY: High-conviction discount entry into sharp pullback (RSI 30-45, valuation intact, composite >= 52).
-  * HOLD: Neutral / wait for favorable entry / setup does not pass criteria.
-  * BOOK PROFIT: Take profit / trim extended long at target or upper channel resistance or overbought (RSI >= 70).
-  * SELL: Structural breakdown, stop breach, or bearish short setup.
-- When an ML score is supplied, include ml_signal_assessment with disposition SUPPORTIVE, CONFLICTING, or NEUTRAL and a concise reason. Explicitly address disagreement; the deterministic blend means the score affects eligibility even if your narrative assessment differs.
+DECISION FRAMEWORK:
+- Review the provided quantitative score values: Deterministic Quant Score (5 pillars), 20-Session ML Alpha Score (cross-sectional rank), and Blended Decision Composite.
+- 5-STATE DECISION TAXONOMY (choose the single most appropriate outcome for "decision"):
+  * BUY: Favorable setup for entering or building a bullish directional position.
+  * DEEP BUY: High-conviction discount entry into a sharp pullback or dislocation where fundamentals remain strong.
+  * HOLD: Neutral / wait for clearer conditions / setup lacks sufficient conviction.
+  * BOOK PROFIT: Lock in gains or trim long exposure into resistance, targets, or overextended conditions.
+  * SELL: Bearish setup, breakdown of technical or fundamental structure, or initiating short exposure.
+- Synthesize the quantitative scores, setup geometry, and qualitative evidence, and use your expert judgment to determine the final decision and 20-session outlook.
+- When an ML score is supplied, include ml_signal_assessment with disposition SUPPORTIVE, CONFLICTING, or NEUTRAL and a concise reason. Explicitly address agreement or disagreement with your outlook.
 - Always provide forecast_20d with relative_outlook OUTPERFORM, MARKET_LIKE, or UNDERPERFORM, a confidence from 0 to 1, and concise rationale. Compare this forecast with the 20-session ML signal when supplied.
-- Keep forecast and trade action separate: decision reflects whether the setup is actionable under risk gates. A HOLD can coexist with an OUTPERFORM or UNDERPERFORM forecast when execution conditions are poor.
-- If days_to_earnings <= 3, fresh entries are permitted in event-sized mode (50% haircut) if conviction is high (composite >= 60). Otherwise return HOLD and note the upcoming earnings event risk.
+- Keep forecast and trade action separate: decision reflects whether the setup is actionable. A HOLD can coexist with an OUTPERFORM or UNDERPERFORM forecast when execution conditions are uncertain.
+- Evaluate upcoming earnings and event risks when forming your recommendation.
 - Treat news and macro as confirmation, vetoes, or risk flags; they cannot independently initiate a directional trade.
 - CATALYST EXCEPTION (news is the trigger, fundamentals are the filter) -- two setups may originate from a company-specific catalyst, and a deterministic certificate re-verifies them from price data. Do not merely assert it:
   1. DIP_BUY: adverse ticker-specific catalyst, price discounted but not collapsed, not deeply oversold (RSI >= 30), valuation pillars still strong, volume confirms. "Bad news, good fundamentals, buy the discount." Set decision "DEEP BUY" and primary_driver "NEWS_CATALYST".
@@ -401,6 +401,7 @@ Return exactly one JSON object with these keys and no markdown or commentary:
 {
   "stock": "Ticker",
   "decision": "BUY|DEEP BUY|HOLD|BOOK PROFIT|SELL",
+  "decision_reasoning": "Explicit, comprehensive explanation of why this final decision was made, synthesizing quantitative scores, technical action, risk factors, and catalysts",
   "primary_driver": "QUANT_STRUCTURE|FUNDAMENTAL|NEWS_CATALYST|MACRO_EVENT|EARNINGS_CATALYST",
   "confidence": 0.0,
   "buy_score": 0.0,
@@ -1084,6 +1085,10 @@ Schema:
         quant_service = QuantitativeScoringService()
         quant_scores = quant_service.compute_5pillar_scores(technical_data, gloomberb_payload, sector_bench)
 
+        ml_ctx = technical_data.get("ml_context") if isinstance(technical_data, dict) else None
+        det_comp = quant_scores.get("composite_quantitative_score")
+        blended_comp, eff_ml_w, eff_ml_score = blend_quant_and_ml_scores(det_comp, ml_ctx)
+
         # Channel-anchored Reward:Risk setup geometry -- varies with where price
         # sits inside its 20-day range (conservative stop/target), not fixed 2.5/1.5.
         struct_rr_info = QuantitativeScoringService.compute_channel_reward_risk(
@@ -1111,6 +1116,10 @@ Schema:
             "symbol": symbol,
             "data_source_status": source_status,
             "sector": profile.get("sector", "N/A"),
+            "deterministic_quant_score": det_comp,
+            "ml_20session_score": eff_ml_score,
+            "ml_weight": eff_ml_w,
+            "blended_composite_score": blended_comp,
             "deterministic_5pillar_scores": quant_scores,
             "setup_geometry": {
                 "entry_price": technical_data.get("current_price"),
@@ -1196,6 +1205,10 @@ Schema:
                     "symbol": symbol,
                     "sector": profile.get("sector", "N/A"),
                     "source_status": source_status,
+                    "deterministic_quant_score": det_comp,
+                    "ml_20session_score": eff_ml_score,
+                    "ml_weight": eff_ml_w,
+                    "blended_composite_score": blended_comp,
                     "deterministic_5pillar_scores": quant_scores,
                     "setup_geometry": market_benchmark_summary["setup_geometry"],
                     "price_action": {
@@ -1294,8 +1307,8 @@ Execute multi-step analytical reasoning:
 1. Chronological & Catalyst Verification: Verify the publication dates of all passages. Do NOT treat prior-quarter results or stale headlines as immediate 24h/7d catalysts.
 2. Event-Risk Assessment: If earnings are within 3 days (days_to_earnings <= 3) or implied volatility is high, evaluate the options market's binary gap risk. Do not rely solely on backward-looking momentum.
 3. Divergence Resolution: Reconcile any divergence between technical momentum and peer valuation multiples or insider transactions.
-4. Anchor your final decision and probabilities around the Composite Quantitative Score.
-5. Fold in setup_geometry: a BUY requires reward_risk_ratio >= 1.5 as computed from the channel-anchored structural stop and target (capped by the 20-day range); if distance_to_resistance_atr < 1.0, the entry is likely a chase. If Wall Street's 12-month mean target implies wall_street_target_rr < 1.0, treat it as a directional contradiction to any BUY.
+4. Consider the quantitative score values (Deterministic Quant Score, ML 20-Session Score, and Blended Composite) alongside market evidence.
+5. Evaluate setup geometry: review structural stop, target, reward-to-risk ratio, and distance to resistance. Compare entry price with Wall Street consensus targets.
 6. Fed Rate-Policy Integration: from the interest_rate_outlook block, state the implied Fed stance (restrictive/neutral/accommodative), the expected cut/hike path and FOMC timing window, and how that path transmits to this company's valuation, debt/financing costs, and sector before finalizing the decision. If fed funds rate, real yields, or a rate-path signal is missing, say so in missing_information instead of assuming neutral policy.
 Return a valid JSON object matching the required schema.
 """

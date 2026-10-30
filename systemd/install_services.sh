@@ -52,12 +52,21 @@ sed -e "s|{{USER}}|${TARGET_USER}|g" \
 
 cp "${SCRIPT_DIR}/ai-trader-scanner.timer" /etc/systemd/system/ai-trader-scanner.timer
 
+# Ensure logs and data directories exist with correct permissions
+mkdir -p "${PROJECT_DIR}/logs" "${PROJECT_DIR}/data"
+chown -R "${TARGET_USER}:${TARGET_USER}" "${PROJECT_DIR}/logs" "${PROJECT_DIR}/data" 2>/dev/null || true
+
 # Configure and install ai-trader-danelfin-daily.service & timer
 sed -e "s|{{USER}}|${TARGET_USER}|g" \
     -e "s|{{PROJECT_DIR}}|${PROJECT_DIR}|g" \
     "${SCRIPT_DIR}/ai-trader-danelfin-daily.service" > /etc/systemd/system/ai-trader-danelfin-daily.service
 
 cp "${SCRIPT_DIR}/ai-trader-danelfin-daily.timer" /etc/systemd/system/ai-trader-danelfin-daily.timer
+
+# Configure and install ai-trader-danelfin-first-boot.service (runs once on first boot without timer)
+sed -e "s|{{USER}}|${TARGET_USER}|g" \
+    -e "s|{{PROJECT_DIR}}|${PROJECT_DIR}|g" \
+    "${SCRIPT_DIR}/ai-trader-danelfin-first-boot.service" > /etc/systemd/system/ai-trader-danelfin-first-boot.service
 
 # Detect npx for mobile service (Expo Metro Bundler)
 TARGET_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
@@ -97,6 +106,9 @@ systemctl enable --now ai-trader-scanner.timer
 
 echo "🟢 Enabling and starting ai-trader-danelfin-daily.timer (daily Danelfin 25-stock pipeline)..."
 systemctl enable --now ai-trader-danelfin-daily.timer
+
+echo "🟢 Enabling ai-trader-danelfin-first-boot.service (triggers on first boot without timer)..."
+systemctl enable ai-trader-danelfin-first-boot.service
 
 if [ "$MOBILE_INSTALLED" = true ]; then
     echo "🟢 Enabling and starting ai-trader-mobile.service (Expo Metro)..."

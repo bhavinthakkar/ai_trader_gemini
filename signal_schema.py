@@ -214,6 +214,13 @@ def validate_signal_json(
                 errors.append(f"invalid primary_driver value '{raw_driver}'")
         norm["primary_driver"] = driver
 
+    # --- Decision reasoning ---------------------------------------------
+    raw_reasoning = norm.get("decision_reasoning") or norm.get("decision_rationale") or norm.get("reason")
+    if not raw_reasoning and isinstance(norm.get("forecast_20d"), dict):
+        raw_reasoning = norm["forecast_20d"].get("rationale")
+    if raw_reasoning:
+        norm["decision_reasoning"] = clean(raw_reasoning)
+
     # --- Probabilities: numeric, in-range, ~sum to 1 ----------------------
     missing_probs = [k for k in ("buy_score", "hold_score", "sell_score") if k not in norm]
     if missing_probs:

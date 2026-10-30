@@ -40,6 +40,8 @@ from quant.volatility import (
 )
 from quant.composite_score import (
     compute_deterministic_composite,
+    blend_quant_and_ml_scores,
+    format_quant_and_ml_context,
 )
 from quant.build_training_table import (
     FROZEN_16_FACTORS,
@@ -86,6 +88,10 @@ from quant.compliance_gates import (
     SellExitSymmetryGate,
     GatedConfidenceGate,
     CompliancePolicyEngine,
+    is_signal_vetoed,
+    format_compliance_gate_action,
+    format_model_recommendation,
+    format_executed_action,
 )
 from quant.decision_precedence import (
     InternalActionType,
@@ -234,6 +240,8 @@ __all__ = [
     "compute_vol_factor",
     "apply_volatility_dampener",
     "compute_deterministic_composite",
+    "blend_quant_and_ml_scores",
+    "format_quant_and_ml_context",
     "FROZEN_16_FACTORS",
     "FEATURE_ALIASES",
     "FACTOR_SPECIFICATIONS",

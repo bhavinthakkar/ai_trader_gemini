@@ -51,16 +51,16 @@ MAIN_SCRIPT = os.path.join(BASE_DIR, "main.py")
 DEFAULT_DB_PATH = os.path.join(BASE_DIR, "trader.db")
 
 VALID_MODELS = [
-    "haiku", "haiku-5.5", "haike", "haike-5.5", "claude", "claude-haiku", "claude-haiku-5-5", "claude-5-5-haiku", "anthropic",
-    "xingchen", "xing", "xing4", "xingchen-agi/xing4.0-29b-a4b:free",
-    "flint", "flint-v1.0", "recursive/flint-v1.0:free",
+    "flint", "flint-v1.0", "recursive", "recursive/flint-v1.0:free", "flint-free",
     "openrouter", "openrouter/free", "free",
+    "xingchen", "xing", "xing4", "xingchen-agi/xing4.0-29b-a4b:free",
     "ling", "ling-3.1", "ling-flash", "ling-3.1-flash", "inclusionai", "inclusionai/ling-3.1-flash",
     "nemotron", "nvidia", "ultra", "nemotron-ultra", "550b",
     "kimi", "kimi-k3", "k3", "moonshot",
     "super", "nemotron-super", "120b",
     "gemini", "minimax", "minimax-m3", "minimax_m3", "m3",
     "qwen", "llamacpp", "qwen-llamacpp",
+    "haiku", "haiku-5.5", "haike", "haike-5.5", "claude", "claude-haiku", "claude-haiku-5-5", "claude-5-5-haiku", "anthropic",
 ]
 
 
@@ -165,7 +165,7 @@ def extract_most_traded_stocks(dashboard_data: Optional[Dict[str, Any]], limit: 
 
 def run_main_analysis(
     symbol: str,
-    model: str = "haiku",
+    model: str = "flint",
     market: str = "US",
     prefer_exchange: str = "DE",
     temperature: Optional[float] = None,
@@ -622,7 +622,7 @@ Examples:
         "model_arg",
         nargs="?",
         default=None,
-        help="LLM model choice for main.py (default: 'haiku' - Anthropic Claude Haiku 5.5)"
+        help="LLM model choice for main.py (default: 'flint' - Recursive: Flint (free))"
     )
     parser.add_argument(
         "--model", "-m",
@@ -769,9 +769,12 @@ Examples:
     args = parser.parse_args()
 
     # Determine model choice
-    raw_model = args.model_opt or args.model_arg or "haiku"
+    raw_model = args.model_opt or args.model_arg or "flint"
     model_choice = str(raw_model).strip().lower()
-    if model_choice in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
+    if model_choice in ["haiku", "haiku-5.5", "haike", "haike-5.5", "claude", "claude-haiku", "claude-haiku-5-5", "claude-5-5-haiku", "anthropic"]:
+        print("[master] Notice: Claude LLM has been replaced; automatically redirecting to 'flint' (Recursive: Flint (free) from OpenRouter).")
+        model_choice = "flint"
+    elif model_choice in ["bunny", "space-bunny", "space-bunny-alpha", "stealth/space-bunny-alpha", "sb"]:
         print("[master] Notice: Space Bunny Alpha ('bunny') is no longer available on OpenRouter; automatically redirecting to 'ling' (inclusionAI: Ling 3.1 Flash).")
         model_choice = "ling"
 

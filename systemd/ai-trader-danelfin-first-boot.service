@@ -1,0 +1,19 @@
+[Unit]
+Description=AI Trader First-Boot Danelfin Analysis (Runs Once On First Boot Without Timer)
+After=network-online.target ai-trader-api.service
+Wants=network-online.target
+ConditionPathExists=!{{PROJECT_DIR}}/data/.first_boot_done
+
+[Service]
+Type=oneshot
+User={{USER}}
+WorkingDirectory={{PROJECT_DIR}}
+ExecStartPre=/bin/mkdir -p {{PROJECT_DIR}}/data {{PROJECT_DIR}}/logs
+ExecStart={{PROJECT_DIR}}/venv/bin/python danelfin_daily_runner.py flint --limit 25
+ExecStartPost=/bin/touch {{PROJECT_DIR}}/data/.first_boot_done
+EnvironmentFile=-{{PROJECT_DIR}}/.env
+StandardOutput=append:{{PROJECT_DIR}}/logs/danelfin_daily.log
+StandardError=append:{{PROJECT_DIR}}/logs/danelfin_daily.log
+
+[Install]
+WantedBy=multi-user.target

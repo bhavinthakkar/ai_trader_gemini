@@ -34,6 +34,7 @@ from catalyst_service import (
 from signal_schema import validate_signal_json
 from ticker_resolver import resolve_symbol
 from ml_signal_service import format_ml_context, get_ml_context
+from quant.composite_score import format_quant_and_ml_context, blend_quant_and_ml_scores
 from danelfin_service import DanelfinService
 from policy_config import TradingPolicy, load_policy_config
 from decision_precedence import (
@@ -72,20 +73,22 @@ load_dotenv()
 MASTER_TRADER_INSTRUCTION = """
 You are a senior Master Trader & Portfolio Manager.
 
-You receive short-term intelligence collected by six specialized sub-agents:
-1. Market Agent: Price action, 5-day velocity, RSI, EMA20/50, ATR, Forward P/E, profit margins.
-2. Institutional Data Agent: SEC EDGAR regulatory filings (Form 4 insider transactions, 10-K/10-Q reports, 8-K material events, 13D/13G/13F institutional ownership).
-3. Macro Data Agent (marco_data): FRED macroeconomic indicators (10Y Treasury Yield, 10Y-2Y yield curve spread, Fed Funds Rate, Unemployment) and CFTC Commitment of Traders (COT) futures positioning (S&P 500, Nasdaq 100, VIX).
-4. News Agent: Today's real-time headlines, news summary, sentiment, and short-term impact.
-5. Risk Agent: Volatility ATR%, technical trend breakdown risk, RSI extreme risk, and stop-loss boundaries.
-6. Analyst Agent: Wall Street consensus, mean target price, and recent rating actions from major investment banks (BofA, Barclays, Credit Suisse, DB, Evercore, Goldman, JPM, Morgan Stanley, UBS).
+You receive short-term intelligence collected by specialized sub-agents and quantitative engines:
+1. Quantitative Scoring Engine: Deterministic Quant Score (0-100 across 5 pillars: Trend, Sector, Alpha, Valuation History, Peer Valuation) and 20-Session ML Alpha Score (0-100) blended into the Decision Composite.
+2. Market Agent: Price action, 5-day velocity, RSI, EMA20/50, ATR, Forward P/E, profit margins.
+3. Institutional Data Agent: SEC EDGAR regulatory filings (Form 4 insider transactions, 10-K/10-Q reports, 8-K material events, 13D/13G/13F institutional ownership).
+4. Macro Data Agent (marco_data): FRED macroeconomic indicators (10Y Treasury Yield, 10Y-2Y yield curve spread, Fed Funds Rate, Unemployment) and CFTC Commitment of Traders (COT) futures positioning (S&P 500, Nasdaq 100, VIX).
+5. News Agent: Today's real-time headlines, news summary, sentiment, and short-term impact.
+6. Risk Agent: Volatility ATR%, technical trend breakdown risk, RSI extreme risk, and stop-loss boundaries.
+7. Analyst Agent: Wall Street consensus, mean target price, and recent rating actions from major investment banks (BofA, Barclays, Credit Suisse, DB, Evercore, Goldman, JPM, Morgan Stanley, UBS).
 
 Your Task:
-Synthesize the insights from all six agents to forecast relative performance over the next 20 trading sessions (about one month) and assess whether a trade is actionable.
+Synthesize the quantitative scores and insights from all specialized sub-agents to forecast relative performance over the next 20 trading sessions (about one month) and assess whether a trade is actionable.
 
 Rules & Guidelines:
 1. Ignore stale long-term macro narratives that are already priced in, but incorporate macro yield curve & CFTC positioning context.
-2. Synthesize Institutional/SEC filings + Macro FRED/COT data + News Agent impact + Market Agent momentum + Risk Agent factors + Analyst Agent bank ratings.
+2. Ground your decision in the Deterministic Quant Score and ML 20-Session Score (Decision Composite).
+3. Synthesize Quantitative Scores + Institutional/SEC filings + Macro FRED/COT data + News Agent impact + Market Agent momentum + Risk Agent factors + Analyst Agent bank ratings.
 3. Return a valid JSON object matching the requested schema.
 
 Schema:
@@ -93,6 +96,7 @@ Schema:
   "stock": "Ticker Symbol",
   "decision": "BUY|SELL|HOLD",
   "confidence": 0.85,
+  "decision_reasoning": "Detailed expert rationale explaining exactly why this decision (BUY, SELL, HOLD) was reached, synthesizing quantitative scores, technical action, risk factors, and catalysts",
   "reason": "Short-term swing setup rationale synthesizing Market, Institutional, Macro, News, Risk & Analyst Agent insights",
   "institutional_data": "Summary of SEC EDGAR insider & institutional filing activity from Institutional Data Agent",
   "macro_data": "Summary of FRED yield curve/interest rates & CFTC COT positioning from Macro Data Agent",
@@ -329,9 +333,25 @@ def normalize_master_trader_json(
         model_pillar_scores[out_key] = _to_float(raw_pillars.get(model_key), None)
 
     # Array Fields
-    bull_case = _to_list_of_strings(data.get("bull_case") or data.get("reason"), "Bullish trade setup and vector RAG catalysts evaluated.")
+    bull_case = _to_list_of_strings(data.get("bull_case"), "Bullish trade setup and vector RAG catalysts evaluated.")
     bear_case = _to_list_of_strings(data.get("bear_case") or data.get("risk_assessment"), "Bearish trade setup and downside risks evaluated.")
     key_risks = _to_list_of_strings(data.get("key_risks") or data.get("key_risk"), "Volatile market conditions and stop-loss boundaries.")
+
+    # Model Decision Reasoning: capture the model's explicit rationale for why this decision was chosen
+    raw_dec_reasoning = (
+        data.get("decision_reasoning")
+        or data.get("decision_rationale")
+        or (forecast_20d.get("rationale") if isinstance(forecast_20d, dict) else None)
+        or data.get("reason")
+    )
+    if not raw_dec_reasoning or (isinstance(raw_dec_reasoning, str) and not raw_dec_reasoning.strip()):
+        if original_decision in ("BUY", "DEEP BUY"):
+            raw_dec_reasoning = "; ".join(bull_case)
+        elif original_decision in ("SELL", "BOOK PROFIT"):
+            raw_dec_reasoning = "; ".join(bear_case)
+        else:
+            raw_dec_reasoning = (forecast_20d.get("rationale") if isinstance(forecast_20d, dict) else None) or "; ".join(bull_case)
+    decision_reasoning = str(raw_dec_reasoning or "No specific decision reasoning recorded.").strip()
     missing_info = _to_list_of_strings(data.get("missing_information"), "None")
     catalyst_analysis = data.get("catalyst_analysis") if isinstance(data.get("catalyst_analysis"), list) else []
     biggest_surprise_catalyst = str(data.get("biggest_surprise_catalyst") or "")
@@ -1357,8 +1377,9 @@ def normalize_master_trader_json(
         "danelfin": m_data.get("danelfin", {}),
         "danelfin_score": m_data.get("danelfin", {}).get("aiscore"),
         "danelfin_signal": m_data.get("danelfin", {}).get("signal", ""),
-        # Backward compatibility for SQLite DB string storage
-        "reason": "; ".join(bull_case),
+        # Explicit Model Decision Reasoning & backward compatibility
+        "decision_reasoning": decision_reasoning,
+        "reason": decision_reasoning,
         "risk_assessment": "; ".join(key_risks),
         "institutional_data": inst_summary,
         "macro_data": macro_summary,
@@ -1445,14 +1466,14 @@ def run_portfolio_review(llm_choice: str, temperature: float = None, reasoning_b
 
 def main():
     parser = argparse.ArgumentParser(
-        description="6-Agent Stock Swing Trading Analysis Pipeline (Powered by OpenRouter Free auto-router)",
-        usage="python main.py [free] [ticker] | python main.py portfolio"
+        description="6-Agent Stock Swing Trading Analysis Pipeline (Powered by Recursive: Flint (free) via OpenRouter)",
+        usage="python main.py [flint] [ticker] | python main.py portfolio"
     )
     parser.add_argument(
         "model_arg",
         nargs="?",
         default=None,
-        help="Model short name (default: 'free') or stock ticker symbol"
+        help="Model short name (default: 'flint' - Recursive: Flint (free)) or stock ticker symbol"
     )
     parser.add_argument(
         "ticker_arg",
@@ -1464,7 +1485,7 @@ def main():
         "--model", "-m",
         dest="model_opt",
         default=None,
-        help="Model short name (default: 'free')"
+        help="Model short name (default: 'flint' - Recursive: Flint (free))"
     )
     parser.add_argument(
         "--ticker", "-t",
@@ -1517,7 +1538,7 @@ def main():
 
     # If first argument is 'portfolio', run portfolio review
     if (raw_first and raw_first.lower() == "portfolio") or (raw_model_opt and raw_model_opt.lower() == "portfolio"):
-        llm_choice = raw_model_opt or "haiku"
+        llm_choice = raw_model_opt or "flint"
         with managed_llamacpp_server(llm_choice):
             run_portfolio_review(
                 llm_choice,
@@ -1528,19 +1549,19 @@ def main():
         return
 
     known_model_names = {
-        "haiku", "haiku-5.5", "haike", "haike-5.5", "claude", "claude-haiku", "claude-haiku-5-5", "claude-5-5-haiku", "anthropic",
+        "flint", "flint-v1.0", "recursive/flint-v1.0:free", "recursive", "flint-free",
         "free", "openrouter/free", "openrouter", "auto", "or",
         "xingchen", "xing", "xing4", "xingchen-agi/xing4.0-29b-a4b:free",
-        "flint", "flint-v1.0", "recursive/flint-v1.0:free",
         "kimi", "kimi-k3", "nemotron", "ultra", "super",
-        "gemini", "ling", "qwen", "llamacpp"
+        "gemini", "ling", "qwen", "llamacpp",
+        "haiku", "haiku-5.5", "haike", "haike-5.5", "claude", "claude-haiku", "claude-haiku-5-5", "claude-5-5-haiku", "anthropic"
     }
 
     if raw_first and raw_second:
         if raw_first.lower() in known_model_names:
             model_choice = raw_first.lower()
         else:
-            model_choice = "haiku"
+            model_choice = "flint"
         raw_ticker = raw_ticker_opt or raw_second
     elif raw_first and not raw_second:
         if raw_first.lower() in known_model_names:
@@ -1548,16 +1569,16 @@ def main():
             raw_ticker = raw_ticker_opt
         else:
             # e.g. python main.py AAPL
-            model_choice = "haiku"
+            model_choice = "flint"
             raw_ticker = raw_first
     else:
-        model_choice = raw_model_opt or "haiku"
+        model_choice = raw_model_opt or "flint"
         raw_ticker = raw_ticker_opt
 
     if not raw_ticker:
-        print("\nUsage: python main.py [haiku] <TICKER> (e.g. python main.py AAPL)")
+        print("\nUsage: python main.py [flint] <TICKER> (e.g. python main.py AAPL)")
         print("       python main.py portfolio")
-        print("Model: Anthropic Claude Haiku 5.5 (claude-haiku-5-5)\n")
+        print("Model: Recursive: Flint (free) from OpenRouter (recursive/flint-v1.0:free)\n")
         sys.exit(1)
 
     market = "EU" if args.eu else args.market.upper()
@@ -1635,6 +1656,12 @@ def main():
             # 4. Institutional Multi-Source Data Stream (IR, SEC direct, Earnings calls, Press releases, Reputable news)
             institutional_payload = institutional_service.get_all_institutional_data(symbol)
 
+            # 4.1 ML Context & Quantitative Scoring setup
+            ml_context = get_ml_context(symbol)
+            if isinstance(m_data, dict):
+                m_data = dict(m_data)
+                m_data["ml_context"] = ml_context
+
             # 5. Dense Vector Embedding RAG & Prompt Payload Assembly
             context = rag_service.get_nemotron_payload(
                 gloomberb_payload,
@@ -1642,24 +1669,30 @@ def main():
                 institutional_data=institutional_payload,
                 prompt_profile=prompt_profile,
             )
-            ml_context = get_ml_context(symbol)
-            context["user_prompt"] += format_ml_context(ml_context)
-            if danelfin_scores:
-                context["user_prompt"] += format_danelfin_context(danelfin_scores)
 
-            # Attach the deterministic 5-pillar scores to m_data so normalize can fall back to them
+            # Compute and attach deterministic 5-pillar scores to m_data so normalize can fall back to them
             # instead of defaults (and so gated_confidence uses real pillar agreement).
+            quant_service = QuantitativeScoringService()
+            sector_bench = gloomberb_payload.get("sector_benchmark", {})
+            deterministic_scores = quant_service.compute_5pillar_scores(m_data, gloomberb_payload, sector_bench)
+
             if isinstance(m_data, dict):
-                m_data = dict(m_data)
-                m_data["ml_context"] = ml_context
-                m_data["deterministic_5pillar_scores"] = QuantitativeScoringService().compute_5pillar_scores(
-                    m_data, gloomberb_payload, gloomberb_payload.get("sector_benchmark", {})
-                )
+                m_data["deterministic_5pillar_scores"] = deterministic_scores
                 # Deterministic data completeness: computed from live provider availability once.
                 # The LLM's own claim (model_data_completeness) is stored separately and never authoritative.
                 m_data["deterministic_data_completeness"] = QuantitativeScoringService.compute_data_coverage(
                     m_data, macro_data, gloomberb_payload, institutional_payload
                 )
+
+            # 5.1 Inject authoritatively formatted Quantitative Intelligence (Deterministic Quant Score + ML 20-Session Score + Blended Composite)
+            context["user_prompt"] += format_quant_and_ml_context(
+                deterministic_scores=deterministic_scores,
+                ml_context=ml_context,
+                m_data=m_data,
+                symbol=symbol,
+            )
+            if danelfin_scores:
+                context["user_prompt"] += format_danelfin_context(danelfin_scores)
 
             # 6. Model Reasoning Core & Market Analysis
             print(f"[{model_label}] Executing market analysis for {symbol}...")
@@ -1708,6 +1741,7 @@ def main():
                             "violation below and return ONLY a single valid JSON object with the required schema fields:\n"
                             f"- stock: \"{symbol}\"\n"
                             "- decision: \"BUY\", \"HOLD\", or \"SELL\"\n"
+                            "- decision_reasoning: detailed explanation string explaining why this decision was reached\n"
                             "- primary_driver: \"QUANT_STRUCTURE\", \"FUNDAMENTAL\", \"NEWS_CATALYST\", \"MACRO_EVENT\", or \"EARNINGS_CATALYST\"\n"
                             "- confidence: float between 0.0 and 1.0\n"
                             "- buy_score, hold_score, sell_score: floats between 0.0 and 1.0 summing to 1.0\n"

@@ -27,7 +27,7 @@ except ImportError:
 class ScoresConfig:
     """Composite score floors and ceilings (0-100)."""
     buy_minimum: float = 60.0
-    dip_buy_minimum: float = 52.0
+    dip_buy_minimum: float = 48.0
     short_maximum: float = 45.0
     holding_thesis_minimum: float = 70.0
 
@@ -48,10 +48,10 @@ class ScoresConfig:
 class DipBuyConfig:
     """Distinct catalyst dip-buy branch specification."""
     enabled: bool = True
-    score_minimum: float = 52.0
+    score_minimum: float = 48.0
     min_drop_pct_5d: float = 5.0
-    max_drop_pct_5d: float = 15.0
-    min_rsi: float = 30.0
+    max_drop_pct_5d: float = 30.0
+    min_rsi: float = 20.0
     max_rsi: float = 45.0
     min_valuation_history: float = 60.0
     min_peer_valuation: float = 55.0

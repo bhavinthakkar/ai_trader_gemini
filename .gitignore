@@ -12,3 +12,6 @@ streamlit.log
 api_server.log
 mobile_app/node_modules/
 mobile_app/.expo/
+logs/
+*.html
+data/.first_boot_done

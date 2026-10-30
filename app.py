@@ -18,6 +18,13 @@ from dashboard import collect_dashboard_data, format_volume
 from ticker_resolver import resolve_symbol, is_european_symbol, get_currency_for_symbol
 from ml_signal_service import classify_ml_signal, get_ml_context, get_all_ml_scores
 from quant.order_execution import GLOBAL_KILL_SWITCH, KillSwitchReason
+from quant.compliance_gates import (
+    is_signal_vetoed,
+    format_compliance_gate_action,
+    format_model_recommendation,
+    format_executed_action,
+    NON_VETO_REASON_CODES,
+)
 from quant.shadow_trading import (
     ShadowDecisionRecord,
     ShadowMetricsAnalyzer,
@@ -311,7 +318,7 @@ st.sidebar.markdown("---")
 st.sidebar.info("""
 💻 **Terminal Trigger Mode (6-Agent System)**
 To run a new pipeline analysis, execute in your terminal:
-- `python main.py haiku <TICKER>` (Anthropic Claude Haiku 5.5 - default)
+- `python main.py flint <TICKER>` (Recursive: Flint (free) - default)
 - `python main.py openrouter <TICKER>` (Optional: OpenRouter Free Models Router - openrouter/free)
 - `python main.py nemotron <TICKER>` (Nemotron-3 Ultra 550B / Super 120B)
 - `python main.py kimi <TICKER>` (Moonshot AI Kimi-K3 via NVIDIA)
@@ -320,9 +327,9 @@ To run a new pipeline analysis, execute in your terminal:
 - `python main.py llamacpp <TICKER>` (Alias for the local llama.cpp server)
 - `python main.py qwen-llamacpp <TICKER>` (Explicit alias for the local llama.cpp server)
 
-*Example:* `python main.py haiku NVDA` or `python main.py haiku AAPL`
+*Example:* `python main.py flint NVDA` or `python main.py flint AAPL`
 
-**Portfolio risk review:** `python main.py portfolio haiku`
+**Portfolio risk review:** `python main.py portfolio flint`
 """)
 
 st.sidebar.markdown("---")
@@ -383,11 +390,14 @@ col1, col2, col3, col4, col5, col6 = st.columns(6)
 with col1:
     st.metric(label="Tracked Stocks", value=stats["total_tracked"])
 with col2:
-    st.metric(label="🟢 Buy Signals", value=stats["buy_count"])
+    m_buys = stats.get("model_buy_count", stats["buy_count"])
+    st.metric(label="🤖 Model Buys", value=m_buys)
 with col3:
-    st.metric(label="🔴 Sell Signals", value=stats["sell_count"])
+    m_sells = stats.get("model_sell_count", stats["sell_count"])
+    st.metric(label="🤖 Model Sells", value=m_sells)
 with col4:
-    st.metric(label="⚪ Hold Signals", value=stats["hold_count"])
+    veto_cnt = stats.get("vetoed_count", 0)
+    st.metric(label="🛡️ Gate Vetoes", value=veto_cnt)
 with col5:
     win_val = f"{outcome_stats['win_rate_pct']}%" if outcome_stats["total_evaluated"] > 0 else "Pending"
     st.metric(label="🎯 Model Win Rate", value=win_val)
@@ -426,20 +436,26 @@ with tab1:
         st.info("No signal data found in database. Run `python main.py` in your terminal to populate analysis reports!")
     else:
         # Filters
-        filter_col1, filter_col2, filter_col3 = st.columns([1.5, 1.5, 1.5])
+        filter_col1, filter_col2, filter_col3, filter_col4 = st.columns([1.5, 1.2, 1.2, 1.5])
         with filter_col1:
             decision_filter = st.multiselect(
-                "Filter by Decision:",
-                options=["BUY", "SELL", "HOLD"],
-                default=["BUY", "SELL", "HOLD"]
+                "Filter by Model Recommendation:",
+                options=["BUY", "DEEP BUY", "HOLD", "BOOK PROFIT", "SELL"],
+                default=["BUY", "DEEP BUY", "HOLD", "BOOK PROFIT", "SELL"]
             )
         with filter_col2:
-            ml_filter = st.selectbox(
-                "Filter by Pure ML Stance:",
-                options=["All Stances", "Bullish (Outperform >= 60)", "Neutral (40-60)", "Bearish (Underperform < 40)"],
+            gate_filter = st.selectbox(
+                "Compliance Safety Gate:",
+                options=["All Statuses", "Passed Only", "Vetoed Only"],
                 index=0
             )
         with filter_col3:
+            ml_filter = st.selectbox(
+                "Filter by ML Stance:",
+                options=["All Stances", "Bullish (Outperform >= 60)", "Neutral (40-60)", "Bearish (Underperform < 40)"],
+                index=0
+            )
+        with filter_col4:
             search_symbol = st.text_input("Search Symbol:", "").strip().upper()
 
         def _matches_ml_filter(s, flt):
@@ -456,10 +472,24 @@ with tab1:
                 return sc < 40.0
             return True
 
+        def _get_model_rec(s):
+            return str(s.get("model_decision") or s.get("decision") or "HOLD").upper()
+
+        def _matches_gate_filter(s, flt):
+            if flt == "All Statuses":
+                return True
+            vetoed = is_signal_vetoed(s)
+            if flt == "Passed Only":
+                return not vetoed
+            if flt == "Vetoed Only":
+                return vetoed
+            return True
+
         filtered_signals = [
             s for s in latest_signals
-            if s["decision"] in decision_filter
+            if _get_model_rec(s) in decision_filter
             and _matches_ml_filter(s, ml_filter)
+            and _matches_gate_filter(s, gate_filter)
             and (not search_symbol or search_symbol in s["symbol"] or search_symbol in s.get("company_name", "").upper())
         ]
 
@@ -493,16 +523,32 @@ with tab1:
                     return f"{score:.1f} (#{int(rank)}/{int(usize)})"
                 return f"{score:.1f}/100"
 
+            df_display["model_rec_col"] = df_display.apply(format_model_recommendation, axis=1)
+            df_display["compliance_gate_col"] = df_display.apply(format_compliance_gate_action, axis=1)
+            df_display["final_action_col"] = df_display.apply(format_executed_action, axis=1)
+            df_display["decision_reasoning_col"] = df_display.apply(lambda r: r.get("decision_reasoning") or r.get("reason") or "—", axis=1)
             df_display["ml_indicator_col"] = df_display.apply(format_ml_signal_display, axis=1)
             df_display["ml_score_col"] = df_display.apply(format_ml_score_display, axis=1)
 
-            cols_to_use = ["symbol", "decision", "ml_indicator_col", "ml_score_col", "confidence"]
+            cols_to_use = [
+                "symbol",
+                "model_rec_col",
+                "compliance_gate_col",
+                "final_action_col",
+                "decision_reasoning_col",
+                "ml_indicator_col",
+                "ml_score_col",
+                "confidence",
+            ]
             col_renames = {
                 "symbol": "Ticker",
-                "decision": "Decision",
+                "model_rec_col": "🤖 Model Recommendation",
+                "compliance_gate_col": "🛡️ Safety Gate (Veto Action)",
+                "final_action_col": "Final Executed Action",
+                "decision_reasoning_col": "💡 Decision Reasoning",
                 "ml_indicator_col": "🤖 ML Signal",
                 "ml_score_col": "🤖 ML Score (Rank)",
-                "confidence": "Confidence"
+                "confidence": "Confidence",
             }
 
             if "quant_score" in df_display.columns and df_display["quant_score"].notna().any():
@@ -585,10 +631,10 @@ with tab2:
         )
 
         if analyze_isin_btn:
-            with st.status(f"🚀 Running 6-Agent AI Swing Synthesis on {res_sym} via Anthropic Claude Haiku 5.5...", expanded=True) as status_box:
+            with st.status(f"🚀 Running 6-Agent AI Swing Synthesis on {res_sym} via Recursive: Flint (free)...", expanded=True) as status_box:
                 st.write(f"Launching main.py for {res_sym}...")
                 main_script = os.path.join(BASE_DIR, "main.py")
-                cmd = [sys.executable, main_script, "haiku", res_sym, "--eu"]
+                cmd = [sys.executable, main_script, "flint", res_sym, "--eu"]
                 try:
                     proc = subprocess.run(cmd, cwd=BASE_DIR, capture_output=True, text=True)
                     if proc.returncode == 0:
@@ -615,24 +661,36 @@ with tab2:
         stock_data = next((s for s in latest_signals if s["symbol"] == selected_stock), None) if latest_signals else None
 
         if stock_data:
-            c1, c2, c3, c4, c5 = st.columns([1.2, 1, 1, 1.2, 1])
+            c1, c2, c3, c4, c5 = st.columns([1.5, 1, 1, 1.2, 1])
             with c1:
-                dec = stock_data["decision"]
-                badge_class = "badge-buy" if dec == "BUY" else ("badge-sell" if dec == "SELL" else "badge-hold")
+                model_rec = format_model_recommendation(stock_data)
+                model_dec = str(stock_data.get("model_decision") or stock_data.get("decision") or "HOLD").upper()
+                badge_class = "badge-buy" if model_dec in ("BUY", "DEEP BUY") else ("badge-sell" if model_dec in ("SELL", "BOOK PROFIT") else "badge-hold")
                 st.markdown(f"### **{stock_data['symbol']}**")
-                st.markdown(f"**Decision:** <span class='{badge_class}'>{dec}</span>", unsafe_allow_html=True)
-                if dec == "HOLD":
-                    origin = stock_data.get("decision_origin")
-                    origin_labels = {
-                        "MODEL": "Model chose HOLD",
-                        "GATE": "Directional signal blocked by a risk gate",
-                        "PROBABILITY_REALIGNED": "Probabilities favored HOLD",
-                        "SCHEMA_INVALID": "Invalid model output; safe HOLD recorded",
-                    }
-                    st.caption(f"Decision source: {origin_labels.get(origin, 'Not recorded')}")
-                ntr = stock_data.get("no_trade_reason")
-                if ntr:
-                    st.markdown(f"**No-Trade Reason:** `{ntr}`")
+                st.markdown(f"**🤖 Model Rec:** <span class='{badge_class}'>{model_rec}</span>", unsafe_allow_html=True)
+
+                vetoed = is_signal_vetoed(stock_data)
+                gate_str = format_compliance_gate_action(stock_data)
+                gate_badge = "badge-sell" if vetoed else "badge-buy"
+                st.markdown(f"**🛡️ Safety Gate:** <span class='{gate_badge}'>{gate_str}</span>", unsafe_allow_html=True)
+
+                final_act = format_executed_action(stock_data)
+                st.markdown(f"**Final Action:** `{final_act}`")
+
+                if vetoed:
+                    reasons = stock_data.get("rejection_reasons") or stock_data.get("reason_codes")
+                    clean_reasons = []
+                    if reasons:
+                        if isinstance(reasons, str):
+                            try:
+                                reasons = json.loads(reasons)
+                            except Exception:
+                                reasons = [reasons]
+                        clean_reasons = [r for r in reasons if r not in NON_VETO_REASON_CODES]
+                    if clean_reasons:
+                        st.caption(f"Veto: {', '.join(clean_reasons)}")
+                elif stock_data.get("no_trade_reason"):
+                    st.caption(f"Reason: {stock_data['no_trade_reason']}")
             with c2:
                 conf = stock_data.get("confidence", 0.0)
                 st.metric("Model Confidence", f"{conf * 100:.0f}%" if conf else "N/A")
@@ -658,6 +716,31 @@ with tab2:
             with c5:
                 entry_p = stock_data.get("entry_price")
                 st.metric("Entry Price", f"{curr_sym}{entry_p:.2f}" if entry_p else "N/A")
+
+            # =====================================================================
+            # 💡 AI Model Decision Reasoning & Rationale
+            # =====================================================================
+            model_dec_str = str(stock_data.get("model_decision") or stock_data.get("decision") or "HOLD").upper()
+            model_reasoning = stock_data.get("decision_reasoning") or stock_data.get("reason")
+            if not model_reasoning or model_reasoning == stock_data.get("bull_case"):
+                raw_j = stock_data.get("raw_json")
+                if raw_j:
+                    try:
+                        pj = json.loads(raw_j) if isinstance(raw_j, str) else raw_j
+                        model_reasoning = (
+                            pj.get("decision_reasoning")
+                            or pj.get("decision_rationale")
+                            or (pj.get("forecast_20d", {}).get("rationale") if isinstance(pj.get("forecast_20d"), dict) else None)
+                            or pj.get("reason")
+                        )
+                    except Exception:
+                        pass
+
+            st.markdown("#### 💡 AI Model Decision Reasoning")
+            if model_reasoning:
+                st.info(f"**Why the Model Recommended {model_dec_str}:**\n\n{model_reasoning}")
+            else:
+                st.info(f"No specific decision reasoning recorded for `{selected_stock}`.")
 
             # =====================================================================
             # 🤖 Standalone ML Pipeline Indicator (Point-in-Time XGBoost Model)
@@ -893,6 +976,10 @@ with tab2:
             with sd_c1:
                 action_badge = "badge-open-long" if pos_action == "OPEN_LONG" else "badge-no-action"
                 st.markdown(f"**Policy Action:** <span class='{action_badge}'>{pos_action}</span>", unsafe_allow_html=True)
+                vetoed_sd = is_signal_vetoed(stock_data)
+                gate_str_sd = format_compliance_gate_action(stock_data)
+                gate_badge_sd = "badge-sell" if vetoed_sd else "badge-buy"
+                st.markdown(f"**Gate Status:** <span class='{gate_badge_sd}'>{gate_str_sd}</span>", unsafe_allow_html=True)
                 if sizing_data.get("binding_constraint"):
                     st.caption(f"Binding Constraint: `{sizing_data['binding_constraint']}`")
             with sd_c2:
@@ -928,8 +1015,8 @@ with tab2:
 
             col_left, col_right = st.columns(2)
             with col_left:
-                st.subheader("💡 Swing Setup Rationale (Bull Case)")
-                st.info(stock_data.get("bull_case") or stock_data.get("reason") or "No rationale provided.")
+                st.subheader("🐂 Bull Case Arguments")
+                st.info(stock_data.get("bull_case") or "No bullish arguments provided.")
 
                 st.subheader("🏛️ SEC EDGAR Institutional & Filings")
                 st.write(stock_data.get("institutional_data") or "No SEC filing summary available.")
@@ -941,7 +1028,7 @@ with tab2:
                 st.write(stock_data.get("news") or "No news catalyst summary reported.")
 
             with col_right:
-                st.subheader("⚠️ Downside Risks & Bear Case")
+                st.subheader("🐻 Downside Risks & Bear Case")
                 st.warning(stock_data.get("bear_case") or stock_data.get("risk_assessment") or "Low risk profile.")
 
                 st.subheader("🏦 Wall Street Bank Coverage")
@@ -1089,10 +1176,10 @@ with tab4:
     with top_ctrl2:
         limit_val = st.selectbox("Number of Active Stocks:", options=[10, 15, 20, 25], index=0)
         analyse_count = st.selectbox(
-            "AI Analysis Count (Claude Haiku 5.5):",
+            "AI Analysis Count (Recursive: Flint):",
             options=[3, 5, 10],
             index=1,
-            help="Number of top active stocks to sequentially analyze with main.py using Anthropic Claude Haiku 5.5 ('haiku')"
+            help="Number of top active stocks to sequentially analyze with main.py using Recursive: Flint (free) ('flint')"
         )
     with top_ctrl3:
         if st.button("🔄 Refresh Active Data", key="refresh_active_stocks", use_container_width=True):
@@ -1102,7 +1189,7 @@ with tab4:
         run_analyse = st.button(
             "🚀 Refresh active data & Analyse",
             key="refresh_and_analyse_stocks",
-            help="Refreshes active stocks data and executes master.py using Anthropic Claude Haiku 5.5 (haiku)",
+            help="Refreshes active stocks data and executes master.py using Recursive: Flint (free) (flint)",
             use_container_width=True,
             type="primary"
         )
@@ -1113,7 +1200,7 @@ with tab4:
         cmd = [
             sys.executable,
             master_script,
-            "haiku",
+            "flint",
             "--limit", str(analyse_count),
             "--dashboard-limit", str(limit_val),
             "--market", selected_market,
@@ -1121,7 +1208,7 @@ with tab4:
             "--no-streamlit",
         ]
         status_market_label = f"Europe (gettex / XETRA: {selected_exchange})" if is_eu else "US Markets"
-        with st.status(f"🚀 Running Gloomberb Master Orchestration ({status_market_label} | Model: haiku, Limit: {analyse_count})...", expanded=True) as status_box:
+        with st.status(f"🚀 Running Gloomberb Master Orchestration ({status_market_label} | Model: flint, Limit: {analyse_count})...", expanded=True) as status_box:
             st.write(f"Initializing active volume screener [{selected_market}] & launching 6-agent AI swing analysis...")
             log_box = st.empty()
             logs = []
@@ -1244,16 +1331,25 @@ with tab5:
     if not history_records:
         st.info("No historical records logged yet.")
     else:
-        df_hist = pd.DataFrame(history_records)[[
-            "id", "timestamp", "symbol", "decision", "confidence", "model_used", "reason"
-        ]].rename(columns={
+        df_hist_raw = pd.DataFrame(history_records)
+        df_hist_raw["model_rec_col"] = df_hist_raw.apply(format_model_recommendation, axis=1)
+        df_hist_raw["gate_action_col"] = df_hist_raw.apply(format_compliance_gate_action, axis=1)
+        df_hist_raw["final_action_col"] = df_hist_raw.apply(format_executed_action, axis=1)
+
+        cols = [
+            "id", "timestamp", "symbol", "model_rec_col", "gate_action_col", "final_action_col", "confidence", "model_used", "reason"
+        ]
+        cols = [c for c in cols if c in df_hist_raw.columns]
+        df_hist = df_hist_raw[cols].rename(columns={
             "id": "ID",
             "timestamp": "Timestamp",
             "symbol": "Ticker",
-            "decision": "Decision",
+            "model_rec_col": "🤖 Model Recommendation",
+            "gate_action_col": "🛡️ Safety Gate (Veto Action)",
+            "final_action_col": "Final Executed Action",
             "confidence": "Confidence",
             "model_used": "Model Used",
-            "reason": "Swing Setup Reason"
+            "reason": "💡 Model Decision Reasoning"
         })
         st.dataframe(df_hist, width="stretch", hide_index=True)
 
@@ -1279,7 +1375,9 @@ with tab6:
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT o.id, s.timestamp as signal_date, s.symbol, s.decision,
+            SELECT o.id, s.timestamp as signal_date, s.symbol,
+                   COALESCE(s.model_decision, s.decision) as model_decision,
+                   s.decision,
                    o.horizon_days, o.entry_price, o.exit_price,
                    o.realized_return_pct, o.max_runup_pct, o.max_drawdown_pct,
                    o.hit_target, o.hit_stop, o.is_profitable
@@ -1292,6 +1390,10 @@ with tab6:
     if outcomes_rows:
         df_outcomes = pd.DataFrame(outcomes_rows)
         df_outcomes["is_profitable"] = df_outcomes["is_profitable"].apply(lambda x: "🟢 Win" if x else "🔴 Loss")
+        df_outcomes = df_outcomes.rename(columns={
+            "model_decision": "🤖 Model Rec",
+            "decision": "Final Action"
+        })
         st.dataframe(df_outcomes, width="stretch", hide_index=True)
     else:
         st.info("No trade outcomes evaluated yet. New 20-session signals are evaluated after 20 forward trading bars; older signals use their recorded horizon.")

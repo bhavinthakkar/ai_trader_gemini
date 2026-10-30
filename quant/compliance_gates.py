@@ -12,6 +12,7 @@ conflict resolution, and mathematically rigorous controls:
 
 from dataclasses import asdict, dataclass, field
 from enum import Enum
+import json
 import math
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -1048,3 +1049,126 @@ class CompliancePolicyEngine:
             no_trade_reason=no_trade_reason,
             gate_results=all_gates,
         )
+
+
+NON_VETO_REASON_CODES = {
+    "BUY_ORDER_CERTIFIED",
+    "SHORT_ORDER_CERTIFIED",
+    "HOLD_CERTIFIED",
+    "SELL_EXIT_CERTIFIED",
+    "COVER_EXIT_CERTIFIED",
+    "HOLDING_THESIS_INTACT",
+    "CLEAR",
+    "NO_ACTION_DEFAULT",
+    "NO_TRADE_DEFAULT",
+    "DATA_QUALITY_OK",
+    "",
+}
+
+
+def is_signal_vetoed(signal: Dict[str, Any]) -> bool:
+    """True if a directional model decision was blocked/vetoed by compliance safety gates."""
+    if not isinstance(signal, dict):
+        return False
+    origin = str(signal.get("decision_origin") or "").upper()
+    if origin == "GATE":
+        return True
+
+    failed = signal.get("failed_gates") or []
+    if isinstance(failed, str):
+        try:
+            failed = json.loads(failed)
+        except Exception:
+            failed = [failed] if failed else []
+
+    reasons = signal.get("rejection_reasons") or signal.get("reason_codes") or []
+    if isinstance(reasons, str):
+        try:
+            reasons = json.loads(reasons)
+        except Exception:
+            reasons = [reasons] if reasons else []
+
+    clean_reasons = [r for r in reasons if r not in NON_VETO_REASON_CODES]
+    model_dec = str(signal.get("model_decision") or signal.get("decision") or "").upper()
+    final_dec = str(signal.get("final_decision") or signal.get("decision") or "").upper()
+
+    if failed:
+        return True
+
+    if clean_reasons:
+        if model_dec in ("BUY", "DEEP BUY", "SELL", "BOOK PROFIT"):
+            return True
+        if final_dec == "HOLD" and origin != "MODEL":
+            return True
+
+    if model_dec in ("BUY", "DEEP BUY", "SELL", "BOOK PROFIT") and final_dec == "HOLD" and origin != "MODEL":
+        return True
+
+    return False
+
+
+def format_compliance_gate_action(signal: Dict[str, Any]) -> str:
+    """
+    Returns the compliance gate action display string.
+    If vetoed: '🛡️ VETO: <REASON>'
+    If cleared: '🟢 PASSED'
+    """
+    if not isinstance(signal, dict):
+        return "🟢 PASSED"
+
+    if not is_signal_vetoed(signal):
+        return "🟢 PASSED"
+
+    reasons = signal.get("rejection_reasons") or signal.get("reason_codes") or []
+    if isinstance(reasons, str):
+        try:
+            reasons = json.loads(reasons)
+        except Exception:
+            reasons = [reasons] if reasons else []
+    clean_reasons = [r for r in reasons if r not in NON_VETO_REASON_CODES]
+
+    failed = signal.get("failed_gates") or []
+    if isinstance(failed, str):
+        try:
+            failed = json.loads(failed)
+        except Exception:
+            failed = [failed] if failed else []
+
+    if clean_reasons:
+        veto_code = clean_reasons[0]
+    elif failed:
+        veto_code = failed[0]
+    else:
+        veto_code = signal.get("no_trade_reason") or "RISK_VETO"
+
+    return f"🛡️ VETO: {veto_code}"
+
+
+def format_model_recommendation(signal: Dict[str, Any]) -> str:
+    """Returns the model's main recommendation formatted with indicator emoji."""
+    if not isinstance(signal, dict):
+        return "⚪ HOLD"
+    val = str(signal.get("model_decision") or signal.get("decision") or "HOLD").upper()
+    if val in ("BUY", "DEEP BUY"):
+        return f"🟢 {val}"
+    elif val in ("SELL", "BOOK PROFIT"):
+        return f"🔴 {val}"
+    return f"⚪ {val}"
+
+
+def format_executed_action(signal: Dict[str, Any]) -> str:
+    """Returns the effective execution action after safety gate adjudication."""
+    if not isinstance(signal, dict):
+        return "⚪ NO_ACTION"
+    pos = str(signal.get("position_action") or "").upper()
+    final_dec = str(signal.get("final_decision") or signal.get("decision") or "HOLD").upper()
+    model_dec = str(signal.get("model_decision") or "").upper()
+
+    if is_signal_vetoed(signal) or (pos == "NO_ACTION" and model_dec in ("BUY", "SELL", "DEEP BUY", "BOOK PROFIT")):
+        return "⚪ NO_ACTION (Vetoed)"
+    if final_dec in ("BUY", "DEEP BUY"):
+        return f"🟢 {final_dec}"
+    elif final_dec in ("SELL", "BOOK PROFIT"):
+        return f"🔴 {final_dec}"
+    return f"⚪ {final_dec}"
+

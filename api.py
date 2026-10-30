@@ -45,6 +45,12 @@ from db import (
 from dashboard import collect_dashboard_data
 from ticker_resolver import resolve_symbol, get_currency_for_symbol
 from ml_signal_service import get_ml_context, get_all_ml_scores
+from quant.compliance_gates import (
+    is_signal_vetoed,
+    format_compliance_gate_action,
+    format_model_recommendation,
+    format_executed_action,
+)
 from quant.shadow_trading import (
     ShadowTradingEngine,
     ShadowMetricsAnalyzer,
@@ -85,12 +91,12 @@ RUNNING_JOBS: Dict[str, Dict[str, Any]] = {}
 
 class AnalyzeRequest(BaseModel):
     symbol: str = Field(..., description="Stock symbol or European ISIN (e.g. NVDA, US67066G1040, NVD.DE)")
-    model: str = Field(default="haiku", description="AI Model to run (Anthropic Claude Haiku 5.5)")
+    model: str = Field(default="flint", description="AI Model to run (Recursive: Flint (free))")
     is_eu: bool = Field(default=False, description="Flag for European gettex/XETRA tickers")
 
 
 class MasterRunRequest(BaseModel):
-    model: str = Field(default="haiku", description="AI Model to run across top active stocks (Anthropic Claude Haiku 5.5)")
+    model: str = Field(default="flint", description="AI Model to run across top active stocks (Recursive: Flint (free))")
     limit: int = Field(default=5, ge=1, le=25, description="Number of top active stocks to analyze")
     dashboard_limit: int = Field(default=10, ge=1, le=50, description="Number of active stocks to screen")
     market: str = Field(default="US", description="Market to scan: 'US' or 'EU'")
@@ -140,19 +146,25 @@ def fetch_latest_signals(
     order: Optional[str] = Query(default="desc", description="Sort order: 'desc' (newest first) or 'asc' (oldest first)"),
 ):
     """Returns the newest signal for each stock within the recency window."""
-    signals = get_latest_signals(max_age_days=days)
+    days_val = days if isinstance(days, int) else (days.default if hasattr(days, "default") and isinstance(days.default, int) else 7)
+    signals = get_latest_signals(max_age_days=days_val)
 
-    # Ensure company_name is populated
+    # Ensure company_name and formatted recommendation/gate fields are populated
     for s in signals:
         if not s.get("company_name"):
             info = resolve_symbol(s.get("symbol", ""))
             s["company_name"] = info.get("company_name") or s.get("symbol")
+        s["model_recommendation"] = format_model_recommendation(s)
+        s["compliance_gate_action"] = format_compliance_gate_action(s)
+        s["is_vetoed"] = is_signal_vetoed(s)
+        s["executed_action"] = format_executed_action(s)
+        s["decision_reasoning"] = s.get("decision_reasoning") or s.get("reason") or ""
 
-    if decision:
+    if decision and isinstance(decision, str):
         dec_filter = decision.strip().upper()
         signals = [s for s in signals if s.get("decision") == dec_filter]
 
-    if search:
+    if search and isinstance(search, str):
         q = search.strip().upper()
         signals = [
             s for s in signals
@@ -160,10 +172,12 @@ def fetch_latest_signals(
         ]
 
     # Sort signals
-    if sort_by == "date":
-        signals.sort(key=lambda s: str(s.get("timestamp") or ""), reverse=(order.lower() != "asc"))
-    elif sort_by == "symbol":
-        signals.sort(key=lambda s: str(s.get("symbol") or "").upper(), reverse=(order.lower() == "desc"))
+    sort_key = sort_by if isinstance(sort_by, str) else "date"
+    order_val = order.lower() if isinstance(order, str) else "desc"
+    if sort_key == "date":
+        signals.sort(key=lambda s: str(s.get("timestamp") or ""), reverse=(order_val != "asc"))
+    elif sort_key == "symbol":
+        signals.sort(key=lambda s: str(s.get("symbol") or "").upper(), reverse=(order_val == "desc"))
 
     return {
         "count": len(signals),
@@ -194,6 +208,12 @@ def fetch_signal_history(
 ):
     """Returns chronologically sorted historical analysis signals."""
     records = get_signal_history(symbol=symbol, limit=limit)
+    for r in records:
+        r["model_recommendation"] = format_model_recommendation(r)
+        r["compliance_gate_action"] = format_compliance_gate_action(r)
+        r["is_vetoed"] = is_signal_vetoed(r)
+        r["executed_action"] = format_executed_action(r)
+        r["decision_reasoning"] = r.get("decision_reasoning") or r.get("reason") or ""
     return {
         "count": len(records),
         "symbol": symbol.strip().upper() if symbol else None,
@@ -270,7 +290,7 @@ def _run_single_analysis_job(job_id: str, symbol: str, model: str, is_eu: bool):
     RUNNING_JOBS[job_id]["status"] = "running"
     RUNNING_JOBS[job_id]["started_at"] = datetime.now(timezone.utc).isoformat()
 
-    effective_model = model or "haiku"
+    effective_model = model or "flint"
 
     main_script = BASE_DIR / "main.py"
     cmd = [sys.executable, str(main_script), effective_model, symbol]
@@ -310,7 +330,7 @@ def trigger_analysis(req: AnalyzeRequest, background_tasks: BackgroundTasks):
         resolved = resolve_symbol(clean_sym, prefer_exchange="AUTO", force_european=False)
         target_symbol = resolved["symbol"]
 
-    req_model = req.model if req.model else "haiku"
+    req_model = req.model if req.model else "flint"
 
     job_id = f"job_{target_symbol}_{int(datetime.now().timestamp())}"
 

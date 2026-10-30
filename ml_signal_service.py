@@ -286,7 +286,7 @@ def get_ml_context(
     symbol: str,
     scores_path: Union[str, os.PathLike, None] = None,
     expected_session_date: Union[date, str, None] = None,
-    max_age_days: int = 14,
+    max_age_days: int = int(os.getenv("STOCK_ML_MAX_AGE_DAYS", "30")),
     hybrid_weight: float = 0.20,
 ) -> dict:
     """Return a fresh point-in-time 20-session score, or explicit out-of-scope context when outside universe.
@@ -478,7 +478,7 @@ def get_ml_context(
 def get_all_ml_scores(
     scores_path: Union[str, os.PathLike, None] = None,
     expected_session_date: Union[date, str, None] = None,
-    max_age_days: int = 14,
+    max_age_days: int = int(os.getenv("STOCK_ML_MAX_AGE_DAYS", "30")),
 ) -> List[dict]:
     """Return all scored universe stocks ranked by point-in-time ML model."""
     search_paths = _resolve_score_file_paths(scores_path)

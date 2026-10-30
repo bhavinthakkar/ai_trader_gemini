@@ -238,7 +238,7 @@ class TestCandidateFeedingIntoGates:
         assert StandardReasonCode.BUY_ORDER_CERTIFIED in out["gate_results"]["reason_codes"]
 
     def test_catalyst_dip_rejected_by_buy_floor_when_score_below_dip_floor(self):
-        """Catalyst dip candidate with score 50.0 (< 52.0 dip floor) reaches gates and is rejected by BUY_FLOOR."""
+        """Catalyst dip candidate with score 46.0 (< 48.0 dip floor) reaches gates and is rejected by BUY_FLOOR."""
         policy = load_policy_config()
         m_data = _make_valid_market_data(
             current_price=100.0,
@@ -250,7 +250,7 @@ class TestCandidateFeedingIntoGates:
             high_20d=110.0,
             low_20d=99.0,
             deterministic_5pillar_scores={
-                "composite_quantitative_score": 50.0,  # Below 52.0 dip floor
+                "composite_quantitative_score": 46.0,  # Below 48.0 dip floor
                 "valuation_history_score": 71.0,
                 "peer_valuation_score": 66.0,
                 "trend": 30.0,

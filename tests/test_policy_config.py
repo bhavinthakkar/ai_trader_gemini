@@ -52,16 +52,16 @@ class TestTradingPolicyConfig(unittest.TestCase):
 
         # Scores
         self.assertEqual(self.policy.scores.buy_minimum, 60.0)
-        self.assertEqual(self.policy.scores.dip_buy_minimum, 52.0)
+        self.assertEqual(self.policy.scores.dip_buy_minimum, 48.0)
         self.assertEqual(self.policy.scores.short_maximum, 45.0)
         self.assertEqual(self.policy.scores.holding_thesis_minimum, 70.0)
 
         # Dip Buy
         self.assertTrue(self.policy.dip_buy.enabled)
-        self.assertEqual(self.policy.dip_buy.score_minimum, 52.0)
+        self.assertEqual(self.policy.dip_buy.score_minimum, 48.0)
         self.assertEqual(self.policy.dip_buy.min_drop_pct_5d, 5.0)
-        self.assertEqual(self.policy.dip_buy.max_drop_pct_5d, 15.0)
-        self.assertEqual(self.policy.dip_buy.min_rsi, 30.0)
+        self.assertEqual(self.policy.dip_buy.max_drop_pct_5d, 30.0)
+        self.assertEqual(self.policy.dip_buy.min_rsi, 20.0)
         self.assertEqual(self.policy.dip_buy.max_rsi, 45.0)
         self.assertEqual(self.policy.dip_buy.min_valuation_history, 60.0)
         self.assertEqual(self.policy.dip_buy.min_peer_valuation, 55.0)
@@ -128,7 +128,7 @@ class TestTradingPolicyConfig(unittest.TestCase):
 
         # Certified Dip-Buy candidate
         dip_floor, dip_rule = self.policy.resolve_buy_score_floor(is_certified_dip_buy=True)
-        self.assertEqual(dip_floor, 52.0)
+        self.assertEqual(dip_floor, 48.0)
         self.assertEqual(dip_rule, "RULE_DIP_BUY_DISCOUNT_FLOOR")
 
         # If dip-buy is disabled, standard floor is universally enforced

@@ -43,8 +43,18 @@ class OpenRouterRoutingTests(unittest.TestCase):
         self.assertIn("free", get_model_label("openrouter").lower())
 
     def test_xingchen_aliases_resolve_to_free(self):
-        for alias in ("xingchen", "xing", "xing4", "xingchen-agi/xing4.0-29b-a4b:free", "flint", "ling", "kimi", "nemotron"):
+        for alias in ("xingchen", "xing", "xing4", "xingchen-agi/xing4.0-29b-a4b:free", "ling", "kimi", "nemotron"):
             self.assertEqual(normalize_model_key(alias), "openrouter/free")
+
+    def test_flint_aliases_resolve_to_flint(self):
+        for alias in ("flint", "flint-v1.0", "recursive/flint-v1.0:free", "recursive", "flint-free"):
+            self.assertEqual(normalize_model_key(alias), "flint")
+
+    def test_flint_targets_recursive_flint_model(self):
+        config = MODEL_REGISTRY["flint"]
+        self.assertEqual(config["provider"], "openrouter")
+        self.assertEqual(config["model"], "recursive/flint-v1.0:free")
+        self.assertIn("Recursive: Flint (free)", get_model_label("flint"))
 
     def test_xingchen_targets_model_via_openrouter(self):
         config = MODEL_REGISTRY["xingchen"]

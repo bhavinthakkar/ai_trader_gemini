@@ -12,7 +12,7 @@ scores:
   # Minimum deterministic composite score (0-100) required to certify a standard long entry
   buy_minimum: 60.0
   # Minimum composite score required for a certified catalyst dip-buy
-  dip_buy_minimum: 52.0
+  dip_buy_minimum: 48.0
   # Maximum composite score permitted to certify a directional short entry
   short_maximum: 45.0
   # Score threshold above which an existing long holding's thesis is considered intact
@@ -26,12 +26,12 @@ scores:
 dip_buy:
   enabled: true
   # Branch-specific composite floor (dislocation discounts trend score by design)
-  score_minimum: 52.0
+  score_minimum: 48.0
   # Required 5-day price drop percentage window
   min_drop_pct_5d: 5.0
-  max_drop_pct_5d: 15.0
+  max_drop_pct_5d: 30.0
   # RSI boundaries: must be oversold but not in an unrecoverable structural collapse
-  min_rsi: 30.0
+  min_rsi: 20.0
   max_rsi: 45.0
   # Fundamental valuation anchors: business must remain cheap vs history and peers
   min_valuation_history: 60.0

@@ -26,6 +26,10 @@ from quant.compliance_gates import (
     SellExitSymmetryGate,
     GatedConfidenceGate,
     CompliancePolicyEngine,
+    is_signal_vetoed,
+    format_compliance_gate_action,
+    format_model_recommendation,
+    format_executed_action,
 )
 
 
@@ -77,16 +81,16 @@ class TestComplianceGatesSemantics(unittest.TestCase):
             policy=self.policy,
         )
         self.assertTrue(res_dip_pass.passed)
-        self.assertEqual(res_dip_pass.metrics["required_floor"], 52.0)
+        self.assertEqual(res_dip_pass.metrics["required_floor"], 48.0)
         self.assertEqual(res_dip_pass.metrics["rule_name"], "RULE_DIP_BUY_DISCOUNT_FLOOR")
 
-        # Disqualified dip-buy: RSI=25 (too low / structural collapse)
+        # Disqualified dip-buy: RSI=15 (too low / structural collapse below min_rsi 20.0)
         # Floor reverts to 60.0 -> score 54.0 fails
         res_dip_bad_rsi = BuyFloorGate.evaluate(
             candidate_decision="BUY",
             composite_score=54.0,
             catalyst_path="DIP_BUY",
-            rsi14=25.0,  # Fails RSI
+            rsi14=15.0,  # Fails RSI
             drawdown_5d_pct=8.0,
             valuation_history_score=65.0,
             is_value_trap=False,
@@ -577,7 +581,7 @@ class TestComplianceGatesSemantics(unittest.TestCase):
         self.assertEqual(res_earn_mode.metrics.get("earnings_risk_haircut"), 0.50)
 
     def test_deep_buy_decision_qualification(self):
-        """Candidate DEEP BUY evaluates against 52.0 floor and requires dip criteria."""
+        """Candidate DEEP BUY evaluates against 48.0 floor and requires dip criteria."""
         res_deep = BuyFloorGate.evaluate(
             candidate_decision="DEEP BUY",
             composite_score=55.0,
@@ -587,7 +591,7 @@ class TestComplianceGatesSemantics(unittest.TestCase):
             policy=self.policy,
         )
         self.assertTrue(res_deep.passed)
-        self.assertEqual(res_deep.metrics["required_floor"], 52.0)
+        self.assertEqual(res_deep.metrics["required_floor"], 48.0)
 
     def test_book_profit_decision_authorization(self):
         """Candidate BOOK PROFIT is authorized when target reached or overbought momentum."""
@@ -615,6 +619,78 @@ class TestComplianceGatesSemantics(unittest.TestCase):
         )
         self.assertTrue(res_profit_rsi.passed)
         self.assertEqual(res_profit_rsi.reason_code, "OVERBOUGHT_PROFIT_TAKING")
+
+    # -------------------------------------------------------------------------
+    # 7. Safety Gate Display & Veto Formatting Helpers
+    # -------------------------------------------------------------------------
+    def test_model_recommendation_formatting(self):
+        """Model recommendations should be formatted with distinct indicator emoji."""
+        self.assertEqual(format_model_recommendation({"model_decision": "BUY"}), "🟢 BUY")
+        self.assertEqual(format_model_recommendation({"model_decision": "DEEP BUY"}), "🟢 DEEP BUY")
+        self.assertEqual(format_model_recommendation({"model_decision": "SELL"}), "🔴 SELL")
+        self.assertEqual(format_model_recommendation({"model_decision": "BOOK PROFIT"}), "🔴 BOOK PROFIT")
+        self.assertEqual(format_model_recommendation({"model_decision": "HOLD"}), "⚪ HOLD")
+        self.assertEqual(format_model_recommendation({}), "⚪ HOLD")
+
+    def test_is_signal_vetoed_and_action_formatting(self):
+        """Vetoed signals must be identified and display exact veto action."""
+        # Cleared signal
+        cleared_signal = {
+            "symbol": "NVDA",
+            "model_decision": "BUY",
+            "decision": "BUY",
+            "final_decision": "BUY",
+            "decision_origin": "MODEL",
+            "failed_gates": [],
+            "reason_codes": ["CLEAR"],
+        }
+        self.assertFalse(is_signal_vetoed(cleared_signal))
+        self.assertEqual(format_compliance_gate_action(cleared_signal), "🟢 PASSED")
+        self.assertEqual(format_executed_action(cleared_signal), "🟢 BUY")
+
+        # Certified buy order (all gates passed, reason_codes has BUY_ORDER_CERTIFIED)
+        certified_buy = {
+            "symbol": "000660.KS",
+            "model_decision": "BUY",
+            "decision": "BUY",
+            "final_decision": "BUY",
+            "decision_origin": "MODEL",
+            "failed_gates": [],
+            "reason_codes": ["BUY_ORDER_CERTIFIED"],
+        }
+        self.assertFalse(is_signal_vetoed(certified_buy))
+        self.assertEqual(format_compliance_gate_action(certified_buy), "🟢 PASSED")
+        self.assertEqual(format_executed_action(certified_buy), "🟢 BUY")
+
+        # Vetoed signal: Event risk blackout
+        vetoed_signal = {
+            "symbol": "INTC",
+            "model_decision": "DEEP BUY",
+            "decision": "HOLD",
+            "final_decision": "HOLD",
+            "decision_origin": "GATE",
+            "failed_gates": ["3. Volatility, Events & Liquidity"],
+            "rejection_reasons": ["EVENT_RISK_BLACKOUT"],
+            "position_action": "NO_ACTION",
+        }
+        self.assertTrue(is_signal_vetoed(vetoed_signal))
+        self.assertEqual(format_compliance_gate_action(vetoed_signal), "🛡️ VETO: EVENT_RISK_BLACKOUT")
+        self.assertEqual(format_executed_action(vetoed_signal), "⚪ NO_ACTION (Vetoed)")
+
+        # Model naturally chose HOLD without gate intervention
+        natural_hold = {
+            "symbol": "AAPL",
+            "model_decision": "HOLD",
+            "decision": "HOLD",
+            "final_decision": "HOLD",
+            "decision_origin": "MODEL",
+            "failed_gates": [],
+            "rejection_reasons": [],
+            "position_action": "NO_ACTION",
+        }
+        self.assertFalse(is_signal_vetoed(natural_hold))
+        self.assertEqual(format_compliance_gate_action(natural_hold), "🟢 PASSED")
+        self.assertEqual(format_executed_action(natural_hold), "⚪ HOLD")
 
 
 if __name__ == "__main__":
