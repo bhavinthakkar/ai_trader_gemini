@@ -70,6 +70,7 @@ def validate_signal_json(
     require_forecast_20d=False,
     expected_ticker=None,
     valid_document_ids=None,
+    require_binary_decision=False,
 ):
     """
     Validate an extracted LLM signal object against the strict schema.
@@ -177,20 +178,30 @@ def validate_signal_json(
         errors.append("missing required field 'decision'")
     else:
         dec = clean(raw_dec).upper()
-        if "DEEP BUY" in dec or "DIP BUY" in dec or "DEEP_BUY" in dec or "DIP_BUY" in dec:
-            dec = "DEEP BUY"
-        elif "BOOK PROFIT" in dec or "TAKE PROFIT" in dec or "BOOK_PROFIT" in dec or "TAKE_PROFIT" in dec or "PROFIT_TAKING" in dec:
-            dec = "BOOK PROFIT"
-        elif "BUY" in dec:
-            dec = "BUY"
-        elif "SELL" in dec:
-            dec = "SELL"
-        elif "HOLD" in dec or "NEUTRAL" in dec or "NO_ACTION" in dec:
-            dec = "HOLD"
-        elif dec in VALID_DECISIONS:
-            dec = dec
+        if require_binary_decision:
+            if "BUY" in dec:
+                dec = "BUY"
+            elif "SELL" in dec:
+                dec = "SELL"
+            else:
+                b_val = _to_float(norm.get("buy_score"), 0.0)
+                s_val = _to_float(norm.get("sell_score"), 0.0)
+                dec = "BUY" if b_val >= s_val else "SELL"
         else:
-            errors.append(f"invalid decision value '{raw_dec}'")
+            if "DEEP BUY" in dec or "DIP BUY" in dec or "DEEP_BUY" in dec or "DIP_BUY" in dec:
+                dec = "DEEP BUY"
+            elif "BOOK PROFIT" in dec or "TAKE PROFIT" in dec or "BOOK_PROFIT" in dec or "TAKE_PROFIT" in dec or "PROFIT_TAKING" in dec:
+                dec = "BOOK PROFIT"
+            elif "BUY" in dec:
+                dec = "BUY"
+            elif "SELL" in dec:
+                dec = "SELL"
+            elif "HOLD" in dec or "NEUTRAL" in dec or "NO_ACTION" in dec:
+                dec = "HOLD"
+            elif dec in VALID_DECISIONS:
+                dec = dec
+            else:
+                errors.append(f"invalid decision value '{raw_dec}'")
         norm["decision"] = dec
 
     # --- primary_driver enum ---------------------------------------------
@@ -222,6 +233,8 @@ def validate_signal_json(
         norm["decision_reasoning"] = clean(raw_reasoning)
 
     # --- Probabilities: numeric, in-range, ~sum to 1 ----------------------
+    if "hold_score" not in norm and "buy_score" in norm and "sell_score" in norm:
+        norm["hold_score"] = 0.0
     missing_probs = [k for k in ("buy_score", "hold_score", "sell_score") if k not in norm]
     if missing_probs:
         errors.append("missing required probability field(s): " + ", ".join(missing_probs))

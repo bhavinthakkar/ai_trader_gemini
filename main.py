@@ -83,20 +83,21 @@ You receive short-term intelligence collected by specialized sub-agents and quan
 7. Analyst Agent: Wall Street consensus, mean target price, and recent rating actions from major investment banks (BofA, Barclays, Credit Suisse, DB, Evercore, Goldman, JPM, Morgan Stanley, UBS).
 
 Your Task:
-Synthesize the quantitative scores and insights from all specialized sub-agents to forecast relative performance over the next 20 trading sessions (about one month) and assess whether a trade is actionable.
+Synthesize the quantitative scores and insights from all specialized sub-agents to forecast relative performance over the next 20 trading sessions (about one month) and determine a definitive directional recommendation (strictly either BUY or SELL; no HOLD). This recommendation is stored in the database for testing forward accuracy against next month's price.
 
 Rules & Guidelines:
 1. Ignore stale long-term macro narratives that are already priced in, but incorporate macro yield curve & CFTC positioning context.
 2. Ground your decision in the Deterministic Quant Score and ML 20-Session Score (Decision Composite).
 3. Synthesize Quantitative Scores + Institutional/SEC filings + Macro FRED/COT data + News Agent impact + Market Agent momentum + Risk Agent factors + Analyst Agent bank ratings.
-3. Return a valid JSON object matching the requested schema.
+4. Output strictly either "BUY" or "SELL" for testing workflow accuracy. Do NOT output "HOLD". Even if evidence is balanced, break the tie directionally.
+5. Return a valid JSON object matching the requested schema.
 
 Schema:
 {
   "stock": "Ticker Symbol",
-  "decision": "BUY|SELL|HOLD",
+  "decision": "BUY|SELL",
   "confidence": 0.85,
-  "decision_reasoning": "Detailed expert rationale explaining exactly why this decision (BUY, SELL, HOLD) was reached, synthesizing quantitative scores, technical action, risk factors, and catalysts",
+  "decision_reasoning": "Detailed expert rationale explaining exactly why this directional decision (BUY or SELL) was reached, synthesizing quantitative scores, technical action, risk factors, and catalysts",
   "reason": "Short-term swing setup rationale synthesizing Market, Institutional, Macro, News, Risk & Analyst Agent insights",
   "institutional_data": "Summary of SEC EDGAR insider & institutional filing activity from Institutional Data Agent",
   "macro_data": "Summary of FRED yield curve/interest rates & CFTC COT positioning from Macro Data Agent",
@@ -231,7 +232,7 @@ def normalize_master_trader_json(
     sell_score = _to_float(data.get("sell_score"), 0.0)
 
     # Normalize Decision (5-State Taxonomy: BUY, DEEP BUY, HOLD, BOOK PROFIT, SELL)
-    raw_dec = str(data.get("decision") or data.get("recommendation") or data.get("signal") or "HOLD").upper()
+    raw_dec = str(data.get("decision") or data.get("recommendation") or data.get("signal") or "").upper()
     if "DEEP BUY" in raw_dec or "DIP BUY" in raw_dec or "DEEP_BUY" in raw_dec or "DIP_BUY" in raw_dec:
         decision = "DEEP BUY"
     elif "BOOK PROFIT" in raw_dec or "TAKE PROFIT" in raw_dec or "BOOK_PROFIT" in raw_dec or "TAKE_PROFIT" in raw_dec or "PROFIT_TAKING" in raw_dec:
@@ -240,10 +241,13 @@ def normalize_master_trader_json(
         decision = "BUY"
     elif "SELL" in raw_dec:
         decision = "SELL"
-    else:
+    elif "HOLD" in raw_dec:
         decision = "HOLD"
+    else:
+        decision = "BUY" if buy_score >= sell_score else "SELL"
     original_decision = decision
     model_decision = decision  # Preserved as explicit separate model suggestion (Step 2 Contract)
+    test_decision = "BUY" if model_decision in ("BUY", "DEEP BUY") or (model_decision == "HOLD" and buy_score >= sell_score) else "SELL"
     decision_origin = "MODEL"
 
     # Normalize model confidence -- kept as a reference; the authoritative `confidence`
@@ -1266,6 +1270,7 @@ def normalize_master_trader_json(
         "decision": final_decision,
         "final_decision": final_decision,
         "model_decision": model_decision,
+        "test_decision": test_decision,
         "candidate_action": candidate_action,
         "candidate_type": candidate_type,
         "setup_evidence": setup_evidence,
@@ -1728,6 +1733,7 @@ def main():
                         require_forecast_20d=True,
                         expected_ticker=symbol,
                         valid_document_ids=retrieved_doc_ids,
+                        require_binary_decision=True,
                     )
 
                     # One constrained corrective retry on strict schema violations.
@@ -1740,11 +1746,11 @@ def main():
                             "Your previous response failed strict schema validation. Correct EVERY "
                             "violation below and return ONLY a single valid JSON object with the required schema fields:\n"
                             f"- stock: \"{symbol}\"\n"
-                            "- decision: \"BUY\", \"HOLD\", or \"SELL\"\n"
+                            "- decision: strictly \"BUY\" or \"SELL\" (no HOLD permitted for accuracy testing)\n"
                             "- decision_reasoning: detailed explanation string explaining why this decision was reached\n"
                             "- primary_driver: \"QUANT_STRUCTURE\", \"FUNDAMENTAL\", \"NEWS_CATALYST\", \"MACRO_EVENT\", or \"EARNINGS_CATALYST\"\n"
                             "- confidence: float between 0.0 and 1.0\n"
-                            "- buy_score, hold_score, sell_score: floats between 0.0 and 1.0 summing to 1.0\n"
+                            "- buy_score, hold_score, sell_score: floats between 0.0 and 1.0 summing to 1.0 (with hold_score: 0.0)\n"
                             "- horizon_days: 20\n"
                             "- horizon_sessions: 20\n"
                             "- quant_score: float between 0.0 and 100.0\n"
@@ -1783,6 +1789,7 @@ def main():
                                 require_forecast_20d=True,
                                 expected_ticker=symbol,
                                 valid_document_ids=retrieved_doc_ids,
+                                require_binary_decision=True,
                             )
 
                     if not errors:

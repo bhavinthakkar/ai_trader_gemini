@@ -135,6 +135,7 @@ def init_db(db_path=DB_PATH):
             "gate_results": "TEXT",
             "rejection_reasons": "TEXT",
             "final_decision": "TEXT",
+            "test_decision": "TEXT",
             "decision_reasoning": "TEXT"
         }
 
@@ -492,6 +493,16 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
 
             # Explicit Decision Contract (Step 2)
             model_decision = _ensure_str(item.get("model_decision") or decision, "HOLD")
+            raw_test_dec = str(item.get("test_decision") or model_decision).upper()
+            if "BUY" in raw_test_dec:
+                test_decision = "BUY"
+            elif "SELL" in raw_test_dec:
+                test_decision = "SELL"
+            else:
+                b_val = _to_float(item.get("buy_score"), 0.0)
+                s_val = _to_float(item.get("sell_score"), 0.0)
+                test_decision = "BUY" if b_val >= s_val else "SELL"
+
             candidate_action = _ensure_str(item.get("candidate_action"), "")
             candidate_type = _ensure_str(item.get("candidate_type"), "")
             setup_evidence = _ensure_str(item.get("setup_evidence") or {})
@@ -533,8 +544,8 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                     run_id, model_status, passed_gates, failed_gates, data_quality_status, position_action, reason_codes, structured_decision,
                     danelfin_score, danelfin_signal, danelfin_details,
                     model_decision, candidate_action, candidate_type, setup_evidence, gate_results, rejection_reasons, final_decision,
-                    decision_reasoning
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    decision_reasoning, test_decision
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 timestamp, stock, decision, confidence, reason, inst_data, macro_data, news,
                 bank_coverage, risk_info, pe_peg, model_used, raw_json,
@@ -557,7 +568,7 @@ def save_results(results: list, model_used: str = "Gemini 3.6 Flash", db_path=DB
                 run_id, model_status, passed_gates, failed_gates, data_quality_status, position_action, reason_codes, structured_decision,
                 danelfin_score, danelfin_signal, danelfin_details,
                 model_decision, candidate_action, candidate_type, setup_evidence, gate_results, rejection_reasons, final_decision,
-                decision_reasoning
+                decision_reasoning, test_decision
             ))
 
             signal_id = cursor.lastrowid
@@ -890,10 +901,13 @@ def delete_signals_older_than(days: int = 7, db_path=DB_PATH) -> int:
 
 
 
-def update_signal_outcomes(db_path=DB_PATH) -> int:
+def update_signal_outcomes(db_path=DB_PATH, min_bars: int = None, force: bool = False) -> int:
     """
     Evaluates past trading signals against forward market price action using yfinance.
     Calculates realized return %, max runup %, max drawdown %, and profit status.
+    Prioritizes testing recommendation (model_decision) to evaluate directional workflow accuracy.
+    Waits until the 20-session / 1-month forward horizon has completed (or 28+ calendar days passed)
+    unless force=True, ensuring accuracy is tested at the end of next month against future price.
     Returns the number of signals evaluated.
     """
     import yfinance as yf
@@ -906,7 +920,7 @@ def update_signal_outcomes(db_path=DB_PATH) -> int:
         cursor = conn.cursor()
         # Find signals with entry_price that don't have an outcome record yet
         cursor.execute("""
-            SELECT s.id, s.timestamp, s.symbol, s.decision, s.entry_price,
+            SELECT s.id, s.timestamp, s.symbol, s.decision, s.model_decision, s.entry_price,
                    s.stop_loss_price, s.target_price, s.horizon_days
             FROM signals s
             LEFT JOIN signal_outcomes o ON s.id = o.signal_id
@@ -924,11 +938,18 @@ def update_signal_outcomes(db_path=DB_PATH) -> int:
             sig_id = row["id"]
             sig_time_str = row["timestamp"]
             symbol = row["symbol"]
-            decision = str(row["decision"]).upper()
+            # Prioritize model_decision (the LLM's binary testing recommendation) over gated decision
+            raw_dec = str(row["model_decision"] or row["decision"]).upper()
+            if "BUY" in raw_dec:
+                decision = "BUY"
+            elif "SELL" in raw_dec:
+                decision = "SELL"
+            else:
+                decision = "HOLD"
             entry_price = float(row["entry_price"])
             stop_loss = row["stop_loss_price"]
             target_price = row["target_price"]
-            horizon_days = int(row["horizon_days"] or 10)
+            horizon_days = int(row["horizon_days"] or 20)
 
             try:
                 sig_dt = datetime.strptime(sig_time_str, "%Y-%m-%d %H:%M:%S")
@@ -938,8 +959,11 @@ def update_signal_outcomes(db_path=DB_PATH) -> int:
                 except Exception:
                     continue
 
+            elapsed_seconds = (now - sig_dt).total_seconds()
+            elapsed_days = elapsed_seconds / 86400.0
+
             # Need at least 1 day elapsed to evaluate forward price action
-            if (now - sig_dt).total_seconds() < 86400:
+            if elapsed_seconds < 86400:
                 continue
 
             try:
@@ -953,6 +977,12 @@ def update_signal_outcomes(db_path=DB_PATH) -> int:
                 # Bars strictly after signal date
                 eval_bars = hist.iloc[1:horizon_days + 1]
                 if eval_bars.empty:
+                    continue
+
+                # For testing signals: wait until full horizon bars have completed (or 28+ days elapsed),
+                # unless force=True or explicit min_bars condition met, ensuring accuracy is evaluated at end of next month
+                req_bars = min_bars if min_bars is not None else horizon_days
+                if not force and len(eval_bars) < req_bars and elapsed_days < 28.0:
                     continue
 
                 exit_price = round(float(eval_bars["Close"].iloc[-1]), 2)
@@ -1073,6 +1103,27 @@ def get_outcome_performance_stats(db_path=DB_PATH) -> dict:
             "profitable_trades": profitable,
             "losing_trades": total - profitable
         }
+
+
+def get_pending_signals(db_path=DB_PATH, limit: int = 50) -> list:
+    """
+    Returns signals currently maturing for forward outcome evaluation (no outcome record yet).
+    """
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT s.id, s.timestamp, s.symbol, s.decision, s.model_decision,
+                   s.entry_price, s.target_price, s.stop_loss_price, s.horizon_days,
+                   s.confidence, s.quant_score, s.model_used
+            FROM signals s
+            LEFT JOIN signal_outcomes o ON s.id = o.signal_id
+            WHERE o.id IS NULL AND s.entry_price IS NOT NULL AND s.entry_price > 0
+            ORDER BY s.timestamp DESC, s.id DESC
+            LIMIT ?;
+        """, (limit,))
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows]
 
 
 # =============================================================================

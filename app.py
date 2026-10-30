@@ -12,7 +12,8 @@ from db import (
     get_outcome_performance_stats,
     get_latest_portfolio_reviews,
     delete_signals_older_than,
-    get_shadow_decisions
+    get_shadow_decisions,
+    get_pending_signals
 )
 from dashboard import collect_dashboard_data, format_volume
 from ticker_resolver import resolve_symbol, is_european_symbol, get_currency_for_symbol
@@ -1399,6 +1400,32 @@ with tab6:
         st.dataframe(df_outcomes, width="stretch", hide_index=True)
     else:
         st.info("No trade outcomes evaluated yet. New 20-session signals are evaluated after 20 forward trading bars; older signals use their recorded horizon.")
+
+    st.markdown("---")
+    st.subheader("⏳ Forward Signals Maturing for End-of-Month Accuracy Testing")
+    st.caption("Active BUY/SELL recommendations recorded in the database awaiting the forward 20-session (~1 month) evaluation horizon.")
+    pending_sigs = get_pending_signals(limit=50)
+    if pending_sigs:
+        df_pending = pd.DataFrame(pending_sigs)
+        df_pending["Model Recommendation"] = df_pending.apply(
+            lambda r: "🟢 BUY" if "BUY" in str(r.get("model_decision") or r.get("decision") or "").upper()
+            else ("🔴 SELL" if "SELL" in str(r.get("model_decision") or r.get("decision") or "").upper() else "⚪ HOLD"),
+            axis=1
+        )
+        cols = ["timestamp", "symbol", "Model Recommendation", "entry_price", "target_price", "stop_loss_price", "horizon_days", "model_used"]
+        available_cols = [c for c in cols if c in df_pending.columns]
+        df_pending_display = df_pending[available_cols].rename(columns={
+            "timestamp": "Signal Date",
+            "symbol": "Ticker",
+            "entry_price": "Entry Price",
+            "target_price": "Target Price",
+            "stop_loss_price": "Stop Loss",
+            "horizon_days": "Horizon (Sessions)",
+            "model_used": "Model",
+        })
+        st.dataframe(df_pending_display, width="stretch", hide_index=True)
+    else:
+        st.info("No forward testing signals pending evaluation.")
 
 with tab7:
     st.subheader("📁 Portfolio Risk Review (Investment-Committee Memo)")

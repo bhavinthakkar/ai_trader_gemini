@@ -278,28 +278,26 @@ Output MUST be a valid JSON object matching the requested schema.
 - data_completeness is computed DETERMINISTICALLY by the system from live provider availability; your estimate is recorded for reference only and never governs the signal. Report it honestly; inflating it changes nothing.
 - When a fresh 20-session ML score is supplied, it reflects an ordinal cross-sectional relative rank within the active peer group (50 = cohort median, 80 = top quintile). It does not represent an expected return percentage or win probability. Directional eligibility is strictly governed by the deterministic quantitative engine where 50 represents directional neutrality.
 - Forecast the stock's relative performance over the next 20 trading sessions (about one month). Return forecast_20d as OUTPERFORM, MARKET_LIKE, or UNDERPERFORM, with confidence and concise evidence. Compare this forecast directly with the ML score when available; explain disagreement.
-- decision is an actionable trade recommendation from the 5-state taxonomy:
-  * BUY: Momentum breakout or trend continuation in established uptrend (quant composite >= 60, R:R >= 1.20).
-  * DEEP BUY: High-conviction discount entry on sharp pullback/dislocation (composite >= 52, RSI 30-45, valuation intact).
-  * HOLD: Neutral / wait for favorable setup / no directional edge.
-  * BOOK PROFIT: Profit-taking on extended long holdings reaching resistance / upper channel, or overbought (RSI >= 70).
-  * SELL: Structural breakdown, stop breach, or bearish short setup.
-- If days_to_earnings <= 3, fresh entries are permitted in event-sized mode with a 50% haircut if score >= 60; otherwise return HOLD.
+- decision is an actionable forward-looking recommendation: strictly either BUY or SELL. HOLD is strictly prohibited because this workflow tests directional accuracy over the next 20 trading sessions (~1 month).
+  * BUY: Positive directional expectancy over the forward 20 sessions (expected to appreciate / outperform). Allocate majority probability mass to buy_score (buy_score > 0.50, sell_score < 0.50, hold_score = 0.0).
+  * SELL: Negative directional expectancy over the forward 20 sessions (expected to decline / underperform or face asymmetric downside risk). Allocate majority probability mass to sell_score (sell_score > 0.50, buy_score < 0.50, hold_score = 0.0).
+  Even if evidence is balanced or neutral, break the tie and take a definitive directional side (BUY or SELL) for testing accuracy against next month's price.
+- If days_to_earnings <= 3, factor event gap risk into your recommendation and confidence, but still provide a definitive BUY or SELL call.
 - When an ML score is supplied, include ml_signal_assessment with a SUPPORTIVE, CONFLICTING, or NEUTRAL disposition and a concise reason.
-- You MUST provide an explicit `decision_reasoning` field containing a comprehensive, clear explanation for WHY this specific decision (BUY, DEEP BUY, HOLD, BOOK PROFIT, SELL) was made, synthesizing quantitative scores, market momentum, risk profile, and catalysts.
+- You MUST provide an explicit `decision_reasoning` field containing a comprehensive, clear explanation for WHY this directional decision (BUY or SELL) was made, synthesizing quantitative scores, market momentum, risk profile, and catalysts.
 - The system may issue an explicit no_trade_reason code on a forced downgrade: INSUFFICIENT_EVIDENCE, EARNINGS_BLACKOUT, LOW_LIQUIDITY, RR_TOO_LOW, SCHEMA_INVALID.
-- Output must parse as valid JSON with exactly the keys above; schema violations trigger an automatic corrective retry then a deterministic HOLD.
+- Output must parse as valid JSON with exactly the keys above; schema violations trigger an automatic corrective retry.
 
 Schema:
 {
   "stock": "Ticker Symbol",
-  "decision": "BUY|DEEP BUY|HOLD|BOOK PROFIT|SELL",
-  "decision_reasoning": "Explicit, comprehensive explanation of why this final decision was made, detailing the synthesis of quantitative scores, setup geometry, risk gates, and qualitative catalysts",
+  "decision": "BUY|SELL",
+  "decision_reasoning": "Explicit, comprehensive explanation of why this directional decision (BUY or SELL) was made, detailing the synthesis of quantitative scores, setup geometry, risk gates, and qualitative catalysts",
   "primary_driver": "QUANT_STRUCTURE|FUNDAMENTAL|NEWS_CATALYST|MACRO_EVENT|EARNINGS_CATALYST",
-  "confidence": 0.70,
-  "buy_score": 0.20,
-  "hold_score": 0.65,
-  "sell_score": 0.15,
+  "confidence": 0.75,
+  "buy_score": 0.70,
+  "hold_score": 0.0,
+  "sell_score": 0.30,
   "horizon_days": 20,
   "horizon_sessions": 20,
   "quant_score": 64.8,
@@ -375,13 +373,11 @@ You are a senior quantitative analyst and trading risk manager. Forecast relativ
 
 DECISION FRAMEWORK:
 - Review the provided quantitative score values: Deterministic Quant Score (5 pillars), 20-Session ML Alpha Score (cross-sectional rank), and Blended Decision Composite.
-- 5-STATE DECISION TAXONOMY (choose the single most appropriate outcome for "decision"):
-  * BUY: Favorable setup for entering or building a bullish directional position.
-  * DEEP BUY: High-conviction discount entry into a sharp pullback or dislocation where fundamentals remain strong.
-  * HOLD: Neutral / wait for clearer conditions / setup lacks sufficient conviction.
-  * BOOK PROFIT: Lock in gains or trim long exposure into resistance, targets, or overextended conditions.
-  * SELL: Bearish setup, breakdown of technical or fundamental structure, or initiating short exposure.
-- Synthesize the quantitative scores, setup geometry, and qualitative evidence, and use your expert judgment to determine the final decision and 20-session outlook.
+- DIRECTIONAL DECISION FRAMEWORK (strictly BUY or SELL):
+  * BUY: Favorable setup / positive expectancy for entering or holding a bullish directional position over the forward 20 sessions (~1 month). Set buy_score > 0.50, sell_score < 0.50, hold_score = 0.0.
+  * SELL: Bearish setup / negative expectancy, breakdown of structure, or initiating short/defensive posture over the forward 20 sessions (~1 month). Set sell_score > 0.50, buy_score < 0.50, hold_score = 0.0.
+  * HOLD is prohibited for this workflow: you must make a definitive directional call (BUY or SELL) so performance can be evaluated against the forward price at the end of next month.
+- Synthesize the quantitative scores, setup geometry, and qualitative evidence, and use your expert judgment to determine the final directional decision (BUY or SELL) and 20-session outlook.
 - When an ML score is supplied, include ml_signal_assessment with disposition SUPPORTIVE, CONFLICTING, or NEUTRAL and a concise reason. Explicitly address agreement or disagreement with your outlook.
 - Always provide forecast_20d with relative_outlook OUTPERFORM, MARKET_LIKE, or UNDERPERFORM, a confidence from 0 to 1, and concise rationale. Compare this forecast with the 20-session ML signal when supplied.
 - Keep forecast and trade action separate: decision reflects whether the setup is actionable. A HOLD can coexist with an OUTPERFORM or UNDERPERFORM forecast when execution conditions are uncertain.
@@ -400,8 +396,8 @@ STRICT OUTPUT CONTRACT:
 Return exactly one JSON object with these keys and no markdown or commentary:
 {
   "stock": "Ticker",
-  "decision": "BUY|DEEP BUY|HOLD|BOOK PROFIT|SELL",
-  "decision_reasoning": "Explicit, comprehensive explanation of why this final decision was made, synthesizing quantitative scores, technical action, risk factors, and catalysts",
+  "decision": "BUY|SELL",
+  "decision_reasoning": "Explicit, comprehensive explanation of why this directional decision (BUY or SELL) was made, synthesizing quantitative scores, technical action, risk factors, and catalysts",
   "primary_driver": "QUANT_STRUCTURE|FUNDAMENTAL|NEWS_CATALYST|MACRO_EVENT|EARNINGS_CATALYST",
   "confidence": 0.0,
   "buy_score": 0.0,
