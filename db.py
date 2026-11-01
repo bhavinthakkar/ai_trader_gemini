@@ -762,7 +762,7 @@ def _enrich_signal_dict(s: dict) -> dict:
             pass
 
     # Deserialize structured decision columns (Step 6.4)
-    for json_col in ("passed_gates", "failed_gates", "reason_codes", "structured_decision"):
+    for json_col in ("passed_gates", "failed_gates", "reason_codes", "rejection_reasons", "structured_decision"):
         val = s.get(json_col)
         if val and isinstance(val, str):
             try:

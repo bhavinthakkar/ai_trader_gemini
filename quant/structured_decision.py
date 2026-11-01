@@ -174,6 +174,14 @@ class StructuredDecision:
     rejection_reasons: List[str] = field(default_factory=list)
 
     def __post_init__(self):
+        if self.reason_codes is None or not isinstance(self.reason_codes, (list, tuple, set)):
+            self.reason_codes = []
+        if self.rejection_reasons is None or not isinstance(self.rejection_reasons, (list, tuple, set)):
+            self.rejection_reasons = []
+        if self.failed_gates is None or not isinstance(self.failed_gates, (list, tuple, set)):
+            self.failed_gates = []
+        if self.passed_gates is None or not isinstance(self.passed_gates, (list, tuple, set)):
+            self.passed_gates = []
         if not self.timestamp:
             self.timestamp = datetime.now(timezone.utc).isoformat()
         if self.composite_score is not None:

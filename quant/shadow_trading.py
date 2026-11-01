@@ -138,6 +138,13 @@ class ShadowDecisionRecord:
     hit_stop: Optional[bool] = None
     is_profitable: Optional[bool] = None
 
+    def __post_init__(self):
+        from quant.compliance_gates import _parse_list_field
+        self.passed_gates = _parse_list_field(self.passed_gates)
+        self.failed_gates = _parse_list_field(self.failed_gates)
+        self.reason_codes = _parse_list_field(self.reason_codes)
+        self.rejection_reasons = _parse_list_field(self.rejection_reasons)
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
@@ -793,7 +800,8 @@ class ShadowMetricsAnalyzer:
 
         gate_breakdown: Dict[str, int] = {}
         for r in records:
-            for g in r.failed_gates:
+            failed_list = r.failed_gates if isinstance(r.failed_gates, (list, tuple, set)) else []
+            for g in failed_list:
                 gate_breakdown[g] = gate_breakdown.get(g, 0) + 1
 
         cert_eval = [r.realized_forward_return_pct for r in eval_records if r.is_order_proposed]

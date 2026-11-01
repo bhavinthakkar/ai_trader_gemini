@@ -25,6 +25,8 @@ from quant.compliance_gates import (
     format_model_recommendation,
     format_executed_action,
     NON_VETO_REASON_CODES,
+    parse_list_field,
+    clean_str_field,
 )
 from quant.shadow_trading import (
     ShadowDecisionRecord,
@@ -527,7 +529,18 @@ with tab1:
             df_display["model_rec_col"] = df_display.apply(format_model_recommendation, axis=1)
             df_display["compliance_gate_col"] = df_display.apply(format_compliance_gate_action, axis=1)
             df_display["final_action_col"] = df_display.apply(format_executed_action, axis=1)
-            df_display["decision_reasoning_col"] = df_display.apply(lambda r: r.get("decision_reasoning") or r.get("reason") or "—", axis=1)
+            df_display["decision_reasoning_col"] = df_display.apply(
+                lambda r: (
+                    r.get("decision_reasoning")
+                    if pd.notna(r.get("decision_reasoning")) and str(r.get("decision_reasoning")).strip()
+                    else (
+                        r.get("reason")
+                        if pd.notna(r.get("reason")) and str(r.get("reason")).strip()
+                        else "—"
+                    )
+                ),
+                axis=1,
+            )
             df_display["ml_indicator_col"] = df_display.apply(format_ml_signal_display, axis=1)
             df_display["ml_score_col"] = df_display.apply(format_ml_score_display, axis=1)
 
@@ -681,18 +694,11 @@ with tab2:
                 st.markdown(f"**Final Action:** `{final_act}`")
 
                 if vetoed:
-                    reasons = stock_data.get("rejection_reasons") or stock_data.get("reason_codes")
-                    clean_reasons = []
-                    if reasons:
-                        if isinstance(reasons, str):
-                            try:
-                                reasons = json.loads(reasons)
-                            except Exception:
-                                reasons = [reasons]
-                        clean_reasons = [r for r in reasons if r not in NON_VETO_REASON_CODES]
+                    reasons = parse_list_field(stock_data.get("rejection_reasons")) or parse_list_field(stock_data.get("reason_codes"))
+                    clean_reasons = [r for r in reasons if r not in NON_VETO_REASON_CODES]
                     if clean_reasons:
                         st.caption(f"Veto: {', '.join(clean_reasons)}")
-                elif stock_data.get("no_trade_reason"):
+                elif stock_data.get("no_trade_reason") and pd.notna(stock_data.get("no_trade_reason")):
                     st.caption(f"Reason: {stock_data['no_trade_reason']}")
             with c2:
                 conf = stock_data.get("confidence", 0.0)
@@ -964,14 +970,18 @@ with tab2:
             # 🛡️ Structured Decision & Policy Compliance Gates (Step 6.4 & 7.2)
             # =====================================================================
             st.markdown("#### 🛡️ Structured Decision & Policy Compliance Gates")
-            pos_action = stock_data.get("position_action") or "NO_ACTION"
-            passed_g = stock_data.get("passed_gates") or []
-            failed_g = stock_data.get("failed_gates") or []
-            r_codes = stock_data.get("reason_codes") or []
-            sizing_data = stock_data.get("position_sizing") or {}
+            pos_action = clean_str_field(stock_data.get("position_action")) or "NO_ACTION"
+            passed_g = parse_list_field(stock_data.get("passed_gates"))
+            failed_g = parse_list_field(stock_data.get("failed_gates"))
+            r_codes = parse_list_field(stock_data.get("reason_codes"))
+            sizing_data = stock_data.get("position_sizing")
+            if not isinstance(sizing_data, dict):
+                sizing_data = {}
             if not sizing_data and stock_data.get("raw_json"):
                 try:
-                    sizing_data = json.loads(stock_data["raw_json"]).get("position_sizing") or {}
+                    parsed_raw = json.loads(stock_data["raw_json"]) if isinstance(stock_data["raw_json"], str) else stock_data["raw_json"]
+                    if isinstance(parsed_raw, dict):
+                        sizing_data = parsed_raw.get("position_sizing") or {}
                 except Exception:
                     pass
 
@@ -1407,11 +1417,7 @@ with tab6:
     pending_sigs = get_pending_signals(limit=50)
     if pending_sigs:
         df_pending = pd.DataFrame(pending_sigs)
-        df_pending["Model Recommendation"] = df_pending.apply(
-            lambda r: "🟢 BUY" if "BUY" in str(r.get("model_decision") or r.get("decision") or "").upper()
-            else ("🔴 SELL" if "SELL" in str(r.get("model_decision") or r.get("decision") or "").upper() else "⚪ HOLD"),
-            axis=1
-        )
+        df_pending["Model Recommendation"] = df_pending.apply(format_model_recommendation, axis=1)
         cols = ["timestamp", "symbol", "Model Recommendation", "entry_price", "target_price", "stop_loss_price", "horizon_days", "model_used"]
         available_cols = [c for c in cols if c in df_pending.columns]
         df_pending_display = df_pending[available_cols].rename(columns={
@@ -1586,9 +1592,9 @@ with tab8:
                 entry_price=r.get("entry_price"),
                 suggested_stop_loss=r.get("suggested_stop_loss"),
                 suggested_target_price=r.get("suggested_target_price"),
-                passed_gates=r.get("passed_gates") or [],
-                failed_gates=r.get("failed_gates") or [],
-                reason_codes=r.get("reason_codes") or [],
+                passed_gates=parse_list_field(r.get("passed_gates")),
+                failed_gates=parse_list_field(r.get("failed_gates")),
+                reason_codes=parse_list_field(r.get("reason_codes")),
                 proposed_shares=r.get("proposed_shares", 0),
                 binding_constraint=r.get("binding_constraint"),
                 is_order_proposed=bool(r.get("is_order_proposed")),
@@ -1660,9 +1666,9 @@ with tab8:
                 "Sim Fill Price": f"${r.get('simulated_fill_price', 0):.2f}" if r.get("simulated_fill_price") else "N/A",
                 "Slippage": f"{r.get('simulated_slippage_bps', 0):.1f} bps" if r.get("simulated_slippage_bps") is not None else "0 bps",
                 "Status": r.get("simulated_status", "SIMULATED"),
-                "Passed Gates": ", ".join(r.get("passed_gates") or []),
-                "Failed Gates": ", ".join(r.get("failed_gates") or []),
-                "Reason Codes": ", ".join(r.get("reason_codes") or []),
+                "Passed Gates": ", ".join(parse_list_field(r.get("passed_gates"))),
+                "Failed Gates": ", ".join(parse_list_field(r.get("failed_gates"))),
+                "Reason Codes": ", ".join(parse_list_field(r.get("reason_codes"))),
             })
         df_shadow = pd.DataFrame(log_rows)
         st.dataframe(df_shadow, width="stretch", hide_index=True)
@@ -1736,24 +1742,9 @@ with tab9:
         # Format rows for table
         table_rows = []
         for r in filtered_records:
-            passed_g = r.get("passed_gates") or []
-            if isinstance(passed_g, str):
-                try:
-                    passed_g = json.loads(passed_g)
-                except Exception:
-                    passed_g = [passed_g]
-            failed_g = r.get("failed_gates") or []
-            if isinstance(failed_g, str):
-                try:
-                    failed_g = json.loads(failed_g)
-                except Exception:
-                    failed_g = [failed_g]
-            reasons = r.get("reason_codes") or []
-            if isinstance(reasons, str):
-                try:
-                    reasons = json.loads(reasons)
-                except Exception:
-                    reasons = [reasons]
+            passed_g = parse_list_field(r.get("passed_gates"))
+            failed_g = parse_list_field(r.get("failed_gates"))
+            reasons = parse_list_field(r.get("reason_codes"))
 
             gates_str = ""
             if failed_g:

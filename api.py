@@ -50,6 +50,7 @@ from quant.compliance_gates import (
     format_compliance_gate_action,
     format_model_recommendation,
     format_executed_action,
+    parse_list_field,
 )
 from quant.shadow_trading import (
     ShadowTradingEngine,
@@ -510,9 +511,9 @@ def fetch_shadow_metrics(
             entry_price=r.get("entry_price"),
             suggested_stop_loss=r.get("suggested_stop_loss"),
             suggested_target_price=r.get("suggested_target_price"),
-            passed_gates=r.get("passed_gates") or [],
-            failed_gates=r.get("failed_gates") or [],
-            reason_codes=r.get("reason_codes") or [],
+            passed_gates=parse_list_field(r.get("passed_gates")),
+            failed_gates=parse_list_field(r.get("failed_gates")),
+            reason_codes=parse_list_field(r.get("reason_codes")),
             proposed_shares=r.get("proposed_shares", 0),
             binding_constraint=r.get("binding_constraint"),
             is_order_proposed=bool(r.get("is_order_proposed")),

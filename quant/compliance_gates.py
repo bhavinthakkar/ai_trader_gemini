@@ -1066,33 +1066,80 @@ NON_VETO_REASON_CODES = {
 }
 
 
+def _clean_str_field(val: Any) -> str:
+    """Safely extracts a non-empty string, ignoring None, NaN, and 'nan'/'none' strings."""
+    if val is None:
+        return ""
+    if isinstance(val, float) and math.isnan(val):
+        return ""
+    s = str(val).strip()
+    if s.lower() in ("nan", "none", "null"):
+        return ""
+    return s
+
+
+def _parse_list_field(val: Any) -> List[str]:
+    """Safely normalizes input to a list of strings, handling NaN, JSON strings, lists, tuples, sets."""
+    if val is None:
+        return []
+    if isinstance(val, float) and math.isnan(val):
+        return []
+    if isinstance(val, (list, tuple, set)):
+        items = []
+        for x in val:
+            if x is None or (isinstance(x, float) and math.isnan(x)):
+                continue
+            sx = str(x).strip()
+            if sx and sx.lower() not in ("nan", "none", "null"):
+                items.append(sx)
+        return items
+    if isinstance(val, str):
+        val = val.strip()
+        if not val or val.lower() in ("nan", "none", "null"):
+            return []
+        try:
+            parsed = json.loads(val)
+            if isinstance(parsed, (list, tuple, set)):
+                items = []
+                for x in parsed:
+                    if x is None or (isinstance(x, float) and math.isnan(x)):
+                        continue
+                    sx = str(x).strip()
+                    if sx and sx.lower() not in ("nan", "none", "null"):
+                        items.append(sx)
+                return items
+            if parsed is not None and not (isinstance(parsed, float) and math.isnan(parsed)):
+                sp = str(parsed).strip()
+                return [sp] if sp and sp.lower() not in ("nan", "none", "null") else []
+        except Exception:
+            return [val]
+    return []
+
+
+parse_list_field = _parse_list_field
+clean_str_field = _clean_str_field
+
+
 def is_signal_vetoed(signal: Dict[str, Any]) -> bool:
     """True if a directional model decision was blocked/vetoed by compliance safety gates."""
     if hasattr(signal, "to_dict"):
         signal = signal.to_dict()
     if not isinstance(signal, dict):
         return False
-    origin = str(signal.get("decision_origin") or "").upper()
+
+    origin = _clean_str_field(signal.get("decision_origin")).upper()
     if origin == "GATE":
         return True
 
-    failed = signal.get("failed_gates") or []
-    if isinstance(failed, str):
-        try:
-            failed = json.loads(failed)
-        except Exception:
-            failed = [failed] if failed else []
+    failed = _parse_list_field(signal.get("failed_gates"))
 
-    reasons = signal.get("rejection_reasons") or signal.get("reason_codes") or []
-    if isinstance(reasons, str):
-        try:
-            reasons = json.loads(reasons)
-        except Exception:
-            reasons = [reasons] if reasons else []
+    reasons = _parse_list_field(signal.get("rejection_reasons"))
+    if not reasons:
+        reasons = _parse_list_field(signal.get("reason_codes"))
 
     clean_reasons = [r for r in reasons if r not in NON_VETO_REASON_CODES]
-    model_dec = str(signal.get("model_decision") or signal.get("decision") or "").upper()
-    final_dec = str(signal.get("final_decision") or signal.get("decision") or "").upper()
+    model_dec = (_clean_str_field(signal.get("model_decision")) or _clean_str_field(signal.get("decision"))).upper()
+    final_dec = (_clean_str_field(signal.get("final_decision")) or _clean_str_field(signal.get("decision"))).upper()
 
     if failed:
         return True
@@ -1123,27 +1170,20 @@ def format_compliance_gate_action(signal: Dict[str, Any]) -> str:
     if not is_signal_vetoed(signal):
         return "🟢 PASSED"
 
-    reasons = signal.get("rejection_reasons") or signal.get("reason_codes") or []
-    if isinstance(reasons, str):
-        try:
-            reasons = json.loads(reasons)
-        except Exception:
-            reasons = [reasons] if reasons else []
+    reasons = _parse_list_field(signal.get("rejection_reasons"))
+    if not reasons:
+        reasons = _parse_list_field(signal.get("reason_codes"))
     clean_reasons = [r for r in reasons if r not in NON_VETO_REASON_CODES]
 
-    failed = signal.get("failed_gates") or []
-    if isinstance(failed, str):
-        try:
-            failed = json.loads(failed)
-        except Exception:
-            failed = [failed] if failed else []
+    failed = _parse_list_field(signal.get("failed_gates"))
 
     if clean_reasons:
         veto_code = clean_reasons[0]
     elif failed:
         veto_code = failed[0]
     else:
-        veto_code = signal.get("no_trade_reason") or "RISK_VETO"
+        no_trade = _clean_str_field(signal.get("no_trade_reason"))
+        veto_code = no_trade if no_trade else "RISK_VETO"
 
     return f"🛡️ VETO: {veto_code}"
 
@@ -1154,7 +1194,11 @@ def format_model_recommendation(signal: Dict[str, Any]) -> str:
         signal = signal.to_dict()
     if not isinstance(signal, dict):
         return "⚪ HOLD"
-    val = str(signal.get("model_decision") or signal.get("decision") or "HOLD").upper()
+    val = (
+        _clean_str_field(signal.get("model_decision"))
+        or _clean_str_field(signal.get("decision"))
+        or "HOLD"
+    ).upper()
     if val in ("BUY", "DEEP BUY"):
         return f"🟢 {val}"
     elif val in ("SELL", "BOOK PROFIT"):
@@ -1168,9 +1212,16 @@ def format_executed_action(signal: Dict[str, Any]) -> str:
         signal = signal.to_dict()
     if not isinstance(signal, dict):
         return "⚪ NO_ACTION"
-    pos = str(signal.get("position_action") or "").upper()
-    final_dec = str(signal.get("final_decision") or signal.get("decision") or "HOLD").upper()
-    model_dec = str(signal.get("model_decision") or "").upper()
+    pos = _clean_str_field(signal.get("position_action")).upper()
+    final_dec = (
+        _clean_str_field(signal.get("final_decision"))
+        or _clean_str_field(signal.get("decision"))
+        or "HOLD"
+    ).upper()
+    model_dec = (
+        _clean_str_field(signal.get("model_decision"))
+        or _clean_str_field(signal.get("decision"))
+    ).upper()
 
     if is_signal_vetoed(signal) or (pos == "NO_ACTION" and model_dec in ("BUY", "SELL", "DEEP BUY", "BOOK PROFIT")):
         return "⚪ NO_ACTION (Vetoed)"

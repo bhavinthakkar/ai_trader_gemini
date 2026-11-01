@@ -331,6 +331,8 @@ class TestDashboard(unittest.TestCase):
             format_executed_action,
         )
 
+        import numpy as np
+
         sample_signal = {
             "symbol": "AAPL",
             "decision": "BUY",
@@ -339,12 +341,27 @@ class TestDashboard(unittest.TestCase):
             "reason": "Strong momentum",
             "ml_score": 75.0,
             "timestamp": "2026-10-30 08:00:00",
+            "rejection_reasons": np.nan,
+            "failed_gates": np.nan,
+            "reason_codes": np.nan,
+            "decision_reasoning": np.nan,
         }
         df_display = pd.DataFrame([sample_signal])
         df_display["model_rec_col"] = df_display.apply(format_model_recommendation, axis=1)
         df_display["compliance_gate_col"] = df_display.apply(format_compliance_gate_action, axis=1)
         df_display["final_action_col"] = df_display.apply(format_executed_action, axis=1)
-        df_display["decision_reasoning_col"] = df_display.apply(lambda r: r.get("decision_reasoning") or r.get("reason") or "—", axis=1)
+        df_display["decision_reasoning_col"] = df_display.apply(
+            lambda r: (
+                r.get("decision_reasoning")
+                if pd.notna(r.get("decision_reasoning")) and str(r.get("decision_reasoning")).strip()
+                else (
+                    r.get("reason")
+                    if pd.notna(r.get("reason")) and str(r.get("reason")).strip()
+                    else "—"
+                )
+            ),
+            axis=1,
+        )
 
         cols_to_use = [
             "symbol",

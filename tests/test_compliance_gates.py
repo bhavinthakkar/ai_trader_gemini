@@ -692,6 +692,126 @@ class TestComplianceGatesSemantics(unittest.TestCase):
         self.assertEqual(format_compliance_gate_action(natural_hold), "🟢 PASSED")
         self.assertEqual(format_executed_action(natural_hold), "⚪ HOLD")
 
+    def test_float_and_nan_tolerance_in_action_formatting(self):
+        """Ensure float('nan') or pandas Series with NaNs do not raise TypeError: 'float' object is not iterable."""
+        import math
+        nan_signal = {
+            "symbol": "TSLA",
+            "model_decision": float("nan"),
+            "decision": "BUY",
+            "final_decision": float("nan"),
+            "decision_origin": float("nan"),
+            "failed_gates": float("nan"),
+            "rejection_reasons": float("nan"),
+            "reason_codes": float("nan"),
+            "position_action": float("nan"),
+        }
+        self.assertFalse(is_signal_vetoed(nan_signal))
+        self.assertEqual(format_compliance_gate_action(nan_signal), "🟢 PASSED")
+        self.assertEqual(format_model_recommendation(nan_signal), "🟢 BUY")
+        self.assertEqual(format_executed_action(nan_signal), "🟢 BUY")
+
+        # Test with pandas DataFrame apply (exact pattern from app.py line 1339)
+        import pandas as pd
+        import numpy as np
+
+        records = [
+            {
+                "id": 1,
+                "symbol": "AAPL",
+                "model_decision": np.nan,
+                "decision": "BUY",
+                "final_decision": np.nan,
+                "failed_gates": np.nan,
+                "rejection_reasons": np.nan,
+                "reason_codes": np.nan,
+            },
+            {
+                "id": 2,
+                "symbol": "INTC",
+                "model_decision": "DEEP BUY",
+                "decision": "HOLD",
+                "final_decision": "HOLD",
+                "failed_gates": '["3. Volatility, Events & Liquidity"]',
+                "rejection_reasons": '["EVENT_RISK_BLACKOUT"]',
+                "reason_codes": np.nan,
+            },
+        ]
+        df = pd.DataFrame(records)
+        df["model_rec_col"] = df.apply(format_model_recommendation, axis=1)
+        df["gate_action_col"] = df.apply(format_compliance_gate_action, axis=1)
+        df["final_action_col"] = df.apply(format_executed_action, axis=1)
+
+        self.assertEqual(df.loc[0, "model_rec_col"], "🟢 BUY")
+        self.assertEqual(df.loc[0, "gate_action_col"], "🟢 PASSED")
+        self.assertEqual(df.loc[0, "final_action_col"], "🟢 BUY")
+
+        self.assertEqual(df.loc[1, "model_rec_col"], "🟢 DEEP BUY")
+        self.assertEqual(df.loc[1, "gate_action_col"], "🛡️ VETO: EVENT_RISK_BLACKOUT")
+        self.assertEqual(df.loc[1, "final_action_col"], "⚪ NO_ACTION (Vetoed)")
+
+    def test_parse_list_field_and_clean_str_field(self):
+        """Test parse_list_field and clean_str_field under edge-case NaN/null inputs."""
+        from quant.compliance_gates import parse_list_field, clean_str_field
+        import numpy as np
+
+        # parse_list_field
+        self.assertEqual(parse_list_field(None), [])
+        self.assertEqual(parse_list_field(float("nan")), [])
+        self.assertEqual(parse_list_field(np.nan), [])
+        self.assertEqual(parse_list_field("nan"), [])
+        self.assertEqual(parse_list_field("none"), [])
+        self.assertEqual(parse_list_field("null"), [])
+        self.assertEqual(parse_list_field(""), [])
+        self.assertEqual(parse_list_field([]), [])
+        self.assertEqual(parse_list_field('["A", "B"]'), ["A", "B"])
+        self.assertEqual(parse_list_field('["A", null, "nan"]'), ["A"])
+        self.assertEqual(parse_list_field(["A", float("nan"), "B"]), ["A", "B"])
+        self.assertEqual(parse_list_field("SINGLE_GATE"), ["SINGLE_GATE"])
+
+        # clean_str_field
+        self.assertEqual(clean_str_field(None), "")
+        self.assertEqual(clean_str_field(float("nan")), "")
+        self.assertEqual(clean_str_field(np.nan), "")
+        self.assertEqual(clean_str_field("nan"), "")
+        self.assertEqual(clean_str_field("None"), "")
+        self.assertEqual(clean_str_field("BUY"), "BUY")
+        self.assertEqual(clean_str_field("  HOLD  "), "HOLD")
+
+    def test_shadow_and_structured_decision_nan_tolerance(self):
+        """Ensure ShadowDecisionRecord and StructuredDecision handle NaN collections cleanly."""
+        import numpy as np
+        from quant.shadow_trading import ShadowDecisionRecord
+        from quant.structured_decision import StructuredDecision
+
+        sdr = ShadowDecisionRecord(
+            session_id="S1",
+            run_id="R1",
+            ticker="AAPL",
+            passed_gates=np.nan,
+            failed_gates=np.nan,
+            reason_codes=np.nan,
+        )
+        self.assertEqual(sdr.passed_gates, [])
+        self.assertEqual(sdr.failed_gates, [])
+        self.assertEqual(sdr.reason_codes, [])
+
+        sd = StructuredDecision(
+            run_id="R1",
+            ticker="MSFT",
+            decision="HOLD",
+            composite_score=50.0,
+            model_status="IN_SCOPE",
+            data_quality_status="VALID",
+            position_action="NO_ACTION",
+            reason_codes=np.nan,
+            failed_gates=np.nan,
+            passed_gates=np.nan,
+        )
+        self.assertEqual(sd.reason_codes, [])
+        self.assertEqual(sd.failed_gates, [])
+        self.assertEqual(sd.passed_gates, [])
+
 
 if __name__ == "__main__":
     unittest.main()
