@@ -1,0 +1,17 @@
+[Unit]
+Description=AI Trader Tailscale Gateway (Serve & Funnel for Streamlit)
+Documentation=https://tailscale.com/kb/1242/tailscale-serve
+After=network-online.target tailscaled.service ai-trader-web.service
+Wants=network-online.target tailscaled.service
+PartOf=ai-trader-web.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'if which tailscale >/dev/null 2>&1; then echo "⚡ Configuring Tailscale Serve & Funnel on port 8501..."; tailscale serve --bg 8501 || true; tailscale funnel --bg 8501 || true; echo "🌐 Active Tailscale Endpoints:"; tailscale funnel status 2>/dev/null || tailscale serve status 2>/dev/null || true; else echo "⚠️ Tailscale not installed; skipping"; fi'
+ExecStop=/bin/sh -c 'which tailscale >/dev/null 2>&1 && tailscale serve reset || true'
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

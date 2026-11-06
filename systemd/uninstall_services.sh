@@ -19,6 +19,8 @@ systemctl stop ai-trader-danelfin-daily.timer 2>/dev/null || true
 systemctl disable ai-trader-danelfin-daily.timer 2>/dev/null || true
 systemctl stop ai-trader-danelfin-first-boot.service 2>/dev/null || true
 systemctl disable ai-trader-danelfin-first-boot.service 2>/dev/null || true
+systemctl stop ai-trader-tailscale.service 2>/dev/null || true
+systemctl disable ai-trader-tailscale.service 2>/dev/null || true
 systemctl stop ai-trader-web.service 2>/dev/null || true
 systemctl disable ai-trader-web.service 2>/dev/null || true
 systemctl stop ai-trader-api.service 2>/dev/null || true
@@ -28,6 +30,7 @@ echo "Removing unit files from /etc/systemd/system/..."
 rm -f /etc/systemd/system/ai-trader-mobile.service
 rm -f /etc/systemd/system/ai-trader-api.service
 rm -f /etc/systemd/system/ai-trader-web.service
+rm -f /etc/systemd/system/ai-trader-tailscale.service
 rm -f /etc/systemd/system/ai-trader-scanner.service
 rm -f /etc/systemd/system/ai-trader-scanner.timer
 rm -f /etc/systemd/system/ai-trader-danelfin-daily.service

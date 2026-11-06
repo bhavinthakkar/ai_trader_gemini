@@ -45,6 +45,16 @@ sed -e "s|{{USER}}|${TARGET_USER}|g" \
     -e "s|{{PROJECT_DIR}}|${PROJECT_DIR}|g" \
     "${SCRIPT_DIR}/ai-trader-web.service" > /etc/systemd/system/ai-trader-web.service
 
+# Configure and install ai-trader-tailscale.service (Serve & Funnel Gateway)
+cp "${SCRIPT_DIR}/ai-trader-tailscale.service" /etc/systemd/system/ai-trader-tailscale.service
+
+TAILSCALE_INSTALLED=false
+if which tailscale >/dev/null 2>&1; then
+    echo "🌐 Configuring Tailscale operator permissions for ${TARGET_USER}..."
+    tailscale set --operator="${TARGET_USER}" 2>/dev/null || true
+    TAILSCALE_INSTALLED=true
+fi
+
 # Configure and install ai-trader-scanner.service & timer
 sed -e "s|{{USER}}|${TARGET_USER}|g" \
     -e "s|{{PROJECT_DIR}}|${PROJECT_DIR}|g" \
@@ -101,6 +111,11 @@ systemctl enable --now ai-trader-api.service
 echo "🟢 Enabling and starting ai-trader-web.service..."
 systemctl enable --now ai-trader-web.service
 
+if [ "$TAILSCALE_INSTALLED" = true ]; then
+    echo "🟢 Enabling and starting ai-trader-tailscale.service (Tailscale Serve & Funnel on port 8501)..."
+    systemctl enable --now ai-trader-tailscale.service
+fi
+
 echo "🟢 Enabling and starting ai-trader-scanner.timer (periodic scans)..."
 systemctl enable --now ai-trader-scanner.timer
 
@@ -122,6 +137,9 @@ echo "============================================================"
 echo " Services configured to automatically start on boot:"
 echo "   1. ai-trader-api.service              (FastAPI REST backend on port 8000)"
 echo "   2. ai-trader-web.service              (Streamlit Web Dashboard on port 8501)"
+if [ "$TAILSCALE_INSTALLED" = true ]; then
+    echo "   •  ai-trader-tailscale.service        (Tailscale Serve & Funnel gateway on port 8501)"
+fi
 echo "   3. ai-trader-scanner.timer            (Periodic market scan runner)"
 echo "   4. ai-trader-danelfin-daily.timer     (Daily Danelfin 25-stock AI analysis)"
 if [ "$MOBILE_INSTALLED" = true ]; then
@@ -131,11 +149,17 @@ echo ""
 echo " Useful management commands:"
 echo "   sudo systemctl status ai-trader-api"
 echo "   sudo systemctl status ai-trader-web"
+if [ "$TAILSCALE_INSTALLED" = true ]; then
+    echo "   sudo systemctl status ai-trader-tailscale"
+fi
 if [ "$MOBILE_INSTALLED" = true ]; then
     echo "   sudo systemctl status ai-trader-mobile"
 fi
 echo "   journalctl -u ai-trader-api -f"
 echo "   journalctl -u ai-trader-web -f"
+if [ "$TAILSCALE_INSTALLED" = true ]; then
+    echo "   journalctl -u ai-trader-tailscale -f"
+fi
 if [ "$MOBILE_INSTALLED" = true ]; then
     echo "   journalctl -u ai-trader-mobile -f"
 fi

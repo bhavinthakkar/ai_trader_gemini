@@ -1,7 +1,7 @@
 [Unit]
 Description=AI Trader Streamlit Web Dashboard
 After=network-online.target ai-trader-api.service
-Wants=network-online.target
+Wants=network-online.target ai-trader-tailscale.service
 
 [Service]
 Type=simple
