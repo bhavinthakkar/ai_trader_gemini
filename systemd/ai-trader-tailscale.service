@@ -8,8 +8,16 @@ PartOf=ai-trader-web.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh -c 'if which tailscale >/dev/null 2>&1; then echo "⚡ Configuring Tailscale Serve & Funnel on port 8501..."; tailscale serve --bg 8501 || true; tailscale funnel --bg 8501 || true; echo "🌐 Active Tailscale Endpoints:"; tailscale funnel status 2>/dev/null || tailscale serve status 2>/dev/null || true; else echo "⚠️ Tailscale not installed; skipping"; fi'
-ExecStop=/bin/sh -c 'which tailscale >/dev/null 2>&1 && tailscale serve reset || true'
+ExecStart=/bin/sh -c '\
+    for i in $(seq 1 15); do \
+        if tailscale ip -4 >/dev/null 2>&1; then break; fi; \
+        echo "Waiting for Tailscale network connection ($i/15)..."; \
+        sleep 2; \
+    done; \
+    echo "⚡ Activating Tailscale Serve & Funnel on port 8501..."; \
+    tailscale serve --bg 8501 || true; \
+    tailscale funnel --bg 8501 || true; \
+    tailscale funnel status || tailscale serve status || true'
 StandardOutput=journal
 StandardError=journal
 
