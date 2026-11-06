@@ -10,6 +10,13 @@ The platform operates on a **Deterministic quantitative-first architecture** pai
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                              AUTOMATED TRIGGERS & RECURRING SCHEDULERS                                 │
+├────────────────────────────────────────────────────┬───────────────────────────────────────────────────┤
+│  • ai-trader-danelfin-daily.timer (Mon-Fri 22:30)  │  • ai-trader-scanner.timer (Every 2h Weekdays)    │
+│  • Danelfin AI Best Stocks Strategy (/v3/beststocks)│  • Real-Time Volume Screener & Movers (dashboard) │
+└─────────────────────────────────────────┬──────────┴───────────────────────────────────────────────────┘
+                                          │
+┌─────────────────────────────────────────▼──────────────────────────────────────────────────────────────┐
 │                                   16-CHANNEL INSTITUTIONAL DATA PIPELINE                                │
 ├────────────────────────────────────────────────────┬───────────────────────────────────────────────────┤
 │  1. Real-Time Market Data (OHLCV, EMAs, RSI, ATR)   │   9. Macro Yield Curve & FRED (10Y, 2Y, TIPS)     │
@@ -111,7 +118,25 @@ The platform operates on a **Deterministic quantitative-first architecture** pai
 │ - Signals & Deep-Dive Inspection │      │ - Real-Time Screener & Deep Dive │
 │ - Structured Decision & Sizing   │      │ - ML Alpha & 5-Pillar Scorecards │
 │ - ⚡ Execution Desk & Kill Switch │      │ - ⚡ Shadow Desk & Promotion Gate │
-└──────────────────────────────────┘      └──────────────────────────────────┘
+└──────────────────────────────────┘      └────────────────┬─────────────────┘
+                                                           │
+                                                           ▼
+                                          ┌──────────────────────────────────┐
+                                          │ Tailscale Gateway Service        │
+                                          │ (ai-trader-tailscale.service)    │
+                                          ├──────────────────────────────────┤
+                                          │ • Serve: Private Tailnet Mesh    │
+                                          │ • Funnel: Public Internet HTTPS  │
+                                          │   (https://<node>.<tailnet>.ts)  │
+                                          └────────────────┬─────────────────┘
+                                                           │
+                          ┌────────────────────────────────┴────────────────────────────────┐
+                          ▼                                                                 ▼
+        ┌──────────────────────────────────┐                              ┌──────────────────────────────────┐
+        │ Tailnet Devices (Encrypted Mesh) │                              │ Remote Browser (Public Internet) │
+        │ - Phone / Laptop via Tailscale   │                              │ - Safari, Chrome on Mobile/PC    │
+        │ - http://<tailscale-ip>:8501     │                              │ - https://*.ts.net (No VPN req.) │
+        └──────────────────────────────────┘                              └──────────────────────────────────┘
 ```
 
 ---
@@ -140,6 +165,13 @@ flowchart TD
     classDef exec fill:#FEF2F2,stroke:#DC2626,stroke-width:1.5px,color:#7F1D1D;
     classDef shadow fill:#FDF4FF,stroke:#9333EA,stroke-width:1.5px,color:#581C87;
     classDef ui fill:#F8FAFC,stroke:#475569,stroke-width:1.5px,color:#0F172A;
+
+    subgraph Schedulers ["Automated Execution Schedulers (systemd)"]
+        SCH1["ai-trader-danelfin-daily.timer (Mon-Fri 22:30 UTC)"]:::blend
+        SCH2["ai-trader-scanner.timer (Every 2h Weekdays)"]:::blend
+    end
+
+    SCH1 & SCH2 --> A1 & C1
 
     subgraph TrackA ["Track A: Deterministic Quant Engine (Step 2)"]
         A1["Market Data (OHLCV, EMAs, RSI, ATR, SPY)"]:::quant --> A2["5-Pillar Scoring & Dynamic Weight Normalization"]:::quant
@@ -198,10 +230,15 @@ flowchart TD
         H3 --> H4["Predefined Promotion Evaluator (PASSED / PENDING / FAILED)"]:::shadow
     end
 
-    subgraph Delivery ["Delivery & Operator Interfaces"]
-        H3 & H4 & G2 & E5 --> U1["FastAPI REST API (api.py)"]:::ui
+    subgraph Delivery ["Delivery & Remote Network Gateway Architecture"]
+        H3 & H4 & G2 & E5 --> U1["FastAPI REST API (api.py :8000)"]:::ui
+        H3 & H4 & G2 & E5 --> U3["Streamlit Web Dashboard (app.py :8501)"]:::ui
         U1 --> U2["React Native Mobile App (App.js)"]:::ui
-        U1 --> U3["Streamlit Web Dashboard (app.py)"]:::ui
+        U3 --> TS["Tailscale Gateway (ai-trader-tailscale.service)"]:::ui
+        TS --> N1["Private Tailnet Mesh (Encrypted WireGuard)"]:::ui
+        TS --> N2["Tailscale Funnel (Public HTTPS: *.ts.net)"]:::ui
+        N1 --> D1["Authorized Tailnet Devices (Pixel 8 Pro, Laptop)"]:::ui
+        N2 --> D2["Remote Browser Anywhere (Safari, Chrome - No VPN)"]:::ui
     end
 ```
 
@@ -817,28 +854,33 @@ Access the dashboard locally at `http://localhost:8501` or via local network at 
 
 ### **🍓 Raspberry Pi & Linux Autostart (systemd)**
 
-To keep the FastAPI REST backend, Streamlit dashboard, daily Danelfin analysis, and Expo Metro bundler running 24/7 across reboots and automatically restart them on crash:
+To keep the FastAPI REST backend, Streamlit dashboard, Tailscale Serve & Funnel gateway, daily Danelfin analysis, and market scanners running 24/7 across reboots and automatically restart them on crash:
 
 ```bash
-# Install and enable all services on boot (API, Web, Scanner Timer, Danelfin Timer, First-Boot Runner, Mobile Bundler)
+# Install and enable all services on boot (API, Web, Tailscale Gateway, Scanner Timer, Danelfin Timer, First-Boot Runner)
 sudo bash systemd/install_services.sh
 
 # Monitor service status and logs
 sudo systemctl status ai-trader-api
 sudo systemctl status ai-trader-web
+sudo systemctl status ai-trader-tailscale
 sudo systemctl status ai-trader-danelfin-daily.timer
 sudo systemctl status ai-trader-danelfin-first-boot.service
 tail -f logs/danelfin_daily.log
 journalctl -u ai-trader-api -f
 journalctl -u ai-trader-web -f
+journalctl -u ai-trader-tailscale -f
+tailscale funnel status
 
 # Uninstall services
 sudo bash systemd/uninstall_services.sh
 ```
 
-> **First Boot & Daily Schedule**:
-> - `ai-trader-danelfin-first-boot.service` executes immediately on the first boot (without waiting for the timer). Upon completion, it flags `data/.first_boot_done`.
-> - `ai-trader-danelfin-daily.timer` triggers automatically every Monday–Friday at 22:30 UTC post-market close, catching up if the Pi was offline.
+> **Automated Services & Gateway Summary**:
+> - `ai-trader-tailscale.service`: Automatically starts on boot alongside Streamlit, waits for network connection, and activates **Tailscale Serve** (private encrypted mesh) and **Tailscale Funnel** (public internet HTTPS via `https://<device>.<tailnet>.ts.net` without VPN).
+> - `ai-trader-danelfin-first-boot.service`: Executes immediately on the first boot (without waiting for the timer). Upon completion, it flags `data/.first_boot_done`.
+> - `ai-trader-danelfin-daily.timer`: Triggers automatically every Monday–Friday at 22:30 UTC post-market close, catching up if the Pi was offline.
+> - `ai-trader-scanner.timer`: Runs periodic volume leader market scans throughout trading hours.
 
 ---
 
@@ -848,5 +890,6 @@ sudo bash systemd/uninstall_services.sh
 * **Vector Embeddings**: FastEmbed (`BAAI/bge-small-en-v1.5`, 384-dimensional dense vectors).
 * **CLI Terminal Feed**: Official `gloom-sh/gloomberb` CLI.
 * **Macro Data**: FRED API (US Treasury Yield Curve) & CNN Fear & Greed Index.
+* **Remote Gateway & Ingress**: Tailscale (Encrypted WireGuard Tailnet mesh) & Tailscale Funnel (Public internet HTTPS access via `*.ts.net` with zero open router ports).
 * **Database & UI**: SQLite3 (`trader.db`), Streamlit web dashboard (`app.py`), React Native & Expo mobile application (`mobile_app`), and FastAPI REST backend (`api.py`).
 
