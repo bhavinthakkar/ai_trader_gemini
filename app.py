@@ -554,108 +554,94 @@ with tab1:
         ]
 
         if filtered_signals:
-            # View Format Toggle (Mobile Cards vs Desktop Table)
-            v_col1, v_col2 = st.columns([2, 1])
-            with v_col1:
-                display_mode = st.radio(
-                    "📱 Signal Display Layout:",
-                    options=["📱 Mobile Cards (Vertical)", "📊 Desktop Table (Wide Spreadsheet)"],
-                    horizontal=True,
-                    index=0,
-                    key="latest_signals_display_mode",
-                    help="Mobile Cards format eliminates horizontal scrolling on phone screens. Select Desktop Table for wide monitors."
-                )
-            with v_col2:
-                st.markdown(f"<div class='hide-on-mobile' style='height: 28px;'></div>", unsafe_allow_html=True)
-                st.caption(f"Showing **{len(filtered_signals)}** active recommendations")
+            st.caption(f"Showing **{len(filtered_signals)}** active recommendations")
 
-            if display_mode == "📱 Mobile Cards (Vertical)":
-                for s in filtered_signals:
-                    sym = s.get("symbol", "")
-                    prof = get_company_profile(sym)
-                    co_name = s.get("company_name") or prof["name"]
-                    sector = prof["sector"]
-                    rec = _get_model_rec(s)
-                    exec_action = format_executed_action(s)
-                    gate_action = format_compliance_gate_action(s)
-                    is_vetoed = is_signal_vetoed(s)
+            for s in filtered_signals:
+                sym = s.get("symbol", "")
+                prof = get_company_profile(sym)
+                co_name = s.get("company_name") or prof["name"]
+                sector = prof["sector"]
+                rec = _get_model_rec(s)
+                exec_action = format_executed_action(s)
+                gate_action = format_compliance_gate_action(s)
+                is_vetoed = is_signal_vetoed(s)
 
-                    quant_score = s.get("quant_score")
-                    dan_score = s.get("danelfin_score")
-                    ml_score = s.get("ml_score")
-                    conf = s.get("confidence")
+                quant_score = s.get("quant_score")
+                dan_score = s.get("danelfin_score")
+                ml_score = s.get("ml_score")
+                conf = s.get("confidence")
 
-                    entry = s.get("entry_price")
-                    stop = s.get("stop_loss_price") or s.get("structural_stop_price")
-                    target = s.get("target_price") or s.get("structural_target_price")
-                    rr = s.get("reward_risk_ratio")
-                    rvol = s.get("rvol_20d")
+                entry = s.get("entry_price")
+                stop = s.get("stop_loss_price") or s.get("structural_stop_price")
+                target = s.get("target_price") or s.get("structural_target_price")
+                rr = s.get("reward_risk_ratio")
+                rvol = s.get("rvol_20d")
 
-                    reason = (
-                        s.get("decision_reasoning")
-                        if pd.notna(s.get("decision_reasoning")) and str(s.get("decision_reasoning")).strip()
-                        else (
-                            s.get("reason")
-                            if pd.notna(s.get("reason")) and str(s.get("reason")).strip()
-                            else "No detailed decision reasoning recorded."
-                        )
+                reason = (
+                    s.get("decision_reasoning")
+                    if pd.notna(s.get("decision_reasoning")) and str(s.get("decision_reasoning")).strip()
+                    else (
+                        s.get("reason")
+                        if pd.notna(s.get("reason")) and str(s.get("reason")).strip()
+                        else "No detailed decision reasoning recorded."
                     )
-                    ts = s.get("timestamp") or ""
-                    model = s.get("model_used") or "flint"
+                )
+                ts = s.get("timestamp") or ""
+                model = s.get("model_used") or "flint"
 
-                    # Badges
-                    if "BUY" in rec:
-                        rec_badge = f"<span class='badge-buy'>🟢 {rec}</span>"
-                    elif "SELL" in rec:
-                        rec_badge = f"<span class='badge-sell'>🔴 {rec}</span>"
-                    else:
-                        rec_badge = f"<span class='badge-hold'>⚪ {rec}</span>"
+                # Badges
+                if "BUY" in rec:
+                    rec_badge = f"<span class='badge-buy'>🟢 {rec}</span>"
+                elif "SELL" in rec:
+                    rec_badge = f"<span class='badge-sell'>🔴 {rec}</span>"
+                else:
+                    rec_badge = f"<span class='badge-hold'>⚪ {rec}</span>"
 
-                    gate_badge = f"<span class='badge-gate-fail'>🛡️ {gate_action}</span>" if is_vetoed else "<span class='badge-gate-pass'>🛡️ Gate Passed</span>"
-                    action_badge = "<span class='badge-open-long'>🚀 Executed: OPEN_LONG</span>" if exec_action == "OPEN_LONG" else "<span class='badge-no-action'>⏸️ Executed: NO_ACTION</span>"
-                    dan_badge = f"<span style='background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid #c084fc; padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; font-weight: 700;'>⭐ Danelfin {int(dan_score) if isinstance(dan_score, (int, float)) and float(dan_score).is_integer() else dan_score}/10</span>" if dan_score is not None else ""
-                    sector_badge = f"<span style='background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; font-weight: 600;'>📁 {sector}</span>"
+                gate_badge = f"<span class='badge-gate-fail'>🛡️ {gate_action}</span>" if is_vetoed else "<span class='badge-gate-pass'>🛡️ Gate Passed</span>"
+                action_badge = "<span class='badge-open-long'>🚀 Executed: OPEN_LONG</span>" if exec_action == "OPEN_LONG" else "<span class='badge-no-action'>⏸️ Executed: NO_ACTION</span>"
+                dan_badge = f"<span style='background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid #c084fc; padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; font-weight: 700;'>⭐ Danelfin {int(dan_score) if isinstance(dan_score, (int, float)) and float(dan_score).is_integer() else dan_score}/10</span>" if dan_score is not None else ""
+                sector_badge = f"<span style='background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; font-weight: 600;'>📁 {sector}</span>"
 
-                    with st.container(border=True):
-                        # Header row
-                        c_top1, c_top2 = st.columns([2, 1])
-                        with c_top1:
-                            st.markdown(f"### **{sym}** <span style='font-size: 0.95rem; color: #94a3b8; font-weight: 500;'>— {co_name}</span>", unsafe_allow_html=True)
-                        with c_top2:
-                            st.markdown(f"<div style='text-align: right; padding-top: 4px;'>{rec_badge}</div>", unsafe_allow_html=True)
+                with st.container(border=True):
+                    # Header row
+                    c_top1, c_top2 = st.columns([2, 1])
+                    with c_top1:
+                        st.markdown(f"### **{sym}** <span style='font-size: 0.95rem; color: #94a3b8; font-weight: 500;'>— {co_name}</span>", unsafe_allow_html=True)
+                    with c_top2:
+                        st.markdown(f"<div style='text-align: right; padding-top: 4px;'>{rec_badge}</div>", unsafe_allow_html=True)
 
-                        st.markdown(f"<div style='display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;'>{gate_badge} {action_badge} {dan_badge} {sector_badge}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;'>{gate_badge} {action_badge} {dan_badge} {sector_badge}</div>", unsafe_allow_html=True)
 
-                        # 4 Metrics in responsive columns
-                        m1, m2, m3, m4 = st.columns(4)
-                        with m1:
-                            st.metric("Quant Score", f"{quant_score:.1f}" if quant_score is not None else "—")
-                        with m2:
-                            st.metric("Confidence", f"{int(conf * 100)}%" if conf else "—")
-                        with m3:
-                            st.metric("Reward:Risk", f"{rr:.2f}:1" if rr is not None and rr > 0 else "—")
-                        with m4:
-                            st.metric("RVOL", f"{rvol:.1f}x" if rvol is not None and rvol > 0 else "—")
+                    # 4 Metrics in responsive columns
+                    m1, m2, m3, m4 = st.columns(4)
+                    with m1:
+                        st.metric("Quant Score", f"{quant_score:.1f}" if quant_score is not None else "—")
+                    with m2:
+                        st.metric("Confidence", f"{int(conf * 100)}%" if conf else "—")
+                    with m3:
+                        st.metric("Reward:Risk", f"{rr:.2f}:1" if rr is not None and rr > 0 else "—")
+                    with m4:
+                        st.metric("RVOL", f"{rvol:.1f}x" if rvol is not None and rvol > 0 else "—")
 
-                        # Trade geometry levels
-                        if entry is not None and entry > 0:
-                            st.markdown(
-                                f"""
-                                <div style="display: flex; justify-content: space-between; background: #080c16; border: 1px solid #1e293b; border-radius: 8px; padding: 8px 12px; margin: 8px 0; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.85rem;">
-                                    <span>Entry: <strong style="color: #38bdf8;">${entry:.2f}</strong></span>
-                                    <span>Stop: <strong style="color: #f87171;">{f"${stop:.2f}" if stop else "N/A"}</strong></span>
-                                    <span>Target: <strong style="color: #34d399;">{f"${target:.2f}" if target else "N/A"}</strong></span>
-                                </div>
-                                """,
-                                unsafe_allow_html=True
-                            )
+                    # Trade geometry levels
+                    if entry is not None and entry > 0:
+                        st.markdown(
+                            f"""
+                            <div style="display: flex; justify-content: space-between; background: #080c16; border: 1px solid #1e293b; border-radius: 8px; padding: 8px 12px; margin: 8px 0; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.85rem;">
+                                <span>Entry: <strong style="color: #38bdf8;">${entry:.2f}</strong></span>
+                                <span>Stop: <strong style="color: #f87171;">{f"${stop:.2f}" if stop else "N/A"}</strong></span>
+                                <span>Target: <strong style="color: #34d399;">{f"${target:.2f}" if target else "N/A"}</strong></span>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
 
-                        # Expandable reasoning
-                        with st.expander("💡 Decision Reasoning & AI Synthesis", expanded=True):
-                            st.markdown(reason)
-                            st.caption(f"📅 Analyzed: {ts} • Model: `{model}`")
+                    # Expandable reasoning
+                    with st.expander("💡 Decision Reasoning & AI Synthesis", expanded=True):
+                        st.markdown(reason)
+                        st.caption(f"📅 Analyzed: {ts} • Model: `{model}`")
 
-            else:
+            with st.expander("📊 View as Spreadsheet Table", expanded=False):
                 df_display = pd.DataFrame(filtered_signals)
 
                 def format_ml_signal_display(row):
@@ -1491,7 +1477,8 @@ with tab4:
             })
 
         df_active = pd.DataFrame(table_rows)
-        st.dataframe(df_active, width="stretch", hide_index=True)
+        with st.expander("📊 View as Spreadsheet Table", expanded=False):
+            st.dataframe(df_active, width="stretch", hide_index=True)
 
         st.markdown("#### 📰 Why Are They Trading So Much Today? (News & Catalyst Drilldown)")
         for s in active_stocks:
