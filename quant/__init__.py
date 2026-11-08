@@ -7,6 +7,11 @@ from quant.sector_frameworks import (
     get_sector_temperature,
     format_sector_system_prompt_overlay,
 )
+from quant.monte_carlo import (
+    MonteCarloConfig,
+    MonteCarloResults,
+    MonteCarloSimulator,
+)
 from quant.schemas import (
     PillarStatus,
     InputTracking,
@@ -380,6 +385,9 @@ __all__ = [
     "get_sector_framework",
     "get_sector_temperature",
     "format_sector_system_prompt_overlay",
+    "MonteCarloConfig",
+    "MonteCarloResults",
+    "MonteCarloSimulator",
 ]
 
 

@@ -461,13 +461,14 @@ with col6:
 st.markdown("---")
 
 # Main Content Tabs
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
     "📊 Latest Signals",
     "🔍 Stock Deep-Dive",
     "🤖 ML Alpha Pipeline",
     "🔥 Most Traded Stocks",
     "📜 Signal History Log",
     "🎯 Model Outcome Tracking",
+    "🎲 Monte Carlo Stress Test",
     "📁 Portfolio Risk Review",
     "⚡ Shadow Execution Desk",
     "🔬 Baseline Decision Audit",
@@ -1625,6 +1626,107 @@ with tab6:
         st.info("No forward testing signals pending evaluation.")
 
 with tab7:
+    st.subheader("🎲 Monte Carlo Risk Simulation & Capital Preservation Engine (Step 8.2)")
+    st.caption("Vectorized bootstrap resampling across 10,000 portfolio trajectories with institutional drawdown governance and circuit breaker modeling.")
+
+    # Controls
+    c_m1, c_m2, c_m3, c_m4 = st.columns([1.2, 1.2, 1.2, 1.4])
+    with c_m1:
+        mc_sims = st.selectbox("Simulations Count:", options=[1000, 3000, 5000, 10000], index=2, key="mc_sims_select")
+    with c_m2:
+        mc_horizon = st.selectbox("Forward Horizon:", options=[25, 50, 100, 200], index=2, format_func=lambda h: f"{h} Trades (~{max(1, round(h/100*12))} mo)", key="mc_horizon_select")
+    with c_m3:
+        mc_risk = st.selectbox("Risk per Trade (r):", options=[0.5, 1.0, 1.5, 2.0], index=1, format_func=lambda r: f"{r:.1f}% Equity Risk", key="mc_risk_select")
+    with c_m4:
+        mc_dampen = st.checkbox("🛡️ Apply Drawdown Governance", value=True, help="Enforces Step 7.2 regime governance: 50% risk dampener at 5% DD, trading halt at 10% DD", key="mc_dampen_toggle")
+        mc_stress_gap = st.checkbox("⚡ Stress Test Overnight Gaps", value=False, help="Injects 2% probability of adverse 5% gap shock beyond stop loss", key="mc_gap_toggle")
+
+    # Run Simulation (cached for speed)
+    @st.cache_data(ttl=300)
+    def get_cached_monte_carlo(sims: int, horizon: int, risk: float, dampen: bool, gap_shock: bool):
+        from quant.monte_carlo import MonteCarloSimulator, MonteCarloConfig
+        cfg = MonteCarloConfig(
+            n_simulations=sims,
+            horizon_trades=horizon,
+            risk_per_trade_pct=risk,
+            apply_regime_dampening=dampen,
+            overnight_gap_prob=0.02 if gap_shock else 0.0,
+            overnight_gap_loss_pct=5.0,
+        )
+        sim = MonteCarloSimulator()
+        return sim.run_simulation(config=cfg)
+
+    mc_res = get_cached_monte_carlo(mc_sims, mc_horizon, mc_risk, mc_dampen, mc_stress_gap)
+
+    # Verdict Banner
+    if "SAFE" in mc_res.safety_verdict:
+        st.success(mc_res.safety_verdict)
+    elif "MODERATE" in mc_res.safety_verdict:
+        st.warning(mc_res.safety_verdict)
+    else:
+        st.error(mc_res.safety_verdict)
+
+    # 5 Institutional Metrics Cards
+    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+    with kpi1:
+        st.metric("Expected Median CAGR", f"{mc_res.expected_cagr_pct:+.2f}%", help="Annualized compound growth rate at 50th percentile trajectory")
+    with kpi2:
+        st.metric("95% Worst Drawdown", f"-{mc_res.max_drawdown_percentiles['p95']:.1f}%", delta=f"-{mc_res.max_drawdown_percentiles['median']:.1f}% Median", delta_color="inverse", help="Maximum drawdown experienced in 95% of simulated market universes")
+    with kpi3:
+        cb_color = "normal" if mc_res.prob_circuit_breaker_pct < 5.0 else "inverse"
+        st.metric("10% Circuit Breaker Risk", f"{mc_res.prob_circuit_breaker_pct:.1f}%", help="Probability of triggering the formal 10% Drawdown Halt circuit breaker")
+    with kpi4:
+        st.metric("Median Losing Streak", f"{int(mc_res.consecutive_loss_streaks['median'])} Trades", delta=f"{int(mc_res.consecutive_loss_streaks['p95'])} max (95%)", delta_color="inverse", help="Expected consecutive losing trades in normal market variance")
+    with kpi5:
+        st.metric("Probability of Ruin (>20% DD)", f"{mc_res.prob_ruin_pct:.2f}%", help="Mathematical probability of severe capital impairment")
+
+    st.markdown("---")
+
+    # Fan Chart Section
+    st.markdown("#### 📈 Forward Equity Curve Forecast (Confidence Intervals)")
+    st.caption("Visualizes the range of portfolio equity paths across simulated market futures based on audited trade expectancy.")
+
+    fc_data = mc_res.equity_fan_chart
+    df_fan = pd.DataFrame({
+        "Step (Trade #)": fc_data["steps"],
+        "p95 Bull Case": fc_data["p95"],
+        "p75 Optimistic": fc_data["p75"],
+        "p50 Median Expected": fc_data["p50"],
+        "p25 Conservative": fc_data["p25"],
+        "p5 Bear Case (95% VaR)": fc_data["p5"],
+    }).set_index("Step (Trade #)")
+
+    st.line_chart(df_fan, height=360)
+
+    # Two columns for Drawdown VaR Table and Risk Sweep
+    c_sub1, c_sub2 = st.columns(2)
+    with c_sub1:
+        st.markdown("#### 🛡️ Value at Risk (VaR) & Drawdown Percentiles")
+        dd_data = [
+            {"Confidence Level": "50% (Expected Median)", "Max Drawdown": f"{mc_res.max_drawdown_percentiles['median']:.2f}%", "Assessment": "Normal Trading Variance"},
+            {"Confidence Level": "90% (Adverse Luck)", "Max Drawdown": f"{mc_res.max_drawdown_percentiles['p90']:.2f}%", "Assessment": "Controlled Drawdown"},
+            {"Confidence Level": "95% (Tail Risk / 95% VaR)", "Max Drawdown": f"{mc_res.max_drawdown_percentiles['p95']:.2f}%", "Assessment": "De-Risking Buffer Active"},
+            {"Confidence Level": "99% (Extreme Stress / 99% VaR)", "Max Drawdown": f"{mc_res.max_drawdown_percentiles['p99']:.2f}%", "Assessment": "Circuit Breaker Protection Zone"},
+            {"Confidence Level": "Worst Simulated Trajectory", "Max Drawdown": f"{mc_res.max_drawdown_percentiles['worst']:.2f}%", "Assessment": "Halt / Recovery Enforced"},
+        ]
+        st.dataframe(pd.DataFrame(dd_data), width="stretch", hide_index=True)
+
+    with c_sub2:
+        st.markdown("#### ⚖️ Risk-per-Trade Calibration Sweep (r-Sweep)")
+        st.caption("Mathematical comparison proving why 1.0% risk budget is the optimal institutional sweet spot.")
+        sweep_rows = []
+        for row in mc_res.risk_sensitivity_sweep:
+            rec_tag = "⭐ Recommended (1.0%)" if row["recommended"] else f"{row['risk_pct']:.1f}% Risk"
+            sweep_rows.append({
+                "Risk Fraction (r)": rec_tag,
+                "Median CAGR": f"{row['median_cagr_pct']:+.2f}%",
+                "95% Max DD": f"{row['max_drawdown_p95_pct']:.1f}%",
+                "Circuit Breaker Risk": f"{row['circuit_breaker_prob_pct']:.1f}%",
+                "Probability of Ruin": f"{row['ruin_prob_pct']:.2f}%",
+            })
+        st.dataframe(pd.DataFrame(sweep_rows), width="stretch", hide_index=True)
+
+with tab8:
     st.subheader("📁 Portfolio Risk Review (Investment-Committee Memo)")
     st.caption("Stored portfolio risk memos generated via `python main.py portfolio <model>`.")
 
@@ -1732,7 +1834,7 @@ with tab7:
                 with st.expander("🔍 View Full JSON Review"):
                     st.json(review)
 
-with tab8:
+with tab9:
     st.subheader("⚡ Institutional Shadow Trading & Order Execution Desk")
     st.caption("Point-in-Time Shadow Trading Validation, 8 Formal Measurement Scorecards, and Operational Kill Switch (Steps 7.3 & 8).")
 
@@ -1878,7 +1980,7 @@ with tab8:
         st.dataframe(df_shadow, width="stretch", hide_index=True)
 
 
-with tab9:
+with tab10:
     st.subheader("🔬 Baseline Decision Audit & Component Breakdown")
     st.caption("Point-in-Time baseline of recent signals, model proposals, quant scores, candidate setups, compliance gates, and root-cause explanations for HOLD decisions.")
 

@@ -620,6 +620,38 @@ def reset_kill_switch(operator: str = Query(default="MobileClient"), reason: str
     }
 
 
+# ==========================================
+# Monte Carlo Simulation Endpoints
+# ==========================================
+
+@app.get("/api/risk/monte-carlo", tags=["Risk Management"])
+def run_monte_carlo_endpoint(
+    simulations: int = Query(default=5000, ge=500, le=25000, description="Number of bootstrap simulations"),
+    horizon_trades: int = Query(default=100, ge=10, le=500, description="Forward trade sequence length"),
+    risk_pct: float = Query(default=1.0, ge=0.1, le=5.0, description="Risk budget fraction per trade (r %)"),
+    apply_dampening: bool = Query(default=True, description="Enable 5% de-risking and 10% circuit breaker regime dampening"),
+    gap_prob: float = Query(default=0.0, ge=0.0, le=0.20, description="Stress test overnight gap probability"),
+):
+    """
+    Executes vectorized Monte Carlo simulation to evaluate drawdown percentiles,
+    circuit breaker breach probability, and expected equity curves.
+    """
+    from quant.monte_carlo import MonteCarloSimulator, MonteCarloConfig
+
+    cfg = MonteCarloConfig(
+        n_simulations=simulations,
+        horizon_trades=horizon_trades,
+        risk_per_trade_pct=risk_pct,
+        apply_regime_dampening=apply_dampening,
+        overnight_gap_prob=gap_prob,
+    )
+    sim = MonteCarloSimulator()
+    results = sim.run_simulation(config=cfg)
+    return {
+        "status": "SUCCESS",
+        "results": results.to_dict(),
+    }
+
 
 if __name__ == "__main__":
 

@@ -190,6 +190,21 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(reset_resp.status_code, 200)
         self.assertFalse(reset_resp.json()["is_tripped"])
 
+    def test_monte_carlo_risk_endpoint(self):
+        resp = self.client.get("/api/risk/monte-carlo?simulations=1000&horizon_trades=50&risk_pct=1.0")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["status"], "SUCCESS")
+        results = data["results"]
+        self.assertEqual(results["n_simulations"], 1000)
+        self.assertEqual(results["horizon_trades"], 50)
+        self.assertIn("median_final_equity", results)
+        self.assertIn("max_drawdown_percentiles", results)
+        self.assertIn("prob_circuit_breaker_pct", results)
+        self.assertIn("equity_fan_chart", results)
+        self.assertIn("safety_verdict", results)
+        self.assertIn("risk_sensitivity_sweep", results)
+
 
 if __name__ == "__main__":
     unittest.main()
