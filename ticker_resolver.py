@@ -20,8 +20,11 @@ Key Capabilities:
 
 from __future__ import annotations
 
+import os
 import re
+import json
 import urllib.parse
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import requests
 
@@ -854,6 +857,259 @@ def get_nasdaq_european_universe(exchange: str = "DE") -> List[str]:
         else:
             tickers.append(f"{k}.MU" if exchange.upper() == "MU" else f"{k}.DE")
     return tickers
+
+
+# Authoritative Reference of Company Names & Sectors
+COMMON_COMPANY_PROFILES: Dict[str, Dict[str, str]] = {
+    # Tech, Semis & AI
+    "NVDA": {"name": "NVIDIA Corporation", "sector": "Information Technology"},
+    "NVD.DE": {"name": "NVIDIA Corporation", "sector": "Information Technology"},
+    "NVD.MU": {"name": "NVIDIA Corporation", "sector": "Information Technology"},
+    "AAPL": {"name": "Apple Inc.", "sector": "Information Technology"},
+    "APC.DE": {"name": "Apple Inc.", "sector": "Information Technology"},
+    "MSFT": {"name": "Microsoft Corporation", "sector": "Information Technology"},
+    "MSF.DE": {"name": "Microsoft Corporation", "sector": "Information Technology"},
+    "AMZN": {"name": "Amazon.com, Inc.", "sector": "Consumer Discretionary"},
+    "AMZ.DE": {"name": "Amazon.com, Inc.", "sector": "Consumer Discretionary"},
+    "GOOGL": {"name": "Alphabet Inc. (Class A)", "sector": "Communication Services"},
+    "GOOG": {"name": "Alphabet Inc. (Class C)", "sector": "Communication Services"},
+    "ABEA.DE": {"name": "Alphabet Inc.", "sector": "Communication Services"},
+    "META": {"name": "Meta Platforms, Inc.", "sector": "Communication Services"},
+    "FB2A.DE": {"name": "Meta Platforms, Inc.", "sector": "Communication Services"},
+    "TSLA": {"name": "Tesla, Inc.", "sector": "Consumer Discretionary"},
+    "TL0.DE": {"name": "Tesla, Inc.", "sector": "Consumer Discretionary"},
+    "AMD": {"name": "Advanced Micro Devices, Inc.", "sector": "Information Technology"},
+    "AMD.DE": {"name": "Advanced Micro Devices, Inc.", "sector": "Information Technology"},
+    "INTC": {"name": "Intel Corporation", "sector": "Information Technology"},
+    "INL.DE": {"name": "Intel Corporation", "sector": "Information Technology"},
+    "TSM": {"name": "Taiwan Semiconductor Manufacturing", "sector": "Information Technology"},
+    "AVGO": {"name": "Broadcom Inc.", "sector": "Information Technology"},
+    "QCOM": {"name": "Qualcomm Inc.", "sector": "Information Technology"},
+    "1QZ.DE": {"name": "Qualcomm Inc.", "sector": "Information Technology"},
+    "PLTR": {"name": "Palantir Technologies Inc.", "sector": "Information Technology"},
+    "NFLX": {"name": "Netflix, Inc.", "sector": "Communication Services"},
+    "NFC.DE": {"name": "Netflix, Inc.", "sector": "Communication Services"},
+    "AMAT": {"name": "Applied Materials, Inc.", "sector": "Information Technology"},
+    "LRCX": {"name": "Lam Research Corporation", "sector": "Information Technology"},
+    "KLAC": {"name": "KLA Corporation", "sector": "Information Technology"},
+    "MCHP": {"name": "Microchip Technology Inc.", "sector": "Information Technology"},
+    "MRVL": {"name": "Marvell Technology, Inc.", "sector": "Information Technology"},
+    "MVRL": {"name": "Marvell Technology, Inc.", "sector": "Information Technology"},
+    "MU": {"name": "Micron Technology, Inc.", "sector": "Information Technology"},
+    "TXN": {"name": "Texas Instruments Inc.", "sector": "Information Technology"},
+    "ASML": {"name": "ASML Holding N.V.", "sector": "Information Technology"},
+    "ASML.AS": {"name": "ASML Holding N.V.", "sector": "Information Technology"},
+    "SAP": {"name": "SAP SE", "sector": "Information Technology"},
+    "SAP.DE": {"name": "SAP SE", "sector": "Information Technology"},
+    "000660.KS": {"name": "SK Hynix Inc.", "sector": "Information Technology"},
+    "000660": {"name": "SK Hynix Inc.", "sector": "Information Technology"},
+    "ORCL": {"name": "Oracle Corporation", "sector": "Information Technology"},
+    "CSCO": {"name": "Cisco Systems, Inc.", "sector": "Information Technology"},
+    "IBM": {"name": "IBM Corporation", "sector": "Information Technology"},
+    "STX": {"name": "Seagate Technology Holdings", "sector": "Information Technology"},
+    "WDC": {"name": "Western Digital Corporation", "sector": "Information Technology"},
+    "CRUS": {"name": "Cirrus Logic, Inc.", "sector": "Information Technology"},
+    "ON": {"name": "ON Semiconductor Corporation", "sector": "Information Technology"},
+    "ONDS": {"name": "Ondas Holdings Inc.", "sector": "Information Technology"},
+    "FLKR": {"name": "Teledyne FLIR LLC", "sector": "Information Technology"},
+
+    # Financials & Crypto
+    "JPM": {"name": "JPMorgan Chase & Co.", "sector": "Financials"},
+    "BAC": {"name": "Bank of America Corporation", "sector": "Financials"},
+    "WFC": {"name": "Wells Fargo & Company", "sector": "Financials"},
+    "C": {"name": "Citigroup Inc.", "sector": "Financials"},
+    "GS": {"name": "Goldman Sachs Group, Inc.", "sector": "Financials"},
+    "MS": {"name": "Morgan Stanley", "sector": "Financials"},
+    "ING": {"name": "ING Groep N.V.", "sector": "Financials"},
+    "MUFG": {"name": "Mitsubishi UFJ Financial Group", "sector": "Financials"},
+    "SMFG": {"name": "Sumitomo Mitsui Financial Group", "sector": "Financials"},
+    "HSBC": {"name": "HSBC Holdings plc", "sector": "Financials"},
+    "FCF": {"name": "First Commonwealth Financial", "sector": "Financials"},
+    "BBVA": {"name": "Banco Bilbao Vizcaya Argentaria", "sector": "Financials"},
+    "NU": {"name": "Nu Holdings Ltd. (Nubank)", "sector": "Financials"},
+    "COIN": {"name": "Coinbase Global, Inc.", "sector": "Financials"},
+    "SOFI": {"name": "SoFi Technologies, Inc.", "sector": "Financials"},
+    "MARA": {"name": "MARA Holdings, Inc.", "sector": "Financials"},
+    "BTC": {"name": "Bitcoin Index / Proxy", "sector": "Digital Assets"},
+
+    # Industrials & Defense
+    "UNP": {"name": "Union Pacific Corporation", "sector": "Industrials"},
+    "CAT": {"name": "Caterpillar Inc.", "sector": "Industrials"},
+    "BA": {"name": "The Boeing Company", "sector": "Industrials"},
+    "GE": {"name": "GE Aerospace", "sector": "Industrials"},
+    "HON": {"name": "Honeywell International Inc.", "sector": "Industrials"},
+    "RTX": {"name": "RTX Corporation", "sector": "Industrials"},
+    "LMT": {"name": "Lockheed Martin Corporation", "sector": "Industrials"},
+    "PCAR": {"name": "PACCAR Inc", "sector": "Industrials"},
+    "CMI": {"name": "Cummins Inc.", "sector": "Industrials"},
+    "HWM": {"name": "Howmet Aerospace Inc.", "sector": "Industrials"},
+    "LTM": {"name": "LATAM Airlines Group S.A.", "sector": "Industrials"},
+    "AIR": {"name": "Airbus SE", "sector": "Industrials"},
+    "AIR.PA": {"name": "Airbus SE", "sector": "Industrials"},
+    "AAL": {"name": "American Airlines Group Inc.", "sector": "Industrials"},
+    "RHM.DE": {"name": "Rheinmetall AG", "sector": "Industrials"},
+
+    # Materials & Mining
+    "NEM": {"name": "Newmont Corporation", "sector": "Materials"},
+    "CGAU": {"name": "Centerra Gold Inc.", "sector": "Materials"},
+    "CCK": {"name": "Crown Holdings, Inc.", "sector": "Materials"},
+    "HCC": {"name": "Warrior Met Coal, Inc.", "sector": "Materials"},
+    "RIO": {"name": "Rio Tinto plc", "sector": "Materials"},
+    "FCX": {"name": "Freeport-McMoRan Inc.", "sector": "Materials"},
+    "LIN": {"name": "Linde plc", "sector": "Materials"},
+    "SHW": {"name": "The Sherwin-Williams Company", "sector": "Materials"},
+    "FSM": {"name": "Fortuna Mining Corp.", "sector": "Materials"},
+
+    # Energy, Marine & Midstream
+    "XOM": {"name": "Exxon Mobil Corporation", "sector": "Energy"},
+    "CVX": {"name": "Chevron Corporation", "sector": "Energy"},
+    "COP": {"name": "ConocoPhillips", "sector": "Energy"},
+    "SLB": {"name": "SLB (Schlumberger)", "sector": "Energy"},
+    "OXY": {"name": "Occidental Petroleum Corp.", "sector": "Energy"},
+    "BKR": {"name": "Baker Hughes Company", "sector": "Energy"},
+    "LPG": {"name": "Dorian LPG Ltd.", "sector": "Energy"},
+    "GLNG": {"name": "Golar LNG Limited", "sector": "Energy"},
+    "STNG": {"name": "Scorpio Tankers Inc.", "sector": "Energy"},
+    "AM": {"name": "Antero Midstream Corporation", "sector": "Energy"},
+    "PARR": {"name": "Par Pacific Holdings, Inc.", "sector": "Energy"},
+
+    # Consumer & Others
+    "BABA": {"name": "Alibaba Group Holding Limited", "sector": "Consumer Discretionary"},
+    "1YD.DE": {"name": "BYD Company Limited", "sector": "Consumer Discretionary"},
+    "GRAB": {"name": "Grab Holdings Limited", "sector": "Consumer Discretionary"},
+    "EXPE": {"name": "Expedia Group, Inc.", "sector": "Consumer Discretionary"},
+    "LLY": {"name": "Eli Lilly and Company", "sector": "Healthcare"},
+    "UNH": {"name": "UnitedHealth Group Inc.", "sector": "Healthcare"},
+    "JNJ": {"name": "Johnson & Johnson", "sector": "Healthcare"},
+    "PFE": {"name": "Pfizer Inc.", "sector": "Healthcare"},
+    "ABBV": {"name": "AbbVie Inc.", "sector": "Healthcare"},
+    "MRNA": {"name": "Moderna, Inc.", "sector": "Healthcare"},
+}
+
+_SEC_TICKERS_CACHE: Optional[Dict[str, str]] = None
+_DANELFIN_SECTORS_CACHE: Optional[Dict[str, str]] = None
+_COMPANY_PROFILES_CACHE: Dict[str, Dict[str, str]] = {}
+
+
+def get_company_profile(symbol: str) -> Dict[str, str]:
+    """
+    Authoritative company name and sector resolution service.
+    Resolves full company name, sector classification, and formatted display string
+    for any US, European (.DE/.MU), ADR, or global ticker symbol.
+
+    Returns dict:
+      {
+        "symbol": "NEM",
+        "name": "Newmont Corporation",
+        "sector": "Materials",
+        "display": "NEM — Newmont Corporation [Materials]"
+      }
+    """
+    global _SEC_TICKERS_CACHE, _DANELFIN_SECTORS_CACHE, _COMPANY_PROFILES_CACHE
+
+    if not symbol:
+        return {"symbol": "", "name": "", "sector": "", "display": ""}
+
+    raw_sym = str(symbol).strip().upper()
+    if raw_sym in _COMPANY_PROFILES_CACHE:
+        return _COMPANY_PROFILES_CACHE[raw_sym]
+
+    base_sym = raw_sym.split(".")[0]
+
+    # 1. Check built-in COMMON_COMPANY_PROFILES
+    if raw_sym in COMMON_COMPANY_PROFILES:
+        item = COMMON_COMPANY_PROFILES[raw_sym]
+        prof = {
+            "symbol": raw_sym,
+            "name": item.get("name", raw_sym),
+            "sector": item.get("sector", ""),
+            "display": f"{raw_sym} — {item.get('name', raw_sym)}" + (f" [{item.get('sector')}]" if item.get("sector") else "")
+        }
+        _COMPANY_PROFILES_CACHE[raw_sym] = prof
+        return prof
+
+    if base_sym in COMMON_COMPANY_PROFILES:
+        item = COMMON_COMPANY_PROFILES[base_sym]
+        prof = {
+            "symbol": raw_sym,
+            "name": item.get("name", raw_sym),
+            "sector": item.get("sector", ""),
+            "display": f"{raw_sym} — {item.get('name', raw_sym)}" + (f" [{item.get('sector')}]" if item.get("sector") else "")
+        }
+        _COMPANY_PROFILES_CACHE[raw_sym] = prof
+        return prof
+
+    # 2. Check SECURITIES_DIRECTORY
+    sec_dir_item = SECURITIES_DIRECTORY.get(raw_sym) or SECURITIES_DIRECTORY.get(base_sym)
+    name = sec_dir_item.get("company_name") if sec_dir_item else None
+    sector = None
+
+    # 3. Check Danelfin cached sectors from trader.db
+    if _DANELFIN_SECTORS_CACHE is None:
+        _DANELFIN_SECTORS_CACHE = {}
+        try:
+            db_file = Path(__file__).resolve().parent / "trader.db"
+            if db_file.exists():
+                import sqlite3
+                conn = sqlite3.connect(str(db_file), timeout=1.0)
+                c = conn.cursor()
+                for row in c.execute("SELECT data_json FROM danelfin_cache WHERE endpoint='beststocks'").fetchall():
+                    try:
+                        d = json.loads(row[0])
+                        for s_key, p_data in d.get("picks", {}).items():
+                            sec_val = p_data.get("sector")
+                            if sec_val:
+                                _DANELFIN_SECTORS_CACHE[s_key.upper()] = sec_val.replace("-", " ").title()
+                    except Exception:
+                        pass
+                conn.close()
+        except Exception:
+            pass
+
+    if _DANELFIN_SECTORS_CACHE:
+        if raw_sym in _DANELFIN_SECTORS_CACHE:
+            sector = _DANELFIN_SECTORS_CACHE[raw_sym]
+        elif base_sym in _DANELFIN_SECTORS_CACHE:
+            sector = _DANELFIN_SECTORS_CACHE[base_sym]
+
+    # 4. Check SEC company tickers for full legal name
+    if not name:
+        if _SEC_TICKERS_CACHE is None:
+            _SEC_TICKERS_CACHE = {}
+            sec_file = Path(__file__).resolve().parent / "sec_company_tickers.json"
+            if sec_file.exists():
+                try:
+                    with open(sec_file, "r", encoding="utf-8") as f:
+                        sec_json = json.load(f)
+                    for item in sec_json.values():
+                        if isinstance(item, dict) and "ticker" in item:
+                            _SEC_TICKERS_CACHE[item["ticker"].upper()] = item.get("title", "")
+                except Exception:
+                    pass
+
+        if _SEC_TICKERS_CACHE:
+            name = _SEC_TICKERS_CACHE.get(base_sym) or _SEC_TICKERS_CACHE.get(raw_sym)
+
+    # Clean fallback name if missing
+    if not name or name == raw_sym:
+        try:
+            res = resolve_symbol(raw_sym)
+            if res and res.get("company_name") and res["company_name"] != raw_sym:
+                name = res["company_name"]
+        except Exception:
+            pass
+
+    final_name = name or raw_sym
+    final_sector = sector or "Equities"
+
+    prof = {
+        "symbol": raw_sym,
+        "name": final_name,
+        "sector": final_sector,
+        "display": f"{raw_sym} — {final_name} [{final_sector}]" if final_sector else f"{raw_sym} — {final_name}"
+    }
+    _COMPANY_PROFILES_CACHE[raw_sym] = prof
+    return prof
 
 
 

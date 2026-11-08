@@ -2,7 +2,7 @@
   "shadow_report": {
     "session_id": "SHADOW_LIVE_RUN",
     "total_observations": 50,
-    "evaluated_at": "2026-10-30 08:35:47",
+    "evaluated_at": "2026-11-08 11:15:33",
     "reproducibility_rate": 1.0,
     "composite_exact_match_rate": 1.0,
     "gate_match_rate": 1.0,
@@ -67,7 +67,7 @@
     "metrics_summary": {
       "session_id": "SHADOW_LIVE_RUN",
       "total_observations": 50,
-      "evaluated_at": "2026-10-30 08:35:47",
+      "evaluated_at": "2026-11-08 11:15:33",
       "reproducibility_rate": 1.0,
       "composite_exact_match_rate": 1.0,
       "gate_match_rate": 1.0,

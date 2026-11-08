@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Query, status
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -125,6 +126,24 @@ def health_check():
         "app": "AI Trader API",
         "version": "1.0.0",
     }
+
+
+@app.get("/", response_class=HTMLResponse, tags=["Dashboard"])
+@app.get("/dashboard", response_class=HTMLResponse, tags=["Dashboard"])
+def get_dashboard_html():
+    """
+    Serves the standalone mobile-optimized HTML dashboard for phone browsers (specifically Brave browser).
+    Returns the latest Danelfin daily report or Gloomberb active dashboard.
+    """
+    base_dir = Path(__file__).resolve().parent
+    for fname in ["danelfin_daily_report.html", "dashboard.html"]:
+        fpath = base_dir / fname
+        if fpath.exists():
+            return HTMLResponse(content=fpath.read_text(encoding="utf-8"))
+    return HTMLResponse(
+        "<h1>AI Trader Dashboard</h1><p>No dashboard generated yet. Run <code>danelfin_daily_runner.py</code> or <code>dashboard.py</code> first.</p>",
+        status_code=404,
+    )
 
 
 @app.get("/api/danelfin/quota", tags=["Danelfin"])

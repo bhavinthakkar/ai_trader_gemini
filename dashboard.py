@@ -19,6 +19,7 @@ import datetime
 import json
 import os
 import sys
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -34,7 +35,8 @@ from ticker_resolver import (
     get_european_default_universe,
     get_nasdaq_european_universe,
     get_currency_for_symbol,
-    is_european_symbol
+    is_european_symbol,
+    get_company_profile
 )
 from google_finance_sync import (
     sync_google_portfolio,
@@ -407,7 +409,10 @@ def infer_trading_catalyst(
 def process_single_stock(quote: Dict[str, Any], market_agent: MarketAgent) -> Dict[str, Any]:
     """Processes quote data, technical analysis, and news for a single active stock."""
     symbol = quote.get("symbol", "").upper()
-    name = quote.get("shortName") or quote.get("longName") or symbol
+    prof = get_company_profile(symbol)
+    raw_name = quote.get("shortName") or quote.get("longName")
+    name = raw_name if (raw_name and raw_name != symbol) else prof["name"]
+    sector = prof["sector"]
     curr = quote.get("currency")
     curr_sym = quote.get("currency_symbol")
     if not curr_sym:
@@ -532,6 +537,7 @@ def process_single_stock(quote: Dict[str, Any], market_agent: MarketAgent) -> Di
     return {
         "symbol": symbol,
         "name": name,
+        "sector": sector,
         "price": current_price,
         "currency": curr or "USD",
         "currency_symbol": curr_sym or "$",
@@ -754,8 +760,69 @@ def render_terminal_dashboard(data: List[Dict[str, Any]], fear_greed: str) -> No
         console.print(Panel(detail_text, box=box.ROUNDED, border_style="dim"))
 
 
+def _enrich_with_db_signals(data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Enriches stock items with Danelfin scores and AI pipeline decisions from trader.db if present."""
+    db_path = Path(__file__).resolve().parent / "trader.db"
+    if not db_path.exists():
+        return data
+
+    import sqlite3
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=2.0)
+        c = conn.cursor()
+
+        # Load Danelfin cache picks
+        danelfin_map: Dict[str, Any] = {}
+        try:
+            row = c.execute("SELECT data_json FROM danelfin_cache WHERE endpoint='beststocks' ORDER BY created_at DESC LIMIT 1").fetchone()
+            if row:
+                danelfin_map = json.loads(row[0]).get("picks", {})
+        except Exception:
+            pass
+
+        for item in data:
+            sym = str(item.get("symbol", "")).upper()
+            base_sym = sym.split(".")[0]
+
+            # Danelfin pick
+            dp = danelfin_map.get(sym) or danelfin_map.get(base_sym)
+            if dp:
+                item["danelfin_score"] = dp.get("aiscore")
+                item["danelfin_rank"] = dp.get("rank")
+                if not item.get("sector") and dp.get("sector"):
+                    item["sector"] = dp.get("sector")
+
+            # System signal from signals table
+            try:
+                s_row = c.execute(
+                    "SELECT decision, confidence, buy_score, danelfin_score, quant_score FROM signals "
+                    "WHERE symbol=? OR symbol LIKE ? ORDER BY timestamp DESC LIMIT 1",
+                    (sym, f"{base_sym}%")
+                ).fetchone()
+                if s_row:
+                    item["ai_decision"] = s_row[0]
+                    item["confidence"] = s_row[1]
+                    item["buy_score"] = s_row[2]
+                    if item.get("danelfin_score") is None and s_row[3] is not None:
+                        item["danelfin_score"] = s_row[3]
+                    item["quant_score"] = s_row[4]
+            except Exception:
+                pass
+        conn.close()
+    except Exception:
+        pass
+
+    return data
+
+
 def generate_html_dashboard(data: List[Dict[str, Any]], fear_greed: str, output_path: str = "dashboard.html") -> str:
-    """Generates a responsive modern dark-mode HTML dashboard file."""
+    """
+    Generates a high-performance, responsive dark-mode HTML dashboard.
+    Engineered for desktop browsers and mobile phone browsers (specifically Brave browser).
+    Features zero-external CDN dependencies, touch-first card navigation, instant search/filtering,
+    and sticky horizontal table scrolling.
+    """
+    data = _enrich_with_db_signals(data)
     now_str = datetime.datetime.now().strftime("%B %d, %Y - %H:%M:%S UTC")
     total_vol = sum(d.get("volume", 0) for d in data)
     top_volume_stock = data[0]["symbol"] if data else "N/A"
@@ -765,10 +832,18 @@ def generate_html_dashboard(data: List[Dict[str, Any]], fear_greed: str, output_
     rows_html = []
     cards_html = []
 
+    buy_count = sum(1 for d in data if (d.get("ai_decision") or "").upper() == "BUY")
+    danelfin_count = sum(1 for d in data if d.get("danelfin_score") is not None)
+    gainers_count = sum(1 for d in data if d.get("change_pct", 0.0) >= 0)
+    decliners_count = sum(1 for d in data if d.get("change_pct", 0.0) < 0)
+    rvol_count = sum(1 for d in data if (d.get("rvol") or 0.0) >= 1.5)
+
     for item in data:
         sym = item["symbol"]
         curr_sym = item.get("currency_symbol", "$")
-        name = item["name"]
+        prof = get_company_profile(sym)
+        name = item.get("name") or prof["name"]
+        sector = item.get("sector") or prof["sector"]
         price = item["price"]
         chg = item["change_pct"]
         chg_val = item["change"]
@@ -778,80 +853,162 @@ def generate_html_dashboard(data: List[Dict[str, Any]], fear_greed: str, output_
         rvol = item["rvol"]
         cap_str = item["market_cap_str"]
         cat = item["catalyst_type"]
-        pos_pct = item["intraday_range_pct"]
-        rsi_str = f"{item['rsi14']:.1f}" if item.get("rsi14") else "N/A"
+        pos_pct = max(0.0, min(100.0, float(item.get("intraday_range_pct", 50.0))))
+        rsi_val = item.get("rsi14")
+        rsi_str = f"{rsi_val:.1f}" if rsi_val is not None else "N/A"
         alpha_str = str(item.get("relative_alpha_5d", "N/A"))
+
+        ai_decision = (item.get("ai_decision") or "").upper()
+        dan_score = item.get("danelfin_score")
+        conf = item.get("confidence")
 
         is_pos = chg >= 0
         badge_class = "badge-green" if is_pos else "badge-red"
         sign = "+" if is_pos else ""
 
+        rsi_class = ""
+        if rsi_val is not None:
+            if rsi_val >= 70:
+                rsi_class = "rsi-hot"
+            elif rsi_val <= 30:
+                rsi_class = "rsi-cold"
+
         # Table Row
+        ai_tag_table = ""
+        if ai_decision:
+            dec_cls = "badge-dec-buy" if ai_decision == "BUY" else ("badge-dec-sell" if ai_decision == "SELL" else "badge-dec-hold")
+            ai_tag_table = f'<span class="badge {dec_cls}">{ai_decision}</span> '
+        if dan_score is not None:
+            score_disp = int(dan_score) if isinstance(dan_score, (int, float)) and float(dan_score).is_integer() else dan_score
+            ai_tag_table += f'<span class="badge badge-danelfin-sm">⭐{score_disp}</span> '
+
         rows_html.append(f"""
-        <tr>
-            <td class="font-bold text-white">{sym}<br><span class="text-xs text-gray-400 font-normal">{name[:20]}</span></td>
-            <td class="text-right font-mono font-bold">{curr_sym}{price:.2f}</td>
+        <tr class="stock-row" data-symbol="{sym}" data-name="{name.lower()}" data-sector="{sector.lower()}" data-cat="{cat.lower()}" data-decision="{ai_decision}" data-danelfin="{dan_score if dan_score is not None else ''}" data-change="{chg}" data-rvol="{rvol}">
+            <td class="sticky-col">
+                <div class="sym-name-wrap">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <span class="font-bold text-white sym-code">{sym}</span>
+                        <span class="sector-badge-sm">{sector}</span>
+                    </div>
+                    <span class="text-xs text-gray-400 font-normal truncate-name">{name}</span>
+                    {f'<div class="table-pills">{ai_tag_table}</div>' if ai_tag_table else ''}
+                </div>
+            </td>
+            <td class="text-right font-mono font-bold text-white">{curr_sym}{price:.2f}</td>
             <td class="text-right"><span class="badge {badge_class}">{sign}{chg:.2f}% ({sign}{curr_sym}{abs(chg_val):.2f})</span></td>
             <td>
                 <div class="range-container">
                     <span class="range-val">{curr_sym}{day_low:.2f}</span>
-                    <div class="range-bar"><div class="range-fill" style="width: {pos_pct}%;"></div></div>
+                    <div class="range-bar">
+                        <div class="range-fill" style="width: {pos_pct}%;"></div>
+                        <div class="range-pip" style="left: {pos_pct}%;"></div>
+                    </div>
                     <span class="range-val">{curr_sym}{day_high:.2f}</span>
                 </div>
             </td>
-            <td class="text-right font-mono">{vol_str} <span class="text-xs {'text-yellow-400 font-bold' if rvol >= 1.5 else 'text-gray-400'}">({rvol:.1f}x)</span></td>
-            <td class="text-center font-mono text-sm">{rsi_str}</td>
+            <td class="text-right font-mono">{vol_str} <span class="rvol-pill {'rvol-surge' if rvol >= 1.5 else 'text-gray-400'}">({rvol:.1f}x)</span></td>
+            <td class="text-center font-mono text-sm {rsi_class}">{rsi_str}</td>
             <td><span class="catalyst-tag">{cat}</span></td>
             <td class="text-sm text-gray-300 max-w-xs">{item['reason_summary']}</td>
         </tr>
         """)
 
-        # Stock News & Detail Card
+        # Stock News Block
         news_html_list = []
         for n in item.get("news", [])[:3]:
             title = n.get("title", "")
             pub = n.get("publisher", "News")
             url = n.get("url", "#")
             news_html_list.append(f"""
-                <li class="mb-2">
+                <li class="news-item">
                     <a href="{url}" target="_blank" rel="noopener noreferrer" class="news-link">
-                        <span class="text-xs text-cyan-400 font-semibold">[{pub}]</span> {title}
+                        <span class="news-pub">[{pub}]</span> {title}
+                        <span class="ext-icon">↗</span>
                     </a>
                 </li>
             """)
         news_block = "".join(news_html_list) if news_html_list else "<li class='text-gray-500 text-sm'>No news headlines retrieved.</li>"
 
+        # AI & Danelfin Badges for Card
+        ai_card_badges = []
+        if ai_decision:
+            dec_cls = "badge-dec-buy" if ai_decision == "BUY" else ("badge-dec-sell" if ai_decision == "SELL" else "badge-dec-hold")
+            conf_str = f" ({int(conf * 100)}%)" if conf else ""
+            ai_card_badges.append(f'<span class="badge {dec_cls}">🤖 SYSTEM {ai_decision}{conf_str}</span>')
+        if dan_score is not None:
+            score_disp = int(dan_score) if isinstance(dan_score, (int, float)) and float(dan_score).is_integer() else dan_score
+            ai_card_badges.append(f'<span class="badge badge-danelfin">⭐ DANELFIN {score_disp}/10</span>')
+
+        badges_html = " ".join(ai_card_badges)
+
         cards_html.append(f"""
-        <div class="stock-card">
-            <div class="flex justify-between items-start mb-3">
-                <div>
-                    <h3 class="text-xl font-bold text-white">{sym} <span class="text-sm font-normal text-gray-400">({name})</span></h3>
-                    <p class="text-xs text-gray-400">Market Cap: {cap_str} | Alpha vs SPY: {alpha_str}</p>
+        <div class="stock-card" data-symbol="{sym}" data-name="{name.lower()}" data-sector="{sector.lower()}" data-cat="{cat.lower()}" data-decision="{ai_decision}" data-danelfin="{dan_score if dan_score is not None else ''}" data-change="{chg}" data-rvol="{rvol}">
+            <!-- Card Header -->
+            <div class="card-head">
+                <div class="card-identity">
+                    <div class="symbol-line">
+                        <span class="card-sym">{sym}</span>
+                        <span class="sector-badge">📁 {sector}</span>
+                        {f'<div class="ai-badges">{badges_html}</div>' if badges_html else ''}
+                    </div>
+                    <div class="card-company-name">{name}</div>
+                    <div class="card-sub-info">Sector: <strong style="color: #cbd5e1;">{sector}</strong> • Cap: {cap_str} • Alpha vs SPY: {alpha_str}</div>
                 </div>
-                <div class="text-right">
-                    <div class="text-2xl font-mono font-bold text-white">{curr_sym}{price:.2f}</div>
+                <div class="card-price-box">
+                    <div class="card-price font-mono">{curr_sym}{price:.2f}</div>
                     <span class="badge {badge_class}">{sign}{chg:.2f}%</span>
                 </div>
             </div>
 
-            <div class="grid grid-cols-4 gap-2 py-2 mb-3 bg-gray-900 rounded p-2 text-xs font-mono">
-                <div><span class="text-gray-400">Low:</span> {curr_sym}{day_low:.2f}</div>
-                <div><span class="text-gray-400">High:</span> {curr_sym}{day_high:.2f}</div>
-                <div><span class="text-gray-400">Volume:</span> {vol_str}</div>
-                <div><span class="text-gray-400">RVOL:</span> {rvol:.1f}x</div>
+            <!-- Day Range Bar -->
+            <div class="card-range-box">
+                <div class="range-labels">
+                    <span>Low: <strong>{curr_sym}{day_low:.2f}</strong></span>
+                    <span class="text-cyan-400">Range: {pos_pct:.0f}%</span>
+                    <span>High: <strong>{curr_sym}{day_high:.2f}</strong></span>
+                </div>
+                <div class="range-bar">
+                    <div class="range-fill" style="width: {pos_pct}%;"></div>
+                    <div class="range-pip" style="left: {pos_pct}%;"></div>
+                </div>
             </div>
 
-            <div class="mb-3">
-                <span class="catalyst-tag mb-1 inline-block">{cat}</span>
-                <p class="text-sm text-gray-200 mt-1"><strong>Trading Reason:</strong> {item['reason_summary']}</p>
+            <!-- 4-Cell Micro Metrics Grid -->
+            <div class="metrics-grid">
+                <div class="m-cell">
+                    <div class="m-label">Volume (RVOL)</div>
+                    <div class="m-val">{vol_str} <span class="{'text-amber font-bold' if rvol >= 1.5 else 'text-gray-400'}">({rvol:.1f}x)</span></div>
+                </div>
+                <div class="m-cell">
+                    <div class="m-label">RSI (14)</div>
+                    <div class="m-val {rsi_class}">{rsi_str}</div>
+                </div>
+                <div class="m-cell">
+                    <div class="m-label">52W Range</div>
+                    <div class="m-val text-gray-300">{curr_sym}{item.get('low_52w', 0.0):.1f} - {curr_sym}{item.get('high_52w', 0.0):.1f}</div>
+                </div>
+                <div class="m-cell">
+                    <div class="m-label">Market Cap</div>
+                    <div class="m-val text-gray-300">{cap_str}</div>
+                </div>
             </div>
 
-            <div class="border-t border-gray-800 pt-3">
-                <h4 class="text-xs uppercase tracking-wider text-gray-400 font-bold mb-2">Latest News & Catalysts</h4>
-                <ul class="list-disc list-inside text-sm text-gray-300">
+            <!-- Catalyst & Reason -->
+            <div class="catalyst-box">
+                <div class="cat-badge-line"><span class="catalyst-tag">{cat}</span></div>
+                <p class="cat-reason"><strong>Trading Reason:</strong> {item['reason_summary']}</p>
+            </div>
+
+            <!-- Collapsible News Drawer -->
+            <details class="news-drawer">
+                <summary class="drawer-toggle">
+                    <span>📰 Latest News & Catalysts ({len(item.get('news', []))})</span>
+                    <span class="toggle-arrow">▾</span>
+                </summary>
+                <ul class="news-list">
                     {news_block}
                 </ul>
-            </div>
+            </details>
         </div>
         """)
 
@@ -859,103 +1016,905 @@ def generate_html_dashboard(data: List[Dict[str, Any]], fear_greed: str, output_
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#080c16">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="format-detection" content="telephone=no">
     <title>Gloomberb - Most Traded Stocks Dashboard</title>
     <style>
-        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-        body {{ background-color: #0b0f19; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding: 24px; }}
-        .container {{ max-width: 1400px; margin: 0 auto; }}
-        .header {{ display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 20px; margin-bottom: 24px; }}
-        .title {{ font-size: 26px; font-weight: 800; color: #38bdf8; letter-spacing: -0.5px; }}
-        .subtitle {{ font-size: 13px; color: #94a3b8; margin-top: 4px; }}
-        .kpi-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 28px; }}
-        .kpi-card {{ background: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 16px; }}
-        .kpi-label {{ font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #9ca3af; }}
-        .kpi-val {{ font-size: 22px; font-weight: 700; margin-top: 6px; font-family: ui-monospace, monospace; }}
-        .table-card {{ background: #111827; border: 1px solid #1f2937; border-radius: 8px; overflow: hidden; margin-bottom: 32px; }}
-        table {{ width: 100%; border-collapse: collapse; text-align: left; }}
-        th {{ background: #1f2937; color: #cbd5e1; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; padding: 12px 16px; font-weight: 600; }}
-        td {{ padding: 14px 16px; border-bottom: 1px solid #1f2937; font-size: 14px; vertical-align: middle; }}
-        tr:hover {{ background-color: #1a2234; }}
-        .badge {{ display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; font-family: ui-monospace, monospace; }}
-        .badge-green {{ background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }}
-        .badge-red {{ background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }}
-        .catalyst-tag {{ background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 4px; padding: 3px 8px; font-size: 11px; font-weight: 700; }}
-        .range-container {{ display: flex; align-items: center; gap: 8px; width: 180px; font-family: ui-monospace, monospace; font-size: 11px; color: #94a3b8; }}
-        .range-bar {{ flex: 1; height: 6px; background: #374151; border-radius: 3px; position: relative; overflow: hidden; }}
-        .range-fill {{ height: 100%; background: #38bdf8; border-radius: 3px; }}
-        .cards-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 20px; }}
-        .stock-card {{ background: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 20px; }}
-        .news-link {{ color: #cbd5e1; text-decoration: none; transition: color 0.2s; }}
-        .news-link:hover {{ color: #38bdf8; text-decoration: underline; }}
-        .text-cyan-400 {{ color: #22d3ee; }}
-        .text-yellow-400 {{ color: #facc15; }}
-        .text-gray-400 {{ color: #9ca3af; }}
+        :root {{
+            color-scheme: dark;
+            --bg: #080c16;
+            --surface: #0e1626;
+            --surface-elevated: #131e33;
+            --surface-hover: #192742;
+            --border: #1e293b;
+            --border-accent: #334155;
+            --text-main: #f8fafc;
+            --text-sub: #94a3b8;
+            --text-dim: #64748b;
+            --cyan: #38bdf8;
+            --cyan-glow: rgba(56, 189, 248, 0.15);
+            --green: #34d399;
+            --green-glow: rgba(16, 185, 129, 0.15);
+            --red: #f87171;
+            --red-glow: rgba(239, 68, 68, 0.15);
+            --amber: #fbbf24;
+            --purple: #c084fc;
+            --purple-glow: rgba(192, 132, 252, 0.16);
+        }}
+        * {{ box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }}
+        html, body {{
+            background-color: var(--bg);
+            color: var(--text-main);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            min-height: 100vh;
+            min-height: 100dvh;
+            scroll-behavior: smooth;
+        }}
+        body {{
+            padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(28px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+        }}
+        .container {{
+            max-width: 1400px;
+            margin: 0 auto;
+        }}
+
+        /* Sticky Glassmorphic Header */
+        .header {{
+            position: sticky;
+            top: 0;
+            z-index: 40;
+            background: rgba(8, 12, 22, 0.88);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 0 16px 0;
+            margin-bottom: 20px;
+        }}
+        .header-content {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+        }}
+        .brand-group {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }}
+        .live-dot {{
+            width: 9px;
+            height: 9px;
+            background-color: var(--green);
+            border-radius: 50%;
+            box-shadow: 0 0 10px var(--green);
+            animation: pulse-dot 2s infinite ease-in-out;
+            display: inline-block;
+        }}
+        @keyframes pulse-dot {{
+            0%, 100% {{ opacity: 1; transform: scale(1); }}
+            50% {{ opacity: 0.4; transform: scale(0.85); }}
+        }}
+        .title {{
+            font-size: 22px;
+            font-weight: 800;
+            color: var(--cyan);
+            letter-spacing: -0.5px;
+        }}
+        .subtitle {{
+            font-size: 12px;
+            color: var(--text-sub);
+            margin-top: 3px;
+        }}
+        .fg-badge {{
+            background: var(--cyan-glow);
+            color: var(--cyan);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            border-radius: 20px;
+            padding: 6px 14px;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            white-space: nowrap;
+        }}
+
+        /* KPI Horizontal Scroll / Grid */
+        .kpi-scroll-wrapper {{
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            padding-bottom: 8px;
+            margin-bottom: 20px;
+            scroll-snap-type: x mandatory;
+        }}
+        .kpi-grid {{
+            display: flex;
+            gap: 12px;
+            min-width: min-content;
+        }}
+        @media (min-width: 900px) {{
+            .kpi-grid {{
+                display: grid;
+                grid-template-columns: repeat(5, 1fr);
+                min-width: auto;
+            }}
+        }}
+        .kpi-card {{
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px 16px;
+            flex: 0 0 200px;
+            scroll-snap-align: start;
+        }}
+        .kpi-label {{
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-dim);
+            font-weight: 600;
+        }}
+        .kpi-val {{
+            font-size: 20px;
+            font-weight: 800;
+            margin-top: 4px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+            white-space: nowrap;
+        }}
+
+        /* Sticky Control Ribbon (Search + Filter Chips + View Mode) */
+        .controls-ribbon {{
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 12px;
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }}
+        @media (min-width: 768px) {{
+            .controls-ribbon {{
+                flex-direction: row;
+                justify-content: space-between;
+                align-items: center;
+            }}
+        }}
+        .search-wrap {{
+            position: relative;
+            flex: 1;
+            max-width: 100%;
+        }}
+        .search-input {{
+            width: 100%;
+            background: #080c16;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px 14px 10px 36px;
+            color: var(--text-main);
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            touch-action: manipulation;
+        }}
+        .search-input:focus {{
+            border-color: var(--cyan);
+            box-shadow: 0 0 0 2px var(--cyan-glow);
+        }}
+        .search-icon {{
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-dim);
+            font-size: 14px;
+            pointer-events: none;
+        }}
+        .clear-btn {{
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--text-dim);
+            font-size: 14px;
+            cursor: pointer;
+            padding: 4px;
+            display: none;
+        }}
+
+        .filter-actions {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+        }}
+        .filter-chips {{
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            padding-bottom: 4px;
+            scrollbar-width: none;
+        }}
+        .filter-chips::-webkit-scrollbar {{ display: none; }}
+        .chip {{
+            background: #080c16;
+            border: 1px solid var(--border);
+            color: var(--text-sub);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+            cursor: pointer;
+            touch-action: manipulation;
+            transition: all 0.2s;
+        }}
+        .chip:hover {{
+            background: var(--surface-elevated);
+            color: var(--text-main);
+        }}
+        .chip.active {{
+            background: var(--cyan);
+            color: #080c16;
+            border-color: var(--cyan);
+            font-weight: 700;
+        }}
+        .chip:active {{
+            transform: scale(0.96);
+        }}
+
+        .view-switch {{
+            display: flex;
+            background: #080c16;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 3px;
+            gap: 2px;
+            align-self: flex-end;
+        }}
+        .view-btn {{
+            background: transparent;
+            border: none;
+            color: var(--text-sub);
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            touch-action: manipulation;
+            transition: all 0.2s;
+        }}
+        .view-btn.active {{
+            background: var(--surface-elevated);
+            color: var(--cyan);
+            font-weight: 700;
+        }}
+
+        /* Stock Cards Grid (Mobile First) */
+        .cards-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: 16px;
+            margin-bottom: 32px;
+        }}
+        @media (max-width: 480px) {{
+            .cards-grid {{
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }}
+        }}
+        .stock-card {{
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 16px;
+            transition: transform 0.15s, border-color 0.2s;
+        }}
+        .stock-card:active {{
+            border-color: var(--border-accent);
+        }}
+        .card-head {{
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+            gap: 10px;
+        }}
+        .card-identity {{
+            flex: 1;
+            min-width: 0;
+        }}
+        .symbol-line {{
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+        }}
+        .card-sym {{
+            font-size: 20px;
+            font-weight: 800;
+            color: var(--text-main);
+            letter-spacing: -0.3px;
+        }}
+        .ai-badges {{
+            display: inline-flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }}
+        .card-company-name {{
+            font-size: 13px;
+            color: var(--text-sub);
+            margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }}
+        .card-sub-info {{
+            font-size: 11px;
+            color: var(--text-dim);
+            margin-top: 2px;
+        }}
+        .card-price-box {{
+            text-align: right;
+            flex-shrink: 0;
+        }}
+        .card-price {{
+            font-size: 20px;
+            font-weight: 800;
+            color: var(--text-main);
+            letter-spacing: -0.5px;
+        }}
+
+        /* Badges */
+        .badge {{
+            display: inline-flex;
+            align-items: center;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+            white-space: nowrap;
+        }}
+        .badge-green {{ background: var(--green-glow); color: var(--green); border: 1px solid rgba(16, 185, 129, 0.3); }}
+        .badge-red {{ background: var(--red-glow); color: var(--red); border: 1px solid rgba(239, 68, 68, 0.3); }}
+        .badge-dec-buy {{ background: rgba(16, 185, 129, 0.22); color: #4ade80; border: 1px solid rgba(16, 185, 129, 0.4); }}
+        .badge-dec-sell {{ background: rgba(239, 68, 68, 0.22); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }}
+        .badge-dec-hold {{ background: rgba(100, 116, 139, 0.2); color: #94a3b8; border: 1px solid rgba(100, 116, 139, 0.3); }}
+        .badge-danelfin {{ background: var(--purple-glow); color: var(--purple); border: 1px solid rgba(192, 132, 252, 0.4); }}
+        .badge-danelfin-sm {{ background: var(--purple-glow); color: var(--purple); border: 1px solid rgba(192, 132, 252, 0.4); font-size: 10px; padding: 2px 5px; }}
+        .sector-badge {{ background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.28); font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 6px; letter-spacing: 0.02em; white-space: nowrap; }}
+        .sector-badge-sm {{ background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.28); font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 4px; white-space: nowrap; }}
+
+        /* Intraday Range Visualizer */
+        .card-range-box {{
+            background: #080c16;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px 12px;
+            margin-bottom: 12px;
+        }}
+        .range-labels {{
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+            color: var(--text-dim);
+            margin-bottom: 6px;
+        }}
+        .range-labels strong {{ color: var(--text-main); }}
+        .range-container {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            min-width: 170px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+            font-size: 11px;
+            color: var(--text-sub);
+        }}
+        .range-bar {{
+            position: relative;
+            flex: 1;
+            height: 6px;
+            background: #1e293b;
+            border-radius: 3px;
+        }}
+        .range-fill {{
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            background: linear-gradient(90deg, #0284c7, var(--cyan));
+            border-radius: 3px;
+        }}
+        .range-pip {{
+            position: absolute;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 8px;
+            height: 12px;
+            background: #ffffff;
+            border-radius: 3px;
+            box-shadow: 0 0 6px rgba(255, 255, 255, 0.8);
+        }}
+
+        /* Metrics Grid */
+        .metrics-grid {{
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            background: #080c16;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px;
+            margin-bottom: 12px;
+        }}
+        @media (max-width: 380px) {{
+            .metrics-grid {{
+                grid-template-columns: repeat(2, 1fr);
+            }}
+        }}
+        .m-cell {{
+            text-align: left;
+        }}
+        .m-label {{
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-dim);
+        }}
+        .m-val {{
+            font-size: 12px;
+            font-weight: 700;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+            margin-top: 3px;
+            color: var(--text-main);
+        }}
+        .rvol-surge {{ color: var(--amber) !important; font-weight: 800; }}
+        .rsi-hot {{ color: var(--red) !important; font-weight: 800; }}
+        .rsi-cold {{ color: var(--green) !important; font-weight: 800; }}
+        .text-amber {{ color: var(--amber); }}
+
+        /* Catalyst Box */
+        .catalyst-box {{
+            background: rgba(19, 30, 51, 0.4);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px 12px;
+            margin-bottom: 12px;
+        }}
+        .cat-badge-line {{
+            margin-bottom: 6px;
+        }}
+        .catalyst-tag {{
+            background: rgba(245, 158, 11, 0.15);
+            color: var(--amber);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            border-radius: 6px;
+            padding: 3px 8px;
+            font-size: 11px;
+            font-weight: 700;
+            display: inline-block;
+        }}
+        .cat-reason {{
+            font-size: 13px;
+            color: #e2e8f0;
+            line-height: 1.45;
+        }}
+
+        /* Collapsible News Drawer */
+        .news-drawer {{
+            border-top: 1px solid var(--border);
+            padding-top: 10px;
+        }}
+        .drawer-toggle {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-sub);
+            cursor: pointer;
+            list-style: none;
+            user-select: none;
+            padding: 4px 0;
+            touch-action: manipulation;
+        }}
+        .drawer-toggle::-webkit-details-marker {{ display: none; }}
+        .drawer-toggle:hover {{ color: var(--cyan); }}
+        .toggle-arrow {{
+            transition: transform 0.2s ease;
+            color: var(--text-dim);
+            font-size: 13px;
+        }}
+        details[open] .toggle-arrow {{
+            transform: rotate(180deg);
+            color: var(--cyan);
+        }}
+        .news-list {{
+            list-style: none;
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }}
+        .news-item {{
+            font-size: 13px;
+            line-height: 1.4;
+        }}
+        .news-link {{
+            color: #cbd5e1;
+            text-decoration: none;
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+            transition: color 0.15s;
+        }}
+        .news-link:hover {{
+            color: var(--cyan);
+        }}
+        .news-pub {{
+            color: var(--cyan);
+            font-weight: 700;
+            font-size: 11px;
+            flex-shrink: 0;
+        }}
+        .ext-icon {{
+            font-size: 11px;
+            color: var(--text-dim);
+            margin-left: 2px;
+        }}
+
+        /* Table View (Horizontally Scrollable on Mobile with Sticky Column) */
+        .table-card {{
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            overflow: hidden;
+            margin-bottom: 32px;
+            display: none;
+        }}
+        .table-scroll-container {{
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            min-width: 900px;
+        }}
+        th {{
+            background: #131e33;
+            color: #cbd5e1;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 12px 14px;
+            font-weight: 700;
+            border-bottom: 1px solid var(--border);
+        }}
+        td {{
+            padding: 12px 14px;
+            border-bottom: 1px solid #141f36;
+            font-size: 13px;
+            vertical-align: middle;
+        }}
+        tr.stock-row:hover {{
+            background-color: var(--surface-hover);
+        }}
+        .sticky-col {{
+            position: sticky;
+            left: 0;
+            background: var(--surface);
+            z-index: 2;
+            box-shadow: 3px 0 6px rgba(0,0,0,0.35);
+        }}
+        th.sticky-col {{
+            background: #131e33;
+            z-index: 3;
+        }}
+        .sym-name-wrap {{
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }}
+        .sym-code {{
+            font-size: 15px;
+        }}
+        .truncate-name {{
+            max-width: 150px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }}
+        .table-pills {{
+            display: flex;
+            gap: 4px;
+            margin-top: 3px;
+        }}
+
+        /* Floating Back to Top Button */
+        .fab-top {{
+            position: fixed;
+            bottom: max(20px, env(safe-area-inset-bottom));
+            right: 20px;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: var(--cyan);
+            color: #080c16;
+            border: none;
+            font-size: 18px;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 14px rgba(56, 189, 248, 0.4);
+            cursor: pointer;
+            z-index: 50;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.25s ease;
+            touch-action: manipulation;
+        }}
+        .fab-top.show {{
+            opacity: 1;
+            visibility: visible;
+        }}
+        .fab-top:active {{
+            transform: scale(0.92);
+        }}
+
+        /* Utilities */
+        .text-cyan-400 {{ color: var(--cyan); }}
+        .text-yellow-400 {{ color: var(--amber); }}
+        .text-gray-400 {{ color: var(--text-sub); }}
+        .text-white {{ color: #ffffff; }}
+        .font-mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace; }}
+        .text-right {{ text-align: right; }}
+        .text-center {{ text-align: center; }}
+        .font-bold {{ font-weight: 700; }}
         .text-xs {{ font-size: 11px; }}
+        .text-sm {{ font-size: 13px; }}
+        .max-w-xs {{ max-width: 280px; }}
+
+        /* Hidden Filter State */
+        .is-hidden {{
+            display: none !important;
+        }}
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <div>
-                <div class="title">⚡ Gloomberb Most Traded Stocks Dashboard</div>
-                <div class="subtitle">High-Volume Intraday Movers, Price Geometry & Catalyst Drivers • {now_str}</div>
+        <!-- Top App Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="brand-group">
+                    <span class="live-dot" title="Live Intelligence Active"></span>
+                    <div>
+                        <div class="title">⚡ Gloomberb Most Traded Stocks Dashboard</div>
+                        <div class="subtitle">High-Volume Intraday Movers, Price Geometry & Catalyst Drivers • {now_str}</div>
+                    </div>
+                </div>
+                <div>
+                    <span class="fg-badge">
+                        {fear_greed}
+                    </span>
+                </div>
             </div>
-            <div>
-                <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 8px 12px; font-size: 13px;">
-                    {fear_greed}
-                </span>
+        </header>
+
+        <!-- KPI Strip -->
+        <div class="kpi-scroll-wrapper">
+            <div class="kpi-grid">
+                <div class="kpi-card">
+                    <div class="kpi-label">Active Stocks Tracked</div>
+                    <div class="kpi-val text-cyan-400">{len(data)} Stocks</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-label">Combined Volume</div>
+                    <div class="kpi-val text-white">{format_volume(total_vol)}</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-label">Volume Leader</div>
+                    <div class="kpi-val text-yellow-400">{top_volume_stock}</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-label">Top Active Gainer</div>
+                    <div class="kpi-val" style="color: var(--green);">{top_gainer.get('symbol', 'N/A')} ({top_gainer.get('change_pct', 0.0):+.2f}%)</div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-label">Top Active Decliner</div>
+                    <div class="kpi-val" style="color: var(--red);">{top_decliner.get('symbol', 'N/A')} ({top_decliner.get('change_pct', 0.0):+.2f}%)</div>
+                </div>
             </div>
         </div>
 
-        <div class="kpi-grid">
-            <div class="kpi-card">
-                <div class="kpi-label">Active Stocks Tracked</div>
-                <div class="kpi-val text-cyan-400">{len(data)} Stocks</div>
+        <!-- Sticky Controls Ribbon -->
+        <div class="controls-ribbon">
+            <div class="search-wrap">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="searchInput" class="search-input" placeholder="Search ticker, company, catalyst..." autocomplete="off" autocapitalize="none" spellcheck="false" />
+                <button id="clearSearch" class="clear-btn" onclick="clearSearch()">✕</button>
             </div>
-            <div class="kpi-card">
-                <div class="kpi-label">Combined Volume</div>
-                <div class="kpi-val text-white">{format_volume(total_vol)}</div>
-            </div>
-            <div class="kpi-card">
-                <div class="kpi-label">Volume Leader</div>
-                <div class="kpi-val text-yellow-400">{top_volume_stock}</div>
-            </div>
-            <div class="kpi-card">
-                <div class="kpi-label">Top Active Gainer</div>
-                <div class="kpi-val" style="color: #34d399;">{top_gainer.get('symbol', 'N/A')} ({top_gainer.get('change_pct', 0.0):+.2f}%)</div>
-            </div>
-            <div class="kpi-card">
-                <div class="kpi-label">Top Active Decliner</div>
-                <div class="kpi-val" style="color: #f87171;">{top_decliner.get('symbol', 'N/A')} ({top_decliner.get('change_pct', 0.0):+.2f}%)</div>
+            <div class="filter-actions">
+                <div class="filter-chips">
+                    <button class="chip active" data-filter="all" onclick="applyFilter('all')">All ({len(data)})</button>
+                    {f'<button class="chip" data-filter="buy" onclick="applyFilter(\'buy\')">🟢 AI BUYs ({buy_count})</button>' if buy_count > 0 else ''}
+                    {f'<button class="chip" data-filter="danelfin" onclick="applyFilter(\'danelfin\')">⭐ Danelfin AI ({danelfin_count})</button>' if danelfin_count > 0 else ''}
+                    <button class="chip" data-filter="gainers" onclick="applyFilter('gainers')">📈 Gainers ({gainers_count})</button>
+                    <button class="chip" data-filter="decliners" onclick="applyFilter('decliners')">📉 Decliners ({decliners_count})</button>
+                    <button class="chip" data-filter="rvol" onclick="applyFilter('rvol')">⚡ Vol Surge ({rvol_count})</button>
+                </div>
+                <div class="view-switch">
+                    <button id="btnCards" class="view-btn active" onclick="setViewMode('cards')">📱 Cards</button>
+                    <button id="btnTable" class="view-btn" onclick="setViewMode('table')">📊 Table</button>
+                </div>
             </div>
         </div>
 
-        <div class="table-card">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Symbol & Name</th>
-                        <th style="text-align: right;">Price</th>
-                        <th style="text-align: right;">Change</th>
-                        <th style="text-align: center;">Day Range</th>
-                        <th style="text-align: right;">Volume (RVOL)</th>
-                        <th style="text-align: center;">RSI(14)</th>
-                        <th>Catalyst</th>
-                        <th>Trading Driver Summary</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {"".join(rows_html)}
-                </tbody>
-            </table>
-        </div>
-
-        <h2 style="font-size: 18px; font-weight: 700; color: #38bdf8; margin-bottom: 16px;">📰 Catalyst & News Deep Dive</h2>
-        <div class="cards-grid">
+        <!-- Stock Cards View (Default for Mobile) -->
+        <main id="cardsView" class="cards-grid">
             {"".join(cards_html)}
+        </main>
+
+        <!-- Table View -->
+        <div id="tableView" class="table-card">
+            <div class="table-scroll-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="sticky-col">Symbol & Name</th>
+                            <th style="text-align: right;">Price</th>
+                            <th style="text-align: right;">Change</th>
+                            <th style="text-align: center;">Day Range</th>
+                            <th style="text-align: right;">Volume (RVOL)</th>
+                            <th style="text-align: center;">RSI(14)</th>
+                            <th>Catalyst</th>
+                            <th>Trading Driver Summary</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {"".join(rows_html)}
+                    </tbody>
+                </table>
+            </div>
         </div>
+
+        <!-- Floating Scroll-To-Top Button -->
+        <button id="fabTop" class="fab-top" onclick="window.scrollTo({{ top: 0, behavior: 'smooth' }})" aria-label="Scroll to top">↑</button>
     </div>
+
+    <!-- Client-side Interactive Filtering & Mobile Enhancements -->
+    <script>
+        let currentFilter = 'all';
+        let currentView = 'cards';
+
+        const searchInput = document.getElementById('searchInput');
+        const clearBtn = document.getElementById('clearSearch');
+        const fabTop = document.getElementById('fabTop');
+
+        // Scroll listener for back-to-top FAB
+        window.addEventListener('scroll', () => {{
+            if (window.scrollY > 300) {{
+                fabTop.classList.add('show');
+            }} else {{
+                fabTop.classList.remove('show');
+            }}
+        }}, {{ passive: true }});
+
+        // Search input handling
+        searchInput.addEventListener('input', () => {{
+            if (searchInput.value.length > 0) {{
+                clearBtn.style.display = 'block';
+            }} else {{
+                clearBtn.style.display = 'none';
+            }}
+            filterStocks();
+        }});
+
+        function clearSearch() {{
+            searchInput.value = '';
+            clearBtn.style.display = 'none';
+            filterStocks();
+            searchInput.focus();
+        }}
+
+        function applyFilter(filterName) {{
+            currentFilter = filterName;
+            document.querySelectorAll('.filter-chips .chip').forEach(c => {{
+                if (c.getAttribute('data-filter') === filterName) {{
+                    c.classList.add('active');
+                }} else {{
+                    c.classList.remove('active');
+                }}
+            }});
+            filterStocks();
+        }}
+
+        function setViewMode(mode) {{
+            currentView = mode;
+            const cardsView = document.getElementById('cardsView');
+            const tableView = document.getElementById('tableView');
+            const btnCards = document.getElementById('btnCards');
+            const btnTable = document.getElementById('btnTable');
+
+            if (mode === 'cards') {{
+                cardsView.style.display = 'grid';
+                tableView.style.display = 'none';
+                btnCards.classList.add('active');
+                btnTable.classList.remove('active');
+            }} else {{
+                cardsView.style.display = 'none';
+                tableView.style.display = 'block';
+                btnCards.classList.remove('active');
+                btnTable.classList.add('active');
+            }}
+        }}
+
+        function filterStocks() {{
+            const query = (searchInput.value || '').trim().toLowerCase();
+            const cards = document.querySelectorAll('.stock-card');
+            const rows = document.querySelectorAll('.stock-row');
+
+            function matches(el) {{
+                const sym = (el.getAttribute('data-symbol') || '').toLowerCase();
+                const name = (el.getAttribute('data-name') || '').toLowerCase();
+                const sector = (el.getAttribute('data-sector') || '').toLowerCase();
+                const cat = (el.getAttribute('data-cat') || '').toLowerCase();
+                const decision = (el.getAttribute('data-decision') || '').toUpperCase();
+                const danelfin = el.getAttribute('data-danelfin');
+                const chg = parseFloat(el.getAttribute('data-change') || '0');
+                const rvol = parseFloat(el.getAttribute('data-rvol') || '1');
+
+                // Filter chip check
+                let filterPass = true;
+                if (currentFilter === 'buy') {{
+                    filterPass = decision === 'BUY';
+                }} else if (currentFilter === 'danelfin') {{
+                    filterPass = danelfin !== '' && danelfin !== null && danelfin !== 'None';
+                }} else if (currentFilter === 'gainers') {{
+                    filterPass = chg >= 0;
+                }} else if (currentFilter === 'decliners') {{
+                    filterPass = chg < 0;
+                }} else if (currentFilter === 'rvol') {{
+                    filterPass = rvol >= 1.5;
+                }}
+
+                if (!filterPass) return false;
+
+                // Query search check
+                if (!query) return true;
+                return sym.includes(query) || name.includes(query) || sector.includes(query) || cat.includes(query);
+            }}
+
+            cards.forEach(card => {{
+                if (matches(card)) {{
+                    card.classList.remove('is-hidden');
+                }} else {{
+                    card.classList.add('is-hidden');
+                }}
+            }});
+
+            rows.forEach(row => {{
+                if (matches(row)) {{
+                    row.classList.remove('is-hidden');
+                }} else {{
+                    row.classList.add('is-hidden');
+                }}
+            }});
+        }}
+    </script>
 </body>
 </html>"""
 
@@ -963,6 +1922,7 @@ def generate_html_dashboard(data: List[Dict[str, Any]], fear_greed: str, output_
         f.write(html_content)
 
     print(f"\n[Dashboard] Standalone HTML dashboard saved successfully to '{output_path}'.")
+    return output_path
     return output_path
 
 

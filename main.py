@@ -32,9 +32,10 @@ from catalyst_service import (
     evaluate_catalyst_setup,
 )
 from signal_schema import validate_signal_json
-from ticker_resolver import resolve_symbol
+from ticker_resolver import resolve_symbol, get_company_profile
 from ml_signal_service import format_ml_context, get_ml_context
 from quant.composite_score import format_quant_and_ml_context, blend_quant_and_ml_scores
+from quant.sector_frameworks import get_sector_temperature
 from danelfin_service import DanelfinService
 from policy_config import TradingPolicy, load_policy_config
 from decision_precedence import (
@@ -1700,14 +1701,17 @@ def main():
                 context["user_prompt"] += format_danelfin_context(danelfin_scores)
 
             # 6. Model Reasoning Core & Market Analysis
-            print(f"[{model_label}] Executing market analysis for {symbol}...")
+            sector = context.get("sector") or get_company_profile(symbol)["sector"]
+            effective_temp = get_sector_temperature(sector, override_temp=args.temperature)
+            temp_desc = f"CLI Override ({args.temperature})" if args.temperature is not None else f"Sector Calibrated ({effective_temp:.2f})"
+            print(f"[{model_label}] Executing market analysis for {symbol} (Sector: {sector} | Temperature: {effective_temp:.2f} [{temp_desc}])...")
 
             try:
                 res_content = query_llm(
                     system_instruction=context["system_instruction"],
                     user_prompt=context["user_prompt"],
                     model_choice=model_choice,
-                    temperature=args.temperature,
+                    temperature=effective_temp,
                     reasoning_budget=args.reasoning_budget,
                     reasoning_effort=args.reasoning_effort
                 )
@@ -1771,7 +1775,7 @@ def main():
                             system_instruction=context["system_instruction"],
                             user_prompt=retry_prompt,
                             model_choice=model_choice,
-                            temperature=args.temperature,
+                            temperature=effective_temp,
                             reasoning_budget=args.reasoning_budget,
                             reasoning_effort=args.reasoning_effort
                         )
@@ -1831,6 +1835,9 @@ def main():
                         normalized_obj["no_trade_reason"] = "SCHEMA_INVALID"
                         normalized_obj["decision"] = "HOLD"
                         normalized_obj["decision_origin"] = "SCHEMA_INVALID"
+
+                    normalized_obj["sector"] = sector
+                    normalized_obj["sector_temperature"] = effective_temp
 
                     # Step 4.1: Attach auditable evidence records to normalized signal
                     normalized_obj["evidence_records"] = context.get("evidence_records", [])

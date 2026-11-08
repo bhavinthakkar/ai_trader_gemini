@@ -1,0 +1,39 @@
+{
+  "total_cases_evaluated": 1,
+  "baseline_mean_compliance_score": 37.4,
+  "sector_aware_mean_compliance_score": 31.1,
+  "compliance_score_improvement": -6.3,
+  "forbidden_metric_violations_baseline": 1,
+  "forbidden_metric_violations_sector_aware": 2,
+  "trap_avoidance_rate_baseline_pct": 0.0,
+  "trap_avoidance_rate_sector_aware_pct": 0.0,
+  "results": [
+    {
+      "case_id": "SEC_01_FINANCIALS",
+      "symbol": "ING",
+      "sector": "Financials",
+      "calibrated_temp": 0.1,
+      "baseline_decision": "BUY",
+      "baseline_confidence": 0.68,
+      "baseline_mandatory_hits": 6,
+      "baseline_mandatory_total": 9,
+      "baseline_forbidden_violations": 1,
+      "baseline_driver_hits": 6,
+      "baseline_driver_total": 7,
+      "baseline_avoided_trap": false,
+      "baseline_reasoning": "The assessment points to a cautiously positive stance. ING has a strong CET1 position and announced a \u20ac2.5B buyback supported by a 390 bps surplus. The P/TBV of 1.12x and forward P/E of 9.8x suggest the market is not fully rewarding the bank's earnings or book value. Q3 net interest income resilience and a steepening yield curve add support. However, negative free cash flow, modest NIM, and rising cost of risk warrant risk awareness. The net evidence supports a BUY, but with moderate confidence due to FCF and margin uncertainties.",
+      "sector_decision": "BUY",
+      "sector_confidence": 0.68,
+      "sector_mandatory_hits": 7,
+      "sector_mandatory_total": 9,
+      "sector_forbidden_violations": 2,
+      "sector_driver_hits": 7,
+      "sector_driver_total": 7,
+      "sector_avoided_trap": false,
+      "sector_reasoning": "ING appears attractively valued relative to tangible book and offers a high return on tangible equity. The yield curve steepening (+35 bps) should benefit net interest margin, while Q3 net interest income resilience and loan growth suggest operating strength. The CET1 surplus of 390 bps and EUR 2.5B buyback provide capital return upside. Cost of risk at 16 bps is low. However, negative FCF and potential NIM or credit risks temper confidence. The stance is constructive but not aggressive.",
+      "baseline_compliance_score": 37.4,
+      "sector_compliance_score": 31.1,
+      "compliance_score_delta": -6.3
+    }
+  ]
+}

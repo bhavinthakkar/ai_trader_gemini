@@ -37,6 +37,12 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 # Quantitative 5-Pillar Scoring Engine
 from quantitative_scoring_service import QuantitativeScoringService
 from quant.composite_score import blend_quant_and_ml_scores
+from quant.sector_frameworks import (
+    format_sector_system_prompt_overlay,
+    normalize_sector_name,
+    get_sector_temperature,
+)
+from ticker_resolver import get_company_profile
 
 # Step 4.1 Auditable Evidence Record
 from evidence_record import (
@@ -1077,6 +1083,23 @@ Schema:
         sector_bench = gloomberb_payload.get("sector_benchmark", {})
         options_flow = gloomberb_payload.get("options", {})
 
+        # Resolve sector dynamically across profile, benchmark, technicals, or ticker directory
+        raw_sector = (
+            profile.get("sector")
+            or gloomberb_payload.get("sector")
+            or sector_bench.get("sector_name")
+            or (technical_data.get("sector") if isinstance(technical_data, dict) else None)
+        )
+        if (not raw_sector or raw_sector == "Equities") and symbol and symbol != "N/A":
+            try:
+                prof = get_company_profile(symbol)
+                if prof.get("sector") and prof["sector"] != "Equities":
+                    raw_sector = prof["sector"]
+            except Exception:
+                pass
+        sector = normalize_sector_name(raw_sector)
+        sector_overlay = format_sector_system_prompt_overlay(sector, compact=compact)
+
         # Compute deterministic 5-pillar quantitative scores (0-100)
         quant_service = QuantitativeScoringService()
         quant_scores = quant_service.compute_5pillar_scores(technical_data, gloomberb_payload, sector_bench)
@@ -1111,7 +1134,7 @@ Schema:
         market_benchmark_summary = {
             "symbol": symbol,
             "data_source_status": source_status,
-            "sector": profile.get("sector", "N/A"),
+            "sector": sector,
             "deterministic_quant_score": det_comp,
             "ml_20session_score": eff_ml_score,
             "ml_weight": eff_ml_w,
@@ -1306,20 +1329,24 @@ Execute multi-step analytical reasoning:
 4. Consider the quantitative score values (Deterministic Quant Score, ML 20-Session Score, and Blended Composite) alongside market evidence.
 5. Evaluate setup geometry: review structural stop, target, reward-to-risk ratio, and distance to resistance. Compare entry price with Wall Street consensus targets.
 6. Fed Rate-Policy Integration: from the interest_rate_outlook block, state the implied Fed stance (restrictive/neutral/accommodative), the expected cut/hike path and FOMC timing window, and how that path transmits to this company's valuation, debt/financing costs, and sector before finalizing the decision. If fed funds rate, real yields, or a rate-path signal is missing, say so in missing_information instead of assuming neutral policy.
+7. Sector-Specific Drivers & Valuation Rules: Factor in the primary market-driving factors and strict valuation mandates prescribed for the {sector} sector in the system instructions.
 Return a valid JSON object matching the required schema.
 """
 
-        system_instruction = (
+        base_instruction = (
             self.LOCAL_QWEN_SYSTEM_INSTRUCTION.strip()
             if compact
             else self.NEMOTRON_SYSTEM_INSTRUCTION.strip()
         )
+        system_instruction = base_instruction + "\n" + sector_overlay
         return {
             "system_instruction": system_instruction,
             "user_prompt": user_prompt.strip(),
             "technical_summary": market_benchmark_summary,
             "prompt_profile": prompt_profile,
             "evidence_records": [r.to_dict() for r in getattr(self, "last_retrieved_evidence_records", [])],
+            "sector": sector,
+            "recommended_temperature": get_sector_temperature(sector),
         }
 
     def get_portfolio_analysis_payload(

@@ -16,6 +16,14 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(data["status"], "healthy")
         self.assertEqual(data["app"], "AI Trader API")
 
+    def test_dashboard_html_endpoint(self):
+        resp = self.client.get("/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("text/html", resp.headers.get("content-type", ""))
+        resp_dash = self.client.get("/dashboard")
+        self.assertEqual(resp_dash.status_code, 200)
+        self.assertIn("text/html", resp_dash.headers.get("content-type", ""))
+
     def test_danelfin_quota(self):
         resp = self.client.get("/api/danelfin/quota")
         self.assertEqual(resp.status_code, 200)

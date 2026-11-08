@@ -16,7 +16,7 @@ from db import (
     get_pending_signals
 )
 from dashboard import collect_dashboard_data, format_volume
-from ticker_resolver import resolve_symbol, is_european_symbol, get_currency_for_symbol
+from ticker_resolver import resolve_symbol, is_european_symbol, get_currency_for_symbol, get_company_profile
 from ml_signal_service import classify_ml_signal, get_ml_context, get_all_ml_scores
 from quant.order_execution import GLOBAL_KILL_SWITCH, KillSwitchReason
 from quant.compliance_gates import (
@@ -171,66 +171,114 @@ st.markdown("""
 
     /* Universal Touch-Friendly Buttons */
     .stButton>button {
-        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+        background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
         color: white;
         border: none;
         font-weight: 600;
-        border-radius: 8px;
-        padding: 0.55rem 1rem;
+        border-radius: 10px;
+        padding: 0.6rem 1.1rem;
         min-height: 44px;
         transition: all 0.2s ease-in-out;
         touch-action: manipulation;
     }
     .stButton>button:hover {
-        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-        box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+        background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
+        box-shadow: 0 4px 14px rgba(56, 189, 248, 0.35);
+    }
+    .stButton>button:active {
+        transform: scale(0.97);
     }
 
     /* Card styling for Metrics across all viewports */
     div[data-testid="stMetric"] {
-        background: #111827;
-        padding: 0.75rem 0.9rem;
-        border-radius: 10px;
-        border: 1px solid #1f2937;
-        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+        background: linear-gradient(145deg, #0e1626 0%, #131e33 100%) !important;
+        padding: 0.85rem 1rem !important;
+        border-radius: 12px !important;
+        border: 1px solid #1e293b !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+        transition: border-color 0.2s ease !important;
+    }
+    div[data-testid="stMetric"]:hover {
+        border-color: #334155 !important;
     }
     div[data-testid="stMetricValue"] {
-        font-size: clamp(1.1rem, 2.5vw, 1.45rem) !important;
-        font-weight: 700 !important;
-        color: #f8fafc !important;
+        font-size: clamp(1.15rem, 2.5vw, 1.55rem) !important;
+        font-weight: 800 !important;
+        color: #ffffff !important;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace !important;
+        letter-spacing: -0.3px !important;
         word-break: break-word !important;
         overflow-wrap: break-word !important;
     }
     div[data-testid="stMetricLabel"] {
-        font-size: 0.78rem !important;
+        font-size: 0.76rem !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.5px !important;
         color: #94a3b8 !important;
+        font-weight: 600 !important;
         white-space: normal !important;
         word-wrap: break-word !important;
     }
 
-    /* Mobile Swipeable Tab Bar */
+    /* Mobile Swipeable Tab Bar (Pill App Bar) */
     .stTabs [data-baseweb="tab-list"] {
         display: flex !important;
         flex-wrap: nowrap !important;
         overflow-x: auto !important;
         -webkit-overflow-scrolling: touch !important;
-        gap: 0.35rem !important;
-        padding: 0.25rem 0.1rem 0.6rem 0.1rem !important;
+        scroll-snap-type: x mandatory !important;
+        gap: 0.45rem !important;
+        padding: 0.35rem 0.2rem 0.75rem 0.2rem !important;
         scrollbar-width: thin !important;
+        border-bottom: 1px solid #1e293b !important;
     }
     .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar {
         height: 3px;
     }
     .stTabs [data-baseweb="tab-list"]::-webkit-scrollbar-thumb {
-        background: #334155;
+        background: #38bdf8;
         border-radius: 4px;
     }
     .stTabs [data-baseweb="tab"] {
         white-space: nowrap !important;
         flex-shrink: 0 !important;
-        padding: 0.5rem 0.9rem !important;
-        font-size: 0.85rem !important;
-        border-radius: 8px !important;
+        scroll-snap-align: start !important;
+        padding: 0.55rem 1rem !important;
+        font-size: 0.88rem !important;
+        font-weight: 600 !important;
+        border-radius: 10px !important;
+        background: #0e1626 !important;
+        border: 1px solid #1e293b !important;
+        color: #94a3b8 !important;
+        min-height: 44px !important;
+        touch-action: manipulation !important;
+        transition: all 0.2s ease !important;
+    }
+    .stTabs [data-baseweb="tab"]:active {
+        transform: scale(0.96) !important;
+    }
+    .stTabs [aria-selected="true"] {
+        background: #16243d !important;
+        color: #38bdf8 !important;
+        border-color: #38bdf8 !important;
+        box-shadow: 0 0 12px rgba(56, 189, 248, 0.25) !important;
+        font-weight: 700 !important;
+    }
+
+    /* Expanders & Accordions */
+    div[data-testid="stExpander"] {
+        background: #0e1626 !important;
+        border: 1px solid #1e293b !important;
+        border-radius: 12px !important;
+        margin-bottom: 0.85rem !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+    }
+    div[data-testid="stExpander"] summary {
+        padding: 0.75rem 1rem !important;
+        font-weight: 600 !important;
+        font-size: 0.95rem !important;
+        color: #f1f5f9 !important;
+        touch-action: manipulation !important;
     }
 
     /* Dataframe & Table Horizontal Scroll for Mobile */
@@ -239,55 +287,53 @@ st.markdown("""
         max-width: 100% !important;
         overflow-x: auto !important;
         -webkit-overflow-scrolling: touch !important;
+        border-radius: 10px !important;
     }
 
-    /* Prominent Sidebar Hamburger Button on Mobile */
+    /* Floating Sidebar Hamburger Button on Mobile */
     [data-testid="stSidebarCollapsedControl"] {
-        background: #1e293b !important;
-        border: 1px solid #334155 !important;
-        border-radius: 8px !important;
-        padding: 0.3rem !important;
-        top: 0.6rem !important;
-        left: 0.6rem !important;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
+        background: #16243d !important;
+        border: 1px solid #38bdf8 !important;
+        border-radius: 10px !important;
+        padding: 0.4rem !important;
+        top: max(0.6rem, env(safe-area-inset-top)) !important;
+        left: max(0.6rem, env(safe-area-inset-left)) !important;
+        box-shadow: 0 4px 14px rgba(56, 189, 248, 0.3) !important;
+        min-width: 44px !important;
+        min-height: 44px !important;
     }
 
-    /* Responsive Media Queries for Tablet & Mobile */
+    /* Responsive Media Queries for Mobile Phone & Brave */
     @media (max-width: 768px) {
         .block-container {
-            padding-top: 1.5rem !important;
-            padding-bottom: 2.5rem !important;
-            padding-left: 0.75rem !important;
-            padding-right: 0.75rem !important;
+            padding-top: max(1.2rem, env(safe-area-inset-top)) !important;
+            padding-bottom: max(3rem, env(safe-area-inset-bottom)) !important;
+            padding-left: max(0.6rem, env(safe-area-inset-left)) !important;
+            padding-right: max(0.6rem, env(safe-area-inset-right)) !important;
             max-width: 100% !important;
         }
 
-        /* Allow columns in horizontal blocks to wrap on mobile */
+        /* Allow columns in horizontal blocks to wrap (2 per row for metrics) */
         div[data-testid="stHorizontalBlock"] {
+            display: flex !important;
             flex-wrap: wrap !important;
             gap: 0.5rem !important;
         }
 
-        /* Columns take 50% width on tablet/mobile (2 per row for metrics) */
         div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
             flex: 1 1 calc(50% - 0.5rem) !important;
-            min-width: 135px !important;
+            min-width: 140px !important;
         }
 
         /* Responsive typography */
         h1 {
-            font-size: 1.55rem !important;
+            font-size: 1.45rem !important;
             line-height: 1.25 !important;
+            letter-spacing: -0.4px !important;
         }
-        h2 {
-            font-size: 1.25rem !important;
-        }
-        h3 {
-            font-size: 1.1rem !important;
-        }
-        h4 {
-            font-size: 0.98rem !important;
-        }
+        h2 { font-size: 1.2rem !important; }
+        h3 { font-size: 1.05rem !important; }
+        h4 { font-size: 0.95rem !important; }
 
         .hide-on-mobile {
             display: none !important;
@@ -296,8 +342,13 @@ st.markdown("""
 
     @media (max-width: 480px) {
         .block-container {
-            padding-left: 0.5rem !important;
-            padding-right: 0.5rem !important;
+            padding-left: max(0.45rem, env(safe-area-inset-left)) !important;
+            padding-right: max(0.45rem, env(safe-area-inset-right)) !important;
+        }
+
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+            flex: 1 1 calc(50% - 0.35rem) !important;
+            min-width: 130px !important;
         }
 
         /* Inputs stack full-width on compact phone screens */
@@ -493,128 +544,241 @@ with tab1:
             if _get_model_rec(s) in decision_filter
             and _matches_ml_filter(s, ml_filter)
             and _matches_gate_filter(s, gate_filter)
-            and (not search_symbol or search_symbol in s["symbol"] or search_symbol in s.get("company_name", "").upper())
+            and (
+                not search_symbol
+                or search_symbol in s["symbol"]
+                or search_symbol in (s.get("company_name") or "").upper()
+                or search_symbol in get_company_profile(s["symbol"])["name"].upper()
+                or search_symbol in get_company_profile(s["symbol"])["sector"].upper()
+            )
         ]
 
         if filtered_signals:
-            df_display = pd.DataFrame(filtered_signals)
+            # View Format Toggle (Mobile Cards vs Desktop Table)
+            v_col1, v_col2 = st.columns([2, 1])
+            with v_col1:
+                display_mode = st.radio(
+                    "📱 Signal Display Layout:",
+                    options=["📱 Mobile Cards (Vertical)", "📊 Desktop Table (Wide Spreadsheet)"],
+                    horizontal=True,
+                    index=0,
+                    key="latest_signals_display_mode",
+                    help="Mobile Cards format eliminates horizontal scrolling on phone screens. Select Desktop Table for wide monitors."
+                )
+            with v_col2:
+                st.markdown(f"<div class='hide-on-mobile' style='height: 28px;'></div>", unsafe_allow_html=True)
+                st.caption(f"Showing **{len(filtered_signals)}** active recommendations")
 
-            def format_ml_signal_display(row):
-                score = row.get("ml_score")
-                ret = row.get("ml_predicted_return")
-                if score is None or pd.isna(score):
-                    return "—"
-                ret_str = f" ({ret * 100:+.1f}%)" if ret is not None and not pd.isna(ret) else ""
-                if score >= 80:
-                    return f"🟢 Strong Outperform{ret_str}"
-                elif score >= 60:
-                    return f"🟢 Outperform{ret_str}"
-                elif score >= 40:
-                    return f"⚪ Neutral{ret_str}"
-                elif score >= 20:
-                    return f"🔴 Underperform{ret_str}"
-                else:
-                    return f"🔴 Strong Underperform{ret_str}"
+            if display_mode == "📱 Mobile Cards (Vertical)":
+                for s in filtered_signals:
+                    sym = s.get("symbol", "")
+                    prof = get_company_profile(sym)
+                    co_name = s.get("company_name") or prof["name"]
+                    sector = prof["sector"]
+                    rec = _get_model_rec(s)
+                    exec_action = format_executed_action(s)
+                    gate_action = format_compliance_gate_action(s)
+                    is_vetoed = is_signal_vetoed(s)
 
-            def format_ml_score_display(row):
-                score = row.get("ml_score")
-                rank = row.get("ml_rank")
-                usize = row.get("ml_universe_size") or 483
-                if score is None or pd.isna(score):
-                    return "—"
-                if rank is not None and not pd.isna(rank):
-                    return f"{score:.1f} (#{int(rank)}/{int(usize)})"
-                return f"{score:.1f}/100"
+                    quant_score = s.get("quant_score")
+                    dan_score = s.get("danelfin_score")
+                    ml_score = s.get("ml_score")
+                    conf = s.get("confidence")
 
-            df_display["model_rec_col"] = df_display.apply(format_model_recommendation, axis=1)
-            df_display["compliance_gate_col"] = df_display.apply(format_compliance_gate_action, axis=1)
-            df_display["final_action_col"] = df_display.apply(format_executed_action, axis=1)
-            df_display["decision_reasoning_col"] = df_display.apply(
-                lambda r: (
-                    r.get("decision_reasoning")
-                    if pd.notna(r.get("decision_reasoning")) and str(r.get("decision_reasoning")).strip()
-                    else (
-                        r.get("reason")
-                        if pd.notna(r.get("reason")) and str(r.get("reason")).strip()
-                        else "—"
+                    entry = s.get("entry_price")
+                    stop = s.get("stop_loss_price") or s.get("structural_stop_price")
+                    target = s.get("target_price") or s.get("structural_target_price")
+                    rr = s.get("reward_risk_ratio")
+                    rvol = s.get("rvol_20d")
+
+                    reason = (
+                        s.get("decision_reasoning")
+                        if pd.notna(s.get("decision_reasoning")) and str(s.get("decision_reasoning")).strip()
+                        else (
+                            s.get("reason")
+                            if pd.notna(s.get("reason")) and str(s.get("reason")).strip()
+                            else "No detailed decision reasoning recorded."
+                        )
                     )
-                ),
-                axis=1,
-            )
-            df_display["ml_indicator_col"] = df_display.apply(format_ml_signal_display, axis=1)
-            df_display["ml_score_col"] = df_display.apply(format_ml_score_display, axis=1)
+                    ts = s.get("timestamp") or ""
+                    model = s.get("model_used") or "flint"
 
-            cols_to_use = [
-                "symbol",
-                "model_rec_col",
-                "compliance_gate_col",
-                "final_action_col",
-                "decision_reasoning_col",
-                "ml_indicator_col",
-                "ml_score_col",
-                "confidence",
-            ]
-            col_renames = {
-                "symbol": "Ticker",
-                "model_rec_col": "🤖 Model Recommendation",
-                "compliance_gate_col": "🛡️ Safety Gate (Veto Action)",
-                "final_action_col": "Final Executed Action",
-                "decision_reasoning_col": "💡 Decision Reasoning",
-                "ml_indicator_col": "🤖 ML Signal",
-                "ml_score_col": "🤖 ML Score (Rank)",
-                "confidence": "Confidence",
-            }
+                    # Badges
+                    if "BUY" in rec:
+                        rec_badge = f"<span class='badge-buy'>🟢 {rec}</span>"
+                    elif "SELL" in rec:
+                        rec_badge = f"<span class='badge-sell'>🔴 {rec}</span>"
+                    else:
+                        rec_badge = f"<span class='badge-hold'>⚪ {rec}</span>"
 
-            if "quant_score" in df_display.columns and df_display["quant_score"].notna().any():
-                cols_to_use.append("quant_score")
-                col_renames["quant_score"] = "Quant Score"
+                    gate_badge = f"<span class='badge-gate-fail'>🛡️ {gate_action}</span>" if is_vetoed else "<span class='badge-gate-pass'>🛡️ Gate Passed</span>"
+                    action_badge = "<span class='badge-open-long'>🚀 Executed: OPEN_LONG</span>" if exec_action == "OPEN_LONG" else "<span class='badge-no-action'>⏸️ Executed: NO_ACTION</span>"
+                    dan_badge = f"<span style='background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid #c084fc; padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; font-weight: 700;'>⭐ Danelfin {int(dan_score) if isinstance(dan_score, (int, float)) and float(dan_score).is_integer() else dan_score}/10</span>" if dan_score is not None else ""
+                    sector_badge = f"<span style='background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 2px 8px; border-radius: 12px; font-size: 0.78rem; font-weight: 600;'>📁 {sector}</span>"
 
-            if "entry_price" in df_display.columns and df_display["entry_price"].notna().any():
-                cols_to_use.append("entry_price")
-                col_renames["entry_price"] = "Entry Price"
+                    with st.container(border=True):
+                        # Header row
+                        c_top1, c_top2 = st.columns([2, 1])
+                        with c_top1:
+                            st.markdown(f"### **{sym}** <span style='font-size: 0.95rem; color: #94a3b8; font-weight: 500;'>— {co_name}</span>", unsafe_allow_html=True)
+                        with c_top2:
+                            st.markdown(f"<div style='text-align: right; padding-top: 4px;'>{rec_badge}</div>", unsafe_allow_html=True)
 
-            if "rvol_20d" in df_display.columns and df_display["rvol_20d"].notna().any():
-                cols_to_use.append("rvol_20d")
-                col_renames["rvol_20d"] = "RVOL"
+                        st.markdown(f"<div style='display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;'>{gate_badge} {action_badge} {dan_badge} {sector_badge}</div>", unsafe_allow_html=True)
 
-            if "reward_risk_ratio" in df_display.columns and df_display["reward_risk_ratio"].notna().any():
-                cols_to_use.append("reward_risk_ratio")
-                col_renames["reward_risk_ratio"] = "Reward:Risk"
+                        # 4 Metrics in responsive columns
+                        m1, m2, m3, m4 = st.columns(4)
+                        with m1:
+                            st.metric("Quant Score", f"{quant_score:.1f}" if quant_score is not None else "—")
+                        with m2:
+                            st.metric("Confidence", f"{int(conf * 100)}%" if conf else "—")
+                        with m3:
+                            st.metric("Reward:Risk", f"{rr:.2f}:1" if rr is not None and rr > 0 else "—")
+                        with m4:
+                            st.metric("RVOL", f"{rvol:.1f}x" if rvol is not None and rvol > 0 else "—")
 
-            if "us_10y_yield" in df_display.columns and df_display["us_10y_yield"].notna().any():
-                cols_to_use.append("us_10y_yield")
-                col_renames["us_10y_yield"] = "10Y Yield"
+                        # Trade geometry levels
+                        if entry is not None and entry > 0:
+                            st.markdown(
+                                f"""
+                                <div style="display: flex; justify-content: space-between; background: #080c16; border: 1px solid #1e293b; border-radius: 8px; padding: 8px 12px; margin: 8px 0; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.85rem;">
+                                    <span>Entry: <strong style="color: #38bdf8;">${entry:.2f}</strong></span>
+                                    <span>Stop: <strong style="color: #f87171;">{f"${stop:.2f}" if stop else "N/A"}</strong></span>
+                                    <span>Target: <strong style="color: #34d399;">{f"${target:.2f}" if target else "N/A"}</strong></span>
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
 
-            if "danelfin_score" in df_display.columns and df_display["danelfin_score"].notna().any():
-                cols_to_use.append("danelfin_score")
-                col_renames["danelfin_score"] = "🧠 Danelfin AI"
+                        # Expandable reasoning
+                        with st.expander("💡 Decision Reasoning & AI Synthesis", expanded=True):
+                            st.markdown(reason)
+                            st.caption(f"📅 Analyzed: {ts} • Model: `{model}`")
 
-            if "candidate_type" in df_display.columns and df_display["candidate_type"].notna().any():
-                cols_to_use.append("candidate_type")
-                col_renames["candidate_type"] = "Candidate Setup"
+            else:
+                df_display = pd.DataFrame(filtered_signals)
 
-            if "model_decision" in df_display.columns and df_display["model_decision"].notna().any():
-                cols_to_use.append("model_decision")
-                col_renames["model_decision"] = "Model Opinion"
+                def format_ml_signal_display(row):
+                    score = row.get("ml_score")
+                    ret = row.get("ml_predicted_return")
+                    if score is None or pd.isna(score):
+                        return "—"
+                    ret_str = f" ({ret * 100:+.1f}%)" if ret is not None and not pd.isna(ret) else ""
+                    if score >= 80:
+                        return f"🟢 Strong Outperform{ret_str}"
+                    elif score >= 60:
+                        return f"🟢 Outperform{ret_str}"
+                    elif score >= 40:
+                        return f"⚪ Neutral{ret_str}"
+                    elif score >= 20:
+                        return f"🔴 Underperform{ret_str}"
+                    else:
+                        return f"🔴 Strong Underperform{ret_str}"
 
-            cols_to_use.extend(["pe_and_peg", "model_used", "timestamp"])
-            col_renames["pe_and_peg"] = "Fwd Valuation"
-            col_renames["model_used"] = "Model"
-            col_renames["timestamp"] = "Timestamp"
+                def format_ml_score_display(row):
+                    score = row.get("ml_score")
+                    rank = row.get("ml_rank")
+                    usize = row.get("ml_universe_size") or 483
+                    if score is None or pd.isna(score):
+                        return "—"
+                    if rank is not None and not pd.isna(rank):
+                        return f"{score:.1f} (#{int(rank)}/{int(usize)})"
+                    return f"{score:.1f}/100"
 
-            cols_to_show = [c for c in cols_to_use if c in df_display.columns]
-            df_table = df_display[cols_to_show].rename(columns=col_renames)
+                df_display["model_rec_col"] = df_display.apply(format_model_recommendation, axis=1)
+                df_display["compliance_gate_col"] = df_display.apply(format_compliance_gate_action, axis=1)
+                df_display["final_action_col"] = df_display.apply(format_executed_action, axis=1)
+                df_display["decision_reasoning_col"] = df_display.apply(
+                    lambda r: (
+                        r.get("decision_reasoning")
+                        if pd.notna(r.get("decision_reasoning")) and str(r.get("decision_reasoning")).strip()
+                        else (
+                            r.get("reason")
+                            if pd.notna(r.get("reason")) and str(r.get("reason")).strip()
+                            else "—"
+                        )
+                    ),
+                    axis=1,
+                )
+                df_display["ml_indicator_col"] = df_display.apply(format_ml_signal_display, axis=1)
+                df_display["ml_score_col"] = df_display.apply(format_ml_score_display, axis=1)
 
-            if "Decision" in df_table.columns:
-                def format_decision(val):
-                    if val == "BUY":
-                        return "🟢 BUY"
-                    elif val == "SELL":
-                        return "🔴 SELL"
-                    return "⚪ HOLD"
+                df_display["Company Name"] = df_display["symbol"].apply(lambda s: get_company_profile(s)["name"])
+                df_display["Sector"] = df_display["symbol"].apply(lambda s: get_company_profile(s)["sector"])
 
-                df_table["Decision"] = df_table["Decision"].apply(format_decision)
-            st.dataframe(df_table, width="stretch", hide_index=True)
+                cols_to_use = [
+                    "symbol",
+                    "Company Name",
+                    "Sector",
+                    "model_rec_col",
+                    "compliance_gate_col",
+                    "final_action_col",
+                    "decision_reasoning_col",
+                    "ml_indicator_col",
+                    "ml_score_col",
+                    "confidence",
+                ]
+                col_renames = {
+                    "symbol": "Ticker",
+                    "model_rec_col": "🤖 Model Recommendation",
+                    "compliance_gate_col": "🛡️ Safety Gate (Veto Action)",
+                    "final_action_col": "Final Executed Action",
+                    "decision_reasoning_col": "💡 Decision Reasoning",
+                    "ml_indicator_col": "🤖 ML Signal",
+                    "ml_score_col": "🤖 ML Score (Rank)",
+                    "confidence": "Confidence",
+                }
+
+                if "quant_score" in df_display.columns and df_display["quant_score"].notna().any():
+                    cols_to_use.append("quant_score")
+                    col_renames["quant_score"] = "Quant Score"
+
+                if "entry_price" in df_display.columns and df_display["entry_price"].notna().any():
+                    cols_to_use.append("entry_price")
+                    col_renames["entry_price"] = "Entry Price"
+
+                if "rvol_20d" in df_display.columns and df_display["rvol_20d"].notna().any():
+                    cols_to_use.append("rvol_20d")
+                    col_renames["rvol_20d"] = "RVOL"
+
+                if "reward_risk_ratio" in df_display.columns and df_display["reward_risk_ratio"].notna().any():
+                    cols_to_use.append("reward_risk_ratio")
+                    col_renames["reward_risk_ratio"] = "Reward:Risk"
+
+                if "us_10y_yield" in df_display.columns and df_display["us_10y_yield"].notna().any():
+                    cols_to_use.append("us_10y_yield")
+                    col_renames["us_10y_yield"] = "10Y Yield"
+
+                if "danelfin_score" in df_display.columns and df_display["danelfin_score"].notna().any():
+                    cols_to_use.append("danelfin_score")
+                    col_renames["danelfin_score"] = "🧠 Danelfin AI"
+
+                if "candidate_type" in df_display.columns and df_display["candidate_type"].notna().any():
+                    cols_to_use.append("candidate_type")
+                    col_renames["candidate_type"] = "Candidate Setup"
+
+                if "model_decision" in df_display.columns and df_display["model_decision"].notna().any():
+                    cols_to_use.append("model_decision")
+                    col_renames["model_decision"] = "Model Opinion"
+
+                cols_to_use.extend(["pe_and_peg", "model_used", "timestamp"])
+                col_renames["pe_and_peg"] = "Fwd Valuation"
+                col_renames["model_used"] = "Model"
+                col_renames["timestamp"] = "Timestamp"
+
+                cols_to_show = [c for c in cols_to_use if c in df_display.columns]
+                df_table = df_display[cols_to_show].rename(columns=col_renames)
+
+                if "Decision" in df_table.columns:
+                    def format_decision(val):
+                        if val == "BUY":
+                            return "🟢 BUY"
+                        elif val == "SELL":
+                            return "🔴 SELL"
+                        return "⚪ HOLD"
+
+                    df_table["Decision"] = df_table["Decision"].apply(format_decision)
+                st.dataframe(df_table, width="stretch", hide_index=True)
         else:
             st.warning("No signals match the selected filters.")
 
@@ -671,18 +835,23 @@ with tab2:
     if not symbol_list:
         st.info("No signal data available. Enter an ISIN or ticker above, or run `python main.py` in your terminal.")
     else:
-        selected_stock = st.selectbox("Select Ticker Symbol to Inspect:", options=symbol_list)
+        selected_stock = st.selectbox("Select Ticker Symbol to Inspect:", options=symbol_list, format_func=lambda s: get_company_profile(s)["display"])
         curr_code, curr_sym = get_currency_for_symbol(selected_stock)
 
         stock_data = next((s for s in latest_signals if s["symbol"] == selected_stock), None) if latest_signals else None
 
         if stock_data:
+            prof = get_company_profile(stock_data['symbol'])
             c1, c2, c3, c4, c5 = st.columns([1.5, 1, 1, 1.2, 1])
             with c1:
                 model_rec = format_model_recommendation(stock_data)
                 model_dec = str(stock_data.get("model_decision") or stock_data.get("decision") or "HOLD").upper()
                 badge_class = "badge-buy" if model_dec in ("BUY", "DEEP BUY") else ("badge-sell" if model_dec in ("SELL", "BOOK PROFIT") else "badge-hold")
-                st.markdown(f"### **{stock_data['symbol']}**")
+                st.markdown(
+                    f"### **{stock_data['symbol']}** — <span style='font-size: 1.05rem; color: #94a3b8; font-weight: 500;'>{prof['name']}</span> "
+                    f"<span style='background: #1e293b; color: #94a3b8; border: 1px solid #334155; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: 600;'>📁 {prof['sector']}</span>",
+                    unsafe_allow_html=True
+                )
                 st.markdown(f"**🤖 Model Rec:** <span class='{badge_class}'>{model_rec}</span>", unsafe_allow_html=True)
 
                 vetoed = is_signal_vetoed(stock_data)
@@ -1069,10 +1238,12 @@ with tab3:
         bottom_10 = all_ml[-10:]
 
         # Pipeline KPI Overview
+        top_prof = get_company_profile(all_ml[0]['ticker'])
+        bot_prof = get_company_profile(all_ml[-1]['ticker'])
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("ML Universe Size", f"{len(all_ml)} Stocks")
-        k2.metric("Top Model Alpha Pick", f"{all_ml[0]['ticker']} (#{all_ml[0]['rank']})", delta=f"{all_ml[0]['predicted_20d_excess_return']*100:+.1f}% 20d")
-        k3.metric("Bottom Model Pick", f"{all_ml[-1]['ticker']} (#{all_ml[-1]['rank']})", delta=f"{all_ml[-1]['predicted_20d_excess_return']*100:+.1f}% 20d")
+        k2.metric("Top Model Alpha Pick", f"{all_ml[0]['ticker']} — {top_prof['name']} (#{all_ml[0]['rank']})", delta=f"{all_ml[0]['predicted_20d_excess_return']*100:+.1f}% 20d")
+        k3.metric("Bottom Model Pick", f"{all_ml[-1]['ticker']} — {bot_prof['name']} (#{all_ml[-1]['rank']})", delta=f"{all_ml[-1]['predicted_20d_excess_return']*100:+.1f}% 20d")
         k4.metric("Forecast Horizon", f"{all_ml[0].get('age_days', 0)}d old | 20 Sessions")
 
         st.markdown("---")
@@ -1082,10 +1253,12 @@ with tab3:
         st.caption("The 10 highest-ranked S&P 500 stocks selected by the Point-in-Time XGBoost alpha model.")
         top_rows = []
         for s in top_10:
+            prof = get_company_profile(s["ticker"])
             top_rows.append({
                 "Rank": f"#{s['rank']}",
                 "Ticker": s["ticker"],
-                "Sector": s["sector"],
+                "Company Name": prof["name"],
+                "Sector": s.get("sector") or prof["sector"],
                 "ML Score": f"{s['score_0_100']:.1f}/100",
                 "Predicted 20d Return": f"{s['predicted_20d_excess_return']*100:+.2f}%",
                 "Pure ML Stance": s["badge"],
@@ -1101,10 +1274,12 @@ with tab3:
         st.caption("The 10 lowest-ranked stocks predicted to underperform the S&P 500 benchmark over the next 20 sessions.")
         bot_rows = []
         for s in bottom_10:
+            prof = get_company_profile(s["ticker"])
             bot_rows.append({
                 "Rank": f"#{s['rank']}",
                 "Ticker": s["ticker"],
-                "Sector": s["sector"],
+                "Company Name": prof["name"],
+                "Sector": s.get("sector") or prof["sector"],
                 "ML Score": f"{s['score_0_100']:.1f}/100",
                 "Predicted 20d Return": f"{s['predicted_20d_excess_return']*100:+.2f}%",
                 "Pure ML Stance": s["badge"],
@@ -1144,14 +1319,21 @@ with tab3:
         elif tier_filter == "Strong Underperform (0-20)":
             filtered_ml = [x for x in filtered_ml if x["score_0_100"] < 20.0]
         if search_ml_sym:
-            filtered_ml = [x for x in filtered_ml if search_ml_sym in x["ticker"]]
+            filtered_ml = [
+                x for x in filtered_ml
+                if search_ml_sym in x["ticker"]
+                or search_ml_sym in get_company_profile(x["ticker"])["name"].upper()
+                or search_ml_sym in str(x.get("sector", "")).upper()
+            ]
 
         screener_rows = []
         for s in filtered_ml:
+            prof = get_company_profile(s["ticker"])
             screener_rows.append({
                 "Rank": f"#{s['rank']}",
                 "Ticker": s["ticker"],
-                "Sector": s["sector"],
+                "Company Name": prof["name"],
+                "Sector": s.get("sector") or prof["sector"],
                 "ML Score": f"{s['score_0_100']:.1f}/100",
                 "Predicted 20d Excess Return": f"{s['predicted_20d_excess_return']*100:+.2f}%",
                 "Pure ML Stance": s["badge"],
@@ -1268,16 +1450,21 @@ with tab4:
         top_gainer = max(active_stocks, key=lambda x: x.get("change_pct", 0.0))
         top_loser = min(active_stocks, key=lambda x: x.get("change_pct", 0.0))
 
+        g_prof = get_company_profile(top_gainer['symbol'])
+        l_prof = get_company_profile(top_loser['symbol'])
         ak1, ak2, ak3, ak4 = st.columns(4)
         ak1.metric("Active Stocks Tracked", f"{len(active_stocks)} Stocks")
         ak2.metric("Combined Volume", format_volume(tot_vol))
-        ak3.metric("Top Active Gainer", f"{top_gainer['symbol']} ({top_gainer['change_pct']:+.2f}%)")
-        ak4.metric("Top Active Decliner", f"{top_loser['symbol']} ({top_loser['change_pct']:+.2f}%)")
+        ak3.metric("Top Active Gainer", f"{top_gainer['symbol']} — {g_prof['name']} ({top_gainer['change_pct']:+.2f}%)")
+        ak4.metric("Top Active Decliner", f"{top_loser['symbol']} — {l_prof['name']} ({top_loser['change_pct']:+.2f}%)")
 
         st.markdown("---")
 
         table_rows = []
         for s in active_stocks:
+            prof = get_company_profile(s["symbol"])
+            co_name = s.get("name") or prof["name"]
+            sector = s.get("sector") or prof["sector"]
             curr_sym = s.get("currency_symbol", "€" if is_eu else "$")
             chg = s.get("change_pct", 0.0)
             sign = "+" if chg >= 0 else ""
@@ -1288,7 +1475,8 @@ with tab4:
                 ml_disp = "—"
             table_rows.append({
                 "Ticker": s["symbol"],
-                "Company": s["name"],
+                "Company Name": co_name,
+                "Sector": sector,
                 "Price": f"{curr_sym}{s['price']:.2f}",
                 "Change": f"{sign}{chg:.2f}% ({sign}{curr_sym}{abs(s['change']):.2f})",
                 "🤖 ML Score": ml_disp,
@@ -1307,11 +1495,14 @@ with tab4:
 
         st.markdown("#### 📰 Why Are They Trading So Much Today? (News & Catalyst Drilldown)")
         for s in active_stocks:
+            prof = get_company_profile(s["symbol"])
+            co_name = s.get("name") or prof["name"]
+            sector = s.get("sector") or prof["sector"]
             curr_sym = s.get("currency_symbol", "€" if is_eu else "$")
             chg_sign = "+" if s.get("change_pct", 0.0) >= 0 else ""
             badge = "🟢" if s.get("change_pct", 0.0) >= 0 else "🔴"
             ml_ctx = get_ml_context(s["symbol"])
-            with st.expander(f"{badge} **{s['symbol']}** ({s['name']}) — {curr_sym}{s['price']:.2f} ({chg_sign}{s['change_pct']:.2f}%) | Vol: {format_volume(s['volume'])} ({s['rvol']:.1f}x 20d avg)"):
+            with st.expander(f"{badge} **{s['symbol']}** — {co_name} [{sector}] — {curr_sym}{s['price']:.2f} ({chg_sign}{s['change_pct']:.2f}%) | Vol: {format_volume(s['volume'])} ({s['rvol']:.1f}x 20d avg)"):
                 m_c1, m_c2, m_c3, m_c4, m_c5 = st.columns(5)
                 m_c1.metric("Day Low / High", f"{curr_sym}{s['day_low']:.2f} - {curr_sym}{s['day_high']:.2f}")
                 m_c2.metric("Market Cap", s["market_cap_str"])
@@ -1345,12 +1536,14 @@ with tab5:
         st.info("No historical records logged yet.")
     else:
         df_hist_raw = pd.DataFrame(history_records)
+        df_hist_raw["Company Name"] = df_hist_raw["symbol"].apply(lambda s: get_company_profile(s)["name"])
+        df_hist_raw["Sector"] = df_hist_raw["symbol"].apply(lambda s: get_company_profile(s)["sector"])
         df_hist_raw["model_rec_col"] = df_hist_raw.apply(format_model_recommendation, axis=1)
         df_hist_raw["gate_action_col"] = df_hist_raw.apply(format_compliance_gate_action, axis=1)
         df_hist_raw["final_action_col"] = df_hist_raw.apply(format_executed_action, axis=1)
 
         cols = [
-            "id", "timestamp", "symbol", "model_rec_col", "gate_action_col", "final_action_col", "confidence", "model_used", "reason"
+            "id", "timestamp", "symbol", "Company Name", "Sector", "model_rec_col", "gate_action_col", "final_action_col", "confidence", "model_used", "reason"
         ]
         cols = [c for c in cols if c in df_hist_raw.columns]
         df_hist = df_hist_raw[cols].rename(columns={
@@ -1402,12 +1595,21 @@ with tab6:
 
     if outcomes_rows:
         df_outcomes = pd.DataFrame(outcomes_rows)
+        df_outcomes["Company Name"] = df_outcomes["symbol"].apply(lambda s: get_company_profile(s)["name"])
+        df_outcomes["Sector"] = df_outcomes["symbol"].apply(lambda s: get_company_profile(s)["sector"])
         df_outcomes["is_profitable"] = df_outcomes["is_profitable"].apply(lambda x: "🟢 Win" if x else "🔴 Loss")
         df_outcomes = df_outcomes.rename(columns={
+            "symbol": "Ticker",
             "model_decision": "🤖 Model Rec",
             "decision": "Final Action"
         })
-        st.dataframe(df_outcomes, width="stretch", hide_index=True)
+        preferred_order = [
+            "id", "signal_date", "Ticker", "Company Name", "Sector",
+            "🤖 Model Rec", "Final Action", "horizon_days", "entry_price", "exit_price",
+            "realized_return_pct", "max_runup_pct", "max_drawdown_pct", "hit_target", "hit_stop", "is_profitable"
+        ]
+        cols_present = [c for c in preferred_order if c in df_outcomes.columns]
+        st.dataframe(df_outcomes[cols_present], width="stretch", hide_index=True)
     else:
         st.info("No trade outcomes evaluated yet. New 20-session signals are evaluated after 20 forward trading bars; older signals use their recorded horizon.")
 
@@ -1417,8 +1619,10 @@ with tab6:
     pending_sigs = get_pending_signals(limit=50)
     if pending_sigs:
         df_pending = pd.DataFrame(pending_sigs)
+        df_pending["Company Name"] = df_pending["symbol"].apply(lambda s: get_company_profile(s)["name"])
+        df_pending["Sector"] = df_pending["symbol"].apply(lambda s: get_company_profile(s)["sector"])
         df_pending["Model Recommendation"] = df_pending.apply(format_model_recommendation, axis=1)
-        cols = ["timestamp", "symbol", "Model Recommendation", "entry_price", "target_price", "stop_loss_price", "horizon_days", "model_used"]
+        cols = ["timestamp", "symbol", "Company Name", "Sector", "Model Recommendation", "entry_price", "target_price", "stop_loss_price", "horizon_days", "model_used"]
         available_cols = [c for c in cols if c in df_pending.columns]
         df_pending_display = df_pending[available_cols].rename(columns={
             "timestamp": "Signal Date",
@@ -1442,6 +1646,15 @@ with tab7:
     if not portfolio_reviews:
         st.info("No portfolio reviews found. Run `python main.py portfolio gemini` in your terminal to generate one.")
     else:
+        def _fmt_holding_item(h):
+            s = str(h).strip().upper()
+            if not s:
+                return ""
+            prof = get_company_profile(s)
+            if prof["name"] and prof["name"] != s:
+                return f"{s} ({prof['name']} • {prof['sector']})"
+            return s
+
         for rev in portfolio_reviews:
             with st.expander(f"🕐 {rev['timestamp']} — Model: {rev.get('model_used', 'N/A')}"):
                 try:
@@ -1477,7 +1690,7 @@ with tab7:
                                 emoji = "🔴" if sev == "HIGH" else ("🟡" if sev == "MEDIUM" else "🟢")
                                 st.markdown(f"- {emoji} **{r.get('risk', 'N/A')}** `{sev}` — {r.get('evidence', '')}")
                                 if r.get("holdings"):
-                                    st.caption(f"Holdings: {', '.join(str(h) for h in r['holdings'])}")
+                                    st.caption(f"Holdings: {', '.join(_fmt_holding_item(h) for h in r['holdings'])}")
                     else:
                         st.write(c_risks)
 
@@ -1496,7 +1709,7 @@ with tab7:
                             if isinstance(t, dict):
                                 st.markdown(f"- **{t.get('scenario', 'N/A')}** — {t.get('likely_impact', 'N/A')}")
                                 if t.get("most_exposed"):
-                                    st.caption(f"Most exposed: {', '.join(str(x) for x in t['most_exposed'])}")
+                                    st.caption(f"Most exposed: {', '.join(_fmt_holding_item(x) for x in t['most_exposed'])}")
                                 if t.get("assumptions_and_limits"):
                                     st.caption(f"Limits: {', '.join(str(x) for x in t['assumptions_and_limits'])}")
                     else:
@@ -1655,9 +1868,13 @@ with tab8:
         st.markdown("#### 📜 Shadow Trading Execution Log")
         log_rows = []
         for r in shadow_raw:
+            raw_t = r.get("ticker", "")
+            prof = get_company_profile(raw_t)
             log_rows.append({
                 "Timestamp": r.get("timestamp"),
-                "Ticker": r.get("ticker"),
+                "Ticker": raw_t,
+                "Company Name": prof["name"],
+                "Sector": prof["sector"],
                 "Decision": r.get("decision"),
                 "Action": r.get("position_action"),
                 "Composite": f"{r.get('composite_score', 0):.1f}" if r.get("composite_score") is not None else "N/A",
@@ -1737,11 +1954,18 @@ with tab9:
             filtered_records = [r for r in filtered_records if r.get("hold_classification") == "MODEL_PROPOSED_HOLD"]
 
         if sym_search:
-            filtered_records = [r for r in filtered_records if sym_search in r.get("symbol", "").upper()]
+            filtered_records = [
+                r for r in filtered_records
+                if sym_search in r.get("symbol", "").upper()
+                or sym_search in get_company_profile(r.get("symbol", ""))["name"].upper()
+                or sym_search in get_company_profile(r.get("symbol", ""))["sector"].upper()
+            ]
 
         # Format rows for table
         table_rows = []
         for r in filtered_records:
+            sym = r.get("symbol", "")
+            prof = get_company_profile(sym)
             passed_g = parse_list_field(r.get("passed_gates"))
             failed_g = parse_list_field(r.get("failed_gates"))
             reasons = parse_list_field(r.get("reason_codes"))
@@ -1779,7 +2003,9 @@ with tab9:
             table_rows.append({
                 "ID": r.get("id"),
                 "Timestamp": r.get("timestamp"),
-                "Symbol": r.get("symbol"),
+                "Symbol": sym,
+                "Company Name": prof["name"],
+                "Sector": prof["sector"],
                 "Model Proposal": r.get("model_decision"),
                 "Quant Score": q_disp,
                 "Data Compl.": dc_disp,
@@ -1795,7 +2021,10 @@ with tab9:
 
         # Drill-down inspection
         st.markdown("#### 🔍 Baseline Signal Inspection")
-        sig_ids = [f"#{r['id']} {r['symbol']} ({r['timestamp']})" for r in filtered_records]
+        sig_ids = [
+            f"#{r['id']} {r['symbol']} — {get_company_profile(r.get('symbol', ''))['name']} [{get_company_profile(r.get('symbol', ''))['sector']}] ({r['timestamp']})"
+            for r in filtered_records
+        ]
         if sig_ids:
             selected_sig_str = st.selectbox("Select signal to view full structured contract:", sig_ids, key="sel_baseline_sig")
             sel_id = int(selected_sig_str.split(" ")[0].replace("#", ""))

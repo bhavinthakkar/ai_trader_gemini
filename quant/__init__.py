@@ -1,5 +1,12 @@
 """Quant Package: Deterministic Quantitative Scoring Engine."""
 
+from quant.sector_frameworks import (
+    SECTOR_FRAMEWORKS,
+    normalize_sector_name,
+    get_sector_framework,
+    get_sector_temperature,
+    format_sector_system_prompt_overlay,
+)
 from quant.schemas import (
     PillarStatus,
     InputTracking,
@@ -368,6 +375,11 @@ __all__ = [
     "StagedTrancheEvaluation",
     "build_staged_entry_plan",
     "evaluate_staged_tranche_addition",
+    "SECTOR_FRAMEWORKS",
+    "normalize_sector_name",
+    "get_sector_framework",
+    "get_sector_temperature",
+    "format_sector_system_prompt_overlay",
 ]
 
 
