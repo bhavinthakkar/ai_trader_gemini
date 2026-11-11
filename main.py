@@ -1535,6 +1535,12 @@ def main():
         default="DE",
         help="Preferred European exchange suffix (DE=XETRA, MU=gettex, HA=Hannover/EIX) (default: DE)"
     )
+    parser.add_argument(
+        "--min-danelfin-score",
+        type=float,
+        default=7.0,
+        help="Minimum Danelfin AI score required (default: 7.0). Discards any stock with score below this threshold."
+    )
     args = parser.parse_args()
 
     raw_first = args.model_arg
@@ -1632,8 +1638,13 @@ def main():
             # Danelfin AI Intelligence (Cached, quota-protected)
             danelfin_scores = danelfin_service.get_scores(symbol)
             if danelfin_scores and danelfin_scores.get("aiscore") is not None:
+                ai_sc = danelfin_scores.get("aiscore")
+                min_threshold = getattr(args, "min_danelfin_score", 7.0)
+                if min_threshold is not None and isinstance(ai_sc, (int, float)) and ai_sc < min_threshold:
+                    print(f"Skipping {symbol}: Discarded due to low Danelfin AI score ({ai_sc}/10 < {min_threshold}).")
+                    continue
                 m_data["danelfin"] = danelfin_scores
-                print(f"[Danelfin] AI Score for {symbol}: {danelfin_scores.get('aiscore')}/10 (Source: {danelfin_scores.get('source')})")
+                print(f"[Danelfin] AI Score for {symbol}: {ai_sc}/10 (Source: {danelfin_scores.get('source')})")
 
             # 2. Macro Data Stream (FRED Yield Curve, Spreads, 10Y Real Yield, 5d Velocity, Fed Funds, CFTC COT)
             macro_data = macro_agent.analyze(symbol)

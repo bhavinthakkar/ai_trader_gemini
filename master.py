@@ -755,6 +755,12 @@ Examples:
         help="Screen and analyze Danelfin AI's high-win-rate Trade Ideas (consumes only 1 API call)"
     )
     parser.add_argument(
+        "--min-danelfin-score",
+        type=int,
+        default=7,
+        help="Minimum Danelfin AI score required (default: 7). Discards any picks/ideas below this threshold."
+    )
+    parser.add_argument(
         "--no-streamlit",
         action="store_true",
         help="Do not automatically start the Streamlit dashboard server"
@@ -786,16 +792,19 @@ Examples:
     use_portfolio = args.portfolio or bool(args.portfolio_url)
     market = "EU" if (args.eu or use_portfolio) else args.market.upper()
 
-    # Danelfin AI Candidate Screening
+    # Danelfin AI Candidate Screening (Discards stocks with score < min_danelfin_score)
     if args.danelfin_picks:
         try:
             from danelfin_service import DanelfinService
             dan_svc = DanelfinService()
-            best_res = dan_svc.get_best_stocks()
+            best_res = dan_svc.get_best_stocks(min_score=args.min_danelfin_score)
             if best_res and best_res.get("picks"):
                 picks_map = best_res["picks"]
-                dan_list = list(picks_map.keys())[:args.limit]
-                print(f"[Master] Sourced {len(dan_list)} top Danelfin AI Best Stock picks: {', '.join(dan_list)}")
+                dan_list = [
+                    sym for sym, vals in picks_map.items()
+                    if not (isinstance(vals, dict) and vals.get("aiscore") is not None and vals.get("aiscore") < args.min_danelfin_score)
+                ][:args.limit]
+                print(f"[Master] Sourced {len(dan_list)} top Danelfin AI Best Stock picks (Score >= {args.min_danelfin_score}): {', '.join(dan_list)}")
                 args.tickers = ",".join(dan_list)
         except Exception as e:
             print(f"[Master] Warning: Failed to query Danelfin Best Stocks: {e}")
@@ -804,11 +813,14 @@ Examples:
             from danelfin_service import DanelfinService
             dan_svc = DanelfinService()
             market_param = "europe" if market == "EU" else "us_stocks"
-            ideas_res = dan_svc.get_trade_ideas(market=market_param, limit=args.limit)
+            ideas_res = dan_svc.get_trade_ideas(market=market_param, min_ai_score=args.min_danelfin_score, limit=args.limit)
             if ideas_res and ideas_res.get("ideas"):
                 ideas_map = ideas_res["ideas"]
-                dan_list = list(ideas_map.keys())[:args.limit]
-                print(f"[Master] Sourced {len(dan_list)} Danelfin Trade Ideas ({market_param}): {', '.join(dan_list)}")
+                dan_list = [
+                    sym for sym, vals in ideas_map.items()
+                    if not (isinstance(vals, dict) and vals.get("aiscore") is not None and vals.get("aiscore") < args.min_danelfin_score)
+                ][:args.limit]
+                print(f"[Master] Sourced {len(dan_list)} Danelfin Trade Ideas (Score >= {args.min_danelfin_score}, {market_param}): {', '.join(dan_list)}")
                 args.tickers = ",".join(dan_list)
         except Exception as e:
             print(f"[Master] Warning: Failed to query Danelfin Trade Ideas: {e}")

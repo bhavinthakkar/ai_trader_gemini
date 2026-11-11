@@ -37,6 +37,7 @@ load_dotenv()
 def run_daily_danelfin_pipeline(
     model: str = "flint",
     limit: int = 25,
+    min_score: int = 7,
     delay: float = 2.0,
     dry_run: bool = False,
     force_refresh_picks: bool = False,
@@ -44,28 +45,28 @@ def run_daily_danelfin_pipeline(
     no_streamlit: bool = True,
 ) -> dict:
     """
-    Executes the end-to-end daily analysis pipeline on Danelfin's top 25 picks.
+    Executes the end-to-end daily analysis pipeline on Danelfin's top picks with score >= min_score (default 7).
     """
     print("\n" + "=" * 75)
-    print("🌟 DANELFIN AI DAILY 25-TICKER ANALYSIS PIPELINE 🌟")
+    print("🌟 DANELFIN AI DAILY ANALYSIS PIPELINE (MIN SCORE >= 7) 🌟")
     print(f"Timestamp: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"Model: {model.upper()} | Limit: {limit} Stocks | Skip Existing Today: {skip_existing}")
+    print(f"Model: {model.upper()} | Limit: {limit} Stocks | Min Danelfin Score: {min_score} | Skip Existing: {skip_existing}")
     print("=" * 75)
 
     dan_svc = DanelfinService()
     usage_before = dan_svc.get_usage()
     print(f"[Danelfin] Free Tier Quota: {usage_before['call_count']}/{usage_before['monthly_limit']} calls used ({usage_before['safe_remaining']} safe calls remaining).")
 
-    # Step 1: Sourcing Top Tickers (1 API call pre-seeds scores for all 25 tickers)
-    print(f"\n[Danelfin] Sourcing daily Best Stocks picks from Danelfin AI...")
-    tickers = dan_svc.get_daily_picks_tickers(limit=limit, force_refresh=force_refresh_picks)
+    # Step 1: Sourcing Top Tickers (discards any stock with Danelfin score < min_score)
+    print(f"\n[Danelfin] Sourcing daily Best Stocks picks from Danelfin AI (Filtering Score >= {min_score})...")
+    tickers = dan_svc.get_daily_picks_tickers(limit=limit, force_refresh=force_refresh_picks, min_score=min_score)
 
     if not tickers:
-        print("❌ Error: Could not retrieve Danelfin daily picks. Check API key, network, or quota limit.")
+        print(f"❌ Error: Could not retrieve Danelfin daily picks with AI score >= {min_score}.")
         return {"status": "error", "message": "Failed to retrieve Danelfin picks"}
 
     tickers_str = ",".join(tickers)
-    print(f"✅ Sourced {len(tickers)} tickers (1 API call consumed): {', '.join(tickers)}")
+    print(f"✅ Sourced {len(tickers)} qualified tickers with Danelfin AI score >= {min_score}: {', '.join(tickers)}")
 
     # Step 2: Run Master Orchestration Pipeline
     print(f"\n🚀 Launching 6-Agent AI Deep Synthesis on {len(tickers)} Danelfin picks...")
@@ -115,6 +116,12 @@ def main():
         help="Number of Danelfin picks to analyze (default: 25, max: 25)"
     )
     parser.add_argument(
+        "--min-score",
+        type=int,
+        default=7,
+        help="Minimum Danelfin AI score required (default: 7). Discards any picks below this threshold."
+    )
+    parser.add_argument(
         "--delay",
         type=float,
         default=2.0,
@@ -159,6 +166,7 @@ def main():
     run_daily_danelfin_pipeline(
         model=model_choice,
         limit=limit,
+        min_score=args.min_score,
         delay=args.delay,
         dry_run=args.dry_run,
         force_refresh_picks=args.force_refresh,

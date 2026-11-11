@@ -545,6 +545,7 @@ with tab1:
             if _get_model_rec(s) in decision_filter
             and _matches_ml_filter(s, ml_filter)
             and _matches_gate_filter(s, gate_filter)
+            and (s.get("danelfin_score") is None or s.get("danelfin_score") >= 7)
             and (
                 not search_symbol
                 or search_symbol in s["symbol"]
@@ -1428,6 +1429,13 @@ with tab4:
 
     with st.spinner(f"Fetching real-time active stocks [{selected_market}] and news catalysts..."):
         active_stocks = get_cached_active_stocks(limit=limit_val, market=selected_market, prefer_exchange=selected_exchange)
+
+    if active_stocks:
+        # Discard stocks with Danelfin AI score < 7
+        active_stocks = [
+            s for s in active_stocks
+            if s.get("danelfin_score") is None or s.get("danelfin_score") >= 7
+        ]
 
     if not active_stocks:
         st.warning("No active stocks data available at this time.")

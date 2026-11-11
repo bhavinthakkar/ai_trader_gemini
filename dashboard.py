@@ -812,6 +812,12 @@ def _enrich_with_db_signals(data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     except Exception:
         pass
 
+    # Discard stocks where Danelfin AI score is less than 7
+    data = [
+        item for item in data
+        if item.get("danelfin_score") is None or item.get("danelfin_score") >= 7
+    ]
+
     return data
 
 

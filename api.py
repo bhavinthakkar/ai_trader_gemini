@@ -180,6 +180,12 @@ def fetch_latest_signals(
         s["executed_action"] = format_executed_action(s)
         s["decision_reasoning"] = s.get("decision_reasoning") or s.get("reason") or ""
 
+    # Discard any signals where Danelfin AI score is less than 7
+    signals = [
+        s for s in signals
+        if s.get("danelfin_score") is None or s.get("danelfin_score") >= 7
+    ]
+
     if decision and isinstance(decision, str):
         dec_filter = decision.strip().upper()
         signals = [s for s in signals if s.get("decision") == dec_filter]

@@ -383,13 +383,27 @@ class DanelfinService:
         self._save_to_cache(ticker, "ranking", result, today)
         return result
 
-    def get_best_stocks(self, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
+    @staticmethod
+    def _filter_picks_by_score(data: Optional[Dict[str, Any]], min_score: Optional[int] = 7) -> Optional[Dict[str, Any]]:
+        if not data or min_score is None or not isinstance(data.get("picks"), dict):
+            return data
+        filtered = {
+            sym: vals for sym, vals in data["picks"].items()
+            if not (isinstance(vals, dict) and vals.get("aiscore") is not None and vals.get("aiscore") < min_score)
+        }
+        res_copy = dict(data)
+        res_copy["picks"] = filtered
+        res_copy["count"] = len(filtered)
+        return res_copy
+
+    def get_best_stocks(self, force_refresh: bool = False, min_score: Optional[int] = 7) -> Optional[Dict[str, Any]]:
         """
         Retrieves Danelfin's Top 25 Best Stocks Strategy.
         Endpoint: GET /v3/beststocks
         
         Batch Pre-seeding: Automatically populates the individual score cache
         for all 25 stocks in a single API call!
+        Discards any stocks with an AI score less than min_score (default: 7).
         """
         today = _today_utc()
         cache_key = "__GLOBAL__"
@@ -397,12 +411,12 @@ class DanelfinService:
         if not force_refresh:
             cached = self._get_from_cache(cache_key, "beststocks", today)
             if cached:
-                return cached
+                return self._filter_picks_by_score(cached, min_score)
 
         if not self.is_quota_available(force_refresh):
             stale = self._get_from_cache(cache_key, "beststocks", allow_stale=True)
             if stale:
-                return stale
+                return self._filter_picks_by_score(stale, min_score)
             return None
 
         data, err = self._make_request("v3/beststocks")
@@ -441,18 +455,32 @@ class DanelfinService:
         }
 
         self._save_to_cache(cache_key, "beststocks", result, today)
-        return result
+        return self._filter_picks_by_score(result, min_score)
 
-    def get_daily_picks_tickers(self, limit: int = 25, force_refresh: bool = False) -> List[str]:
+    def get_daily_picks_tickers(self, limit: int = 25, force_refresh: bool = False, min_score: Optional[int] = 7) -> List[str]:
         """
         Returns the ordered list of top tickers from Danelfin's daily Best Stocks strategy.
         Pre-seeds the individual score cache for all tickers in 1 single API call.
+        Discards any stocks with an AI score less than min_score (default: 7).
         """
-        best = self.get_best_stocks(force_refresh=force_refresh)
+        best = self.get_best_stocks(force_refresh=force_refresh, min_score=min_score)
         if not best or not best.get("picks"):
             return []
         picks = best["picks"]
         return list(picks.keys())[:limit]
+
+    @staticmethod
+    def _filter_ideas_by_score(data: Optional[Dict[str, Any]], min_score: Optional[int] = 7) -> Optional[Dict[str, Any]]:
+        if not data or min_score is None or not isinstance(data.get("ideas"), dict):
+            return data
+        filtered = {
+            sym: vals for sym, vals in data["ideas"].items()
+            if not (isinstance(vals, dict) and vals.get("aiscore") is not None and vals.get("aiscore") < min_score)
+        }
+        res_copy = dict(data)
+        res_copy["ideas"] = filtered
+        res_copy["count"] = len(filtered)
+        return res_copy
 
     def get_trade_ideas(
         self,
@@ -473,10 +501,13 @@ class DanelfinService:
         if not force_refresh:
             cached = self._get_from_cache(cache_key, "trade-ideas", today)
             if cached:
-                return cached
+                return self._filter_ideas_by_score(cached, min_ai_score)
 
         if not self.is_quota_available(force_refresh):
-            return self._get_from_cache(cache_key, "trade-ideas", allow_stale=True)
+            stale = self._get_from_cache(cache_key, "trade-ideas", allow_stale=True)
+            if stale:
+                return self._filter_ideas_by_score(stale, min_ai_score)
+            return None
 
         params: Dict[str, Any] = {
             "direction": direction,
@@ -525,7 +556,7 @@ class DanelfinService:
         }
 
         self._save_to_cache(cache_key, "trade-ideas", result, today)
-        return result
+        return self._filter_ideas_by_score(result, min_ai_score)
 
     def get_trading_parameters(
         self,

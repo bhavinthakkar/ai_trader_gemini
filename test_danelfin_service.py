@@ -222,6 +222,36 @@ class TestDanelfinService(unittest.TestCase):
         # Usage counter should NOT increment on failed requests
         self.assertEqual(self.service.get_usage()["call_count"], 0)
 
+    @patch("requests.get")
+    def test_discard_stocks_with_score_less_than_seven(self, mock_get):
+        """Verify stocks with Danelfin AI score < 7 are discarded from best stocks and daily picks."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "2026-10-24": {
+                "HIGH_QUAL_1": {"aiscore": 10, "rank": 1},
+                "HIGH_QUAL_2": {"aiscore": 8, "rank": 2},
+                "BORDERLINE": {"aiscore": 7, "rank": 3},
+                "LOW_QUAL_1": {"aiscore": 6, "rank": 4},
+                "LOW_QUAL_2": {"aiscore": 4, "rank": 5},
+            }
+        }
+        mock_get.return_value = mock_response
+
+        # 1. get_best_stocks defaults to min_score=7 -> Low-qual stocks (< 7) discarded
+        best = self.service.get_best_stocks(force_refresh=True, min_score=7)
+        self.assertIsNotNone(best)
+        self.assertIn("HIGH_QUAL_1", best["picks"])
+        self.assertIn("HIGH_QUAL_2", best["picks"])
+        self.assertIn("BORDERLINE", best["picks"])
+        self.assertNotIn("LOW_QUAL_1", best["picks"])
+        self.assertNotIn("LOW_QUAL_2", best["picks"])
+        self.assertEqual(best["count"], 3)
+
+        # 2. get_daily_picks_tickers also discards < 7
+        tickers = self.service.get_daily_picks_tickers(min_score=7)
+        self.assertEqual(tickers, ["HIGH_QUAL_1", "HIGH_QUAL_2", "BORDERLINE"])
+
 
 if __name__ == "__main__":
     unittest.main()
