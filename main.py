@@ -87,9 +87,9 @@ Your Task:
 Synthesize the quantitative scores and insights from all specialized sub-agents to forecast relative performance over the next 20 trading sessions (about one month) and determine a definitive directional recommendation (strictly either BUY or SELL; no HOLD). This recommendation is stored in the database for testing forward accuracy against next month's price.
 
 Rules & Guidelines:
-1. Ignore stale long-term macro narratives that are already priced in, but incorporate macro yield curve & CFTC positioning context.
-2. Ground your decision in the Deterministic Quant Score and ML 20-Session Score (Decision Composite).
-3. Synthesize Quantitative Scores + Institutional/SEC filings + Macro FRED/COT data + News Agent impact + Market Agent momentum + Risk Agent factors + Analyst Agent bank ratings.
+1. Ground your decision in the Deterministic Quant Score and ML 20-Session Score (Decision Composite).
+2. Write `decision_reasoning` in clear, plain-English business language that an everyday investor can easily understand and act upon. Keep it concise, practical, and free of dense walls of mathematical jargon.
+3. NEGATIVE CONSTRAINT: DO NOT repeat Federal Reserve policy data, FRED interest rate statistics, or yield curve figures in `decision_reasoning`. That macro rate data is strictly for internal agent reasoning and risk underwriting.
 4. Output strictly either "BUY" or "SELL" for testing workflow accuracy. Do NOT output "HOLD". Even if evidence is balanced, break the tie directionally.
 5. Return a valid JSON object matching the requested schema.
 
@@ -98,7 +98,7 @@ Schema:
   "stock": "Ticker Symbol",
   "decision": "BUY|SELL",
   "confidence": 0.85,
-  "decision_reasoning": "Detailed expert rationale explaining exactly why this directional decision (BUY or SELL) was reached, synthesizing quantitative scores, technical action, risk factors, and catalysts",
+  "decision_reasoning": "Clear, plain-English explanation for an investor explaining why this decision was reached in simple, actionable business language. DO NOT repeat Federal Reserve policy data, FRED interest rate statistics, or yield curve figures here (keep macro rate figures strictly for internal reasoning). Focus on the core business thesis, key catalysts, and primary risks.",
   "reason": "Short-term swing setup rationale synthesizing Market, Institutional, Macro, News, Risk & Analyst Agent insights",
   "institutional_data": "Summary of SEC EDGAR insider & institutional filing activity from Institutional Data Agent",
   "macro_data": "Summary of FRED yield curve/interest rates & CFTC COT positioning from Macro Data Agent",
@@ -1762,7 +1762,7 @@ def main():
                             "violation below and return ONLY a single valid JSON object with the required schema fields:\n"
                             f"- stock: \"{symbol}\"\n"
                             "- decision: strictly \"BUY\" or \"SELL\" (no HOLD permitted for accuracy testing)\n"
-                            "- decision_reasoning: detailed explanation string explaining why this decision was reached\n"
+                            "- decision_reasoning: clear, plain-English explanation string explaining why this decision was reached in simple language (do not repeat Fed interest rate or yield curve data here)\n"
                             "- primary_driver: \"QUANT_STRUCTURE\", \"FUNDAMENTAL\", \"NEWS_CATALYST\", \"MACRO_EVENT\", or \"EARNINGS_CATALYST\"\n"
                             "- confidence: float between 0.0 and 1.0\n"
                             "- buy_score, hold_score, sell_score: floats between 0.0 and 1.0 summing to 1.0 (with hold_score: 0.0)\n"

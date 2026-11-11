@@ -261,21 +261,18 @@ MULTI-TIMEFRAME PRICE-LEVEL MAP:
 - Provide bullish, neutral, and bearish scenarios. For each, name the confirming price action, invalidation condition, and the most important level(s). If weekly data, volume data, or a price level is unavailable, say so rather than inferring it.
 - Frame every technical conclusion as a probability and condition, never as a guaranteed prediction.
 
-FEDERAL RESERVE POLICY ASSESSMENT MANDATE:
-- Treat monetary policy as a first-class input to EVERY analysis, not a footnote. Build the rate-policy read from the supplied interest_rate_outlook block: current Fed funds rate (fed_funds_rate), real 10Y yield (yield_10y_real), nominal 10Y yield and its 5-day velocity (yield_10y_5d_change), and 2s10s curve spread/status (yield_curve_spread_2y10y / yield_curve_status).
-- Stance: state explicitly whether Fed policy is restrictive, neutral, or accommodative relative to the prevailing fed funds rate, and what the yield-curve shape implies about the market's expected easing or tightening path.
-- Rate path: give the expected direction and rough magnitude of cuts or hikes over the next 3-12 months, the likely FOMC meeting window that would deliver it, and the data that would force that path to change. If the payload has no explicit FOMC calendar, dot-plot, or forward-curve forecast, list that in missing_information instead of inventing a date.
-- Valuation transmission: explain how the expected rate path moves the stock's fair value through the discount rate (duration). Higher real yields and a steepening curve compress growth/valuation multiples -- state that mechanism explicitly for high-duration companies using supplied data.
-- Debt & liquidity transmission: assess floating-rate / refinancing risk, cash-flow sensitivity, and cost-of-capital effects for high-leverage or financial issuers where balance-sheet data is supplied; mark the input as missing when leverage data is absent.
-- Sector sensitivity: classify the company as rate-sensitive or rate-resilient with its mechanism (financials/reals/utilities/high-duration tech/credit-sensitive consumer vs. rate-immune franchises) based on data, not a generic label.
-- Integration: fold the Fed-path view into the chain-of-thought macro step, the bull/bear case, and key_risks. A hawkish path may downgrade or veto a BUY but cannot independently initiate one.
+FEDERAL RESERVE POLICY ASSESSMENT MANDATE (INTERNAL REASONING ONLY):
+- Treat monetary policy as an internal input to your risk underwriting, not a footnote. Evaluate the supplied interest_rate_outlook block (Fed funds rate, real 10Y yield, nominal 10Y velocity, and 2s10s curve spread) internally to gauge discount rates, debt refinancing pressure, and valuation multiple headroom.
+- STRICT PRIVACY / NON-REPETITION CONSTRAINT: Do NOT copy, repeat, or quote Federal Reserve policy data, FRED yield curve spreads, FOMC cut/hike statistics, or interest rate figures into the user-facing decision_reasoning field. That macroeconomic data is strictly for your internal agent reasoning and quantitative risk checks.
+- Keep the user-facing decision_reasoning focused strictly on plain-English business fundamentals, price trends, company catalysts, and downside risks that an everyday investor can easily understand.
+- Stance & rate path (internal): gauge whether Fed policy is restrictive, neutral, or accommodative and fold this into your internal probability weighting. A hawkish path may downgrade or veto a BUY but cannot independently initiate one.
 
 DEPTH OF REASONING & CHAIN-OF-THOUGHT MANDATE:
 - Conduct rigorous multi-step reasoning before formulating final JSON scores:
   1. Technical Action: Price vs. EMA20/50, RSI14, ATR stop-loss boundaries.
   2. Valuation Reality: Forward P/E vs. 3Y history and direct peers.
   3. Qualitative Evidence: True recency of catalysts vs. structural headwinds.
-  4. Macro & Fed Policy Climate: 10Y Treasury yield velocity, real yields, Fed funds stance, expected cut/hike path and FOMC timing, yield curve slope, and fear/greed regime.
+  4. Macro & Fed Policy Climate (Internal): 10Y Treasury yield velocity, real yields, Fed funds stance, expected cut/hike path and FOMC timing, yield curve slope, and fear/greed regime.
 
 Output MUST be a valid JSON object matching the requested schema.
 
@@ -290,7 +287,7 @@ Output MUST be a valid JSON object matching the requested schema.
   Even if evidence is balanced or neutral, break the tie and take a definitive directional side (BUY or SELL) for testing accuracy against next month's price.
 - If days_to_earnings <= 3, factor event gap risk into your recommendation and confidence, but still provide a definitive BUY or SELL call.
 - When an ML score is supplied, include ml_signal_assessment with a SUPPORTIVE, CONFLICTING, or NEUTRAL disposition and a concise reason.
-- You MUST provide an explicit `decision_reasoning` field containing a comprehensive, clear explanation for WHY this directional decision (BUY or SELL) was made, synthesizing quantitative scores, market momentum, risk profile, and catalysts.
+- You MUST provide an explicit `decision_reasoning` field written in simple, clear, plain-English business language that any investor can easily understand. Structure it with clear, concise takeaways (Executive Thesis, Core Catalysts, Key Risks). DO NOT repeat Fed policy data, FRED yield curve spreads, or interest rate numbers here (keep them strictly for internal agent reasoning).
 - The system may issue an explicit no_trade_reason code on a forced downgrade: INSUFFICIENT_EVIDENCE, EARNINGS_BLACKOUT, LOW_LIQUIDITY, RR_TOO_LOW, SCHEMA_INVALID.
 - Output must parse as valid JSON with exactly the keys above; schema violations trigger an automatic corrective retry.
 
@@ -298,7 +295,7 @@ Schema:
 {
   "stock": "Ticker Symbol",
   "decision": "BUY|SELL",
-  "decision_reasoning": "Explicit, comprehensive explanation of why this directional decision (BUY or SELL) was made, detailing the synthesis of quantitative scores, setup geometry, risk gates, and qualitative catalysts",
+  "decision_reasoning": "Clear, plain-English explanation for an investor explaining why this decision was reached in simple, actionable business language. DO NOT repeat Federal Reserve policy data, FRED interest rate statistics, or yield curve figures here (keep macro rate figures strictly for internal reasoning). Focus on the core business thesis, key catalysts, and primary risks.",
   "primary_driver": "QUANT_STRUCTURE|FUNDAMENTAL|NEWS_CATALYST|MACRO_EVENT|EARNINGS_CATALYST",
   "confidence": 0.75,
   "buy_score": 0.70,
@@ -388,7 +385,7 @@ DECISION FRAMEWORK:
 - Always provide forecast_20d with relative_outlook OUTPERFORM, MARKET_LIKE, or UNDERPERFORM, a confidence from 0 to 1, and concise rationale. Compare this forecast with the 20-session ML signal when supplied.
 - Keep forecast and trade action separate: decision reflects whether the setup is actionable. A HOLD can coexist with an OUTPERFORM or UNDERPERFORM forecast when execution conditions are uncertain.
 - Evaluate upcoming earnings and event risks when forming your recommendation.
-- Treat news and macro as confirmation, vetoes, or risk flags; they cannot independently initiate a directional trade.
+- Treat news and macro as confirmation, vetoes, or risk flags; they cannot independently initiate a directional trade. Macro & Fed policy data is for internal confirmation and risk underwriting only. NEVER repeat raw Fed funds rate, Treasury yields, or yield curve numbers in the user-facing `decision_reasoning` field.
 - CATALYST EXCEPTION (news is the trigger, fundamentals are the filter) -- two setups may originate from a company-specific catalyst, and a deterministic certificate re-verifies them from price data. Do not merely assert it:
   1. DIP_BUY: adverse ticker-specific catalyst, price discounted but not collapsed, not deeply oversold (RSI >= 30), valuation pillars still strong, volume confirms. "Bad news, good fundamentals, buy the discount." Set decision "DEEP BUY" and primary_driver "NEWS_CATALYST".
   2. EXTENSION_SELL: favourable catalyst, price extended into a 20-day high (RSI >= 70) AND valuation pillars rich vs own history and peers. "Good news, extended and richly valued, book profit." Set decision "BOOK PROFIT" and primary_driver "NEWS_CATALYST".
@@ -403,7 +400,7 @@ Return exactly one JSON object with these keys and no markdown or commentary:
 {
   "stock": "Ticker",
   "decision": "BUY|SELL",
-  "decision_reasoning": "Explicit, comprehensive explanation of why this directional decision (BUY or SELL) was made, synthesizing quantitative scores, technical action, risk factors, and catalysts",
+  "decision_reasoning": "Clear, plain-English explanation for an investor explaining why this decision was reached in simple, actionable business language. DO NOT repeat Federal Reserve policy data, FRED interest rate statistics, or yield curve figures here (keep macro rate figures strictly for internal reasoning). Focus on the core business thesis, key catalysts, and primary risks.",
   "primary_driver": "QUANT_STRUCTURE|FUNDAMENTAL|NEWS_CATALYST|MACRO_EVENT|EARNINGS_CATALYST",
   "confidence": 0.0,
   "buy_score": 0.0,
@@ -1328,8 +1325,9 @@ Execute multi-step analytical reasoning:
 3. Divergence Resolution: Reconcile any divergence between technical momentum and peer valuation multiples or insider transactions.
 4. Consider the quantitative score values (Deterministic Quant Score, ML 20-Session Score, and Blended Composite) alongside market evidence.
 5. Evaluate setup geometry: review structural stop, target, reward-to-risk ratio, and distance to resistance. Compare entry price with Wall Street consensus targets.
-6. Fed Rate-Policy Integration: from the interest_rate_outlook block, state the implied Fed stance (restrictive/neutral/accommodative), the expected cut/hike path and FOMC timing window, and how that path transmits to this company's valuation, debt/financing costs, and sector before finalizing the decision. If fed funds rate, real yields, or a rate-path signal is missing, say so in missing_information instead of assuming neutral policy.
-7. Sector-Specific Drivers & Valuation Rules: Factor in the primary market-driving factors and strict valuation mandates prescribed for the {sector} sector in the system instructions.
+6. Fed Rate-Policy Integration (Internal Reasoning Only): from the interest_rate_outlook block, assess the implied Fed stance, yield curve context, and transmission mechanism to valuation/debt. Keep this macro rate data strictly for internal reasoning and risk gating; DO NOT repeat Fed policy data, FRED yield curve spreads, or interest rate figures in the user-facing decision_reasoning field.
+7. Plain-English Synthesis: Write `decision_reasoning` in simple, plain-English business language with clear actionable takeaways (Investment Thesis, Catalysts, Key Risks).
+8. Sector-Specific Drivers & Valuation Rules: Factor in the primary market-driving factors and strict valuation mandates prescribed for the {sector} sector in the system instructions.
 Return a valid JSON object matching the required schema.
 """
 

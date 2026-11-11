@@ -1,6 +1,7 @@
 import os
 import sys
 import subprocess
+import re
 import streamlit as st
 import pandas as pd
 import json
@@ -13,7 +14,9 @@ from db import (
     get_latest_portfolio_reviews,
     delete_signals_older_than,
     get_shadow_decisions,
-    get_pending_signals
+    get_pending_signals,
+    get_evidence_records_for_signal,
+    query_evidence_as_of
 )
 from dashboard import collect_dashboard_data, format_volume
 from ticker_resolver import resolve_symbol, is_european_symbol, get_currency_for_symbol, get_company_profile
@@ -166,6 +169,16 @@ st.markdown("""
         font-size: 0.75rem;
         font-weight: 600;
         margin-right: 4px;
+        display: inline-block;
+    }
+    .badge-pill {
+        background-color: #1e293b;
+        color: #94a3b8;
+        border: 1px solid #334155;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.78rem;
+        font-weight: 600;
         display: inline-block;
     }
 
@@ -474,6 +487,97 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
     "🔬 Baseline Decision Audit",
 ])
 
+def sanitize_plain_english_reasoning(text: str) -> str:
+    """
+    Cleans raw decision reasoning into plain, simple language:
+    - Strips Federal Reserve / FRED interest rate / FOMC / yield curve repetition.
+    - Cleans dangling semicolons, punctuation, and formatting artifacts.
+    """
+    if not text:
+        return "No specific decision reasoning recorded."
+    
+    fed_pattern = re.compile(
+        r'(\bfed\b|\bfomc\b|\bfederal reserve\b|\byield curve\b|\b10y\b|\b2y10y\b|\b10y-2y\b|\bfed funds\b|\breal yields?\b|\btreasury yields?\b|\binterest rates?\b|\brate-policy\b)',
+        re.IGNORECASE
+    )
+    
+    # Split text into sentences
+    sentences = re.split(r'(?<=[.!?])\s+|\n+', str(text).strip())
+    cleaned_sentences = []
+    
+    for s in sentences:
+        s_str = s.strip()
+        if not s_str:
+            continue
+        # Split on semicolon if present
+        parts = s_str.split(';')
+        kept_parts = []
+        for part in parts:
+            p_strip = part.strip()
+            if not p_strip:
+                continue
+            if fed_pattern.search(p_strip):
+                continue
+            kept_parts.append(p_strip)
+        if kept_parts:
+            reassembled = '; '.join(kept_parts)
+            # Clean leading conjunctions or punctuation
+            reassembled = re.sub(r'^(?:and|but|so|or|yet|while|though|,)\s+', '', reassembled, flags=re.IGNORECASE).strip()
+            if reassembled:
+                if reassembled[0].islower():
+                    reassembled = reassembled[0].upper() + reassembled[1:]
+                if not reassembled.endswith(('.', '!', '?')):
+                    reassembled += '.'
+                cleaned_sentences.append(reassembled)
+            
+    result = ' '.join(cleaned_sentences).strip()
+    return result or "Directional setup synthesized from quantitative scores, technical structure, and business catalysts."
+
+
+def get_plain_english_takeaways(s: dict) -> dict:
+    """
+    Extracts simple, plain-English bullet takeaways for an investor:
+    - Catalysts & Positive Drivers
+    - Key Risks & Downside Protection
+    """
+    bull_case = s.get("bull_case") or ""
+    bear_case = s.get("bear_case") or ""
+    key_risks = s.get("key_risks") or ""
+    
+    fed_pattern = re.compile(
+        r'(\bfed\b|\bfomc\b|\bfederal reserve\b|\byield curve\b|\b10y\b|\b2y10y\b|\b10y-2y\b|\bfed funds\b|\breal yields?\b|\btreasury yields?\b|\binterest rates?\b|\brate-policy\b)',
+        re.IGNORECASE
+    )
+    
+    def _extract_bullets(val, max_items=3):
+        if not val:
+            return []
+        items = []
+        raw_items = [x.strip() for x in re.split(r';|\n', str(val)) if x.strip()]
+        for item in raw_items:
+            if fed_pattern.search(item):
+                continue
+            item_clean = re.sub(r'^[\s\-•\*\d\.]+', '', item).strip()
+            item_clean = re.sub(r'^(?:and|but|so|or|yet|while|though|,)\s+', '', item_clean, flags=re.IGNORECASE).strip()
+            if item_clean and item_clean[0].islower():
+                item_clean = item_clean[0].upper() + item_clean[1:]
+            if len(item_clean) > 8:
+                items.append(item_clean)
+            if len(items) >= max_items:
+                break
+        return items
+
+    bull_bullets = _extract_bullets(bull_case)
+    risk_bullets = _extract_bullets(key_risks)
+    if not risk_bullets:
+        risk_bullets = _extract_bullets(bear_case)
+        
+    return {
+        "bull_bullets": bull_bullets,
+        "risk_bullets": risk_bullets,
+    }
+
+
 @st.cache_data(ttl=120)
 def get_cached_active_stocks(limit: int = 10, market: str = "US", prefer_exchange: str = "DE"):
     return collect_dashboard_data(limit=limit, market=market, prefer_exchange=prefer_exchange)
@@ -638,10 +742,98 @@ with tab1:
                             unsafe_allow_html=True
                         )
 
-                    # Expandable reasoning
-                    with st.expander("💡 Decision Reasoning & AI Synthesis", expanded=True):
-                        st.markdown(reason)
-                        st.caption(f"📅 Analyzed: {ts} • Model: `{model}`")
+                    # Retrieve auditable input documents ingested for this signal before LLM synthesis
+                    sig_id = s.get("id")
+                    docs = []
+                    if sig_id:
+                        docs = get_evidence_records_for_signal(sig_id)
+                    if not docs and sym and ts:
+                        docs = query_evidence_as_of(sym, ts, limit=12)
+
+                    sub_tab_thesis, sub_tab_docs = st.tabs([
+                        "💡 Decision Reasoning & AI Synthesis",
+                        f"📄 Processed Input Documents ({len(docs)})"
+                    ])
+
+                    with sub_tab_thesis:
+                        clean_reason = sanitize_plain_english_reasoning(reason)
+                        takeaways = get_plain_english_takeaways(s)
+                        bull_bullets = takeaways.get("bull_bullets", [])
+                        risk_bullets = takeaways.get("risk_bullets", [])
+
+                        if bull_bullets:
+                            st.markdown("##### 🚀 Key Catalysts & Trade Drivers")
+                            for b in bull_bullets:
+                                st.markdown(f"• {b}")
+
+                        if risk_bullets:
+                            st.markdown("##### ⚠️ Key Risks & Stop-Loss Defense")
+                            for r in risk_bullets:
+                                st.markdown(f"• {r}")
+
+                        with st.expander("📖 Full Plain-English Analysis", expanded=not (bull_bullets and risk_bullets)):
+                            st.markdown(clean_reason)
+                            st.caption(f"📅 Analyzed: {ts} • Model: `{model}`")
+
+                    with sub_tab_docs:
+                        if docs:
+                            st.caption(f"Audit of **{len(docs)} source documents** retrieved and processed for `{sym}` before LLM analysis:")
+
+                            sec_cnt = sum(1 for d in docs if "SEC" in d.get("source_type", ""))
+                            analyst_cnt = sum(1 for d in docs if "ANALYST" in d.get("source_type", ""))
+                            news_cnt = sum(1 for d in docs if "NEWS" in d.get("source_type", ""))
+                            ir_cnt = sum(1 for d in docs if "COMPANY" in d.get("source_type", "") or "TRANSCRIPT" in d.get("source_type", ""))
+
+                            st.markdown(
+                                f"<div style='display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; font-size: 0.8rem;'>"
+                                f"<span class='badge-pill'>🏛️ {sec_cnt} SEC Filings</span> "
+                                f"<span class='badge-pill'>🏦 {analyst_cnt} Analyst Reports</span> "
+                                f"<span class='badge-pill'>📰 {news_cnt} News Catalysts</span> "
+                                f"<span class='badge-pill'>🏢 {ir_cnt} Company Disclosures</span>"
+                                f"</div>",
+                                unsafe_allow_html=True
+                            )
+
+                            for idx, doc in enumerate(docs):
+                                src_type = doc.get("source_type", "GENERAL_NEWS")
+                                pub_dt = (doc.get("publication_timestamp") or "")[:10]
+                                excerpt = (doc.get("passage_or_excerpt") or "").strip()
+                                src_url = doc.get("source_url") or ""
+                                sub_q = doc.get("sub_query") or doc.get("event_type") or "Document"
+                                score = doc.get("hybrid_score")
+
+                                if "SEC" in src_type:
+                                    icon = "🏛️"
+                                    type_label = "SEC Regulatory Filing"
+                                elif "ANALYST" in src_type:
+                                    icon = "🏦"
+                                    type_label = "Wall Street Equity Research"
+                                elif "COMPANY" in src_type:
+                                    icon = "🏢"
+                                    type_label = "Company IR / Profile"
+                                elif "TRANSCRIPT" in src_type:
+                                    icon = "🎙️"
+                                    type_label = "Earnings Call Transcript"
+                                else:
+                                    icon = "📰"
+                                    type_label = "Financial News / Catalyst"
+
+                                score_tag = f" • Score: `{score:.2f}`" if score is not None else ""
+                                exp_title = f"{icon} {type_label} — {sub_q} ({pub_dt}){score_tag}"
+
+                                with st.expander(exp_title, expanded=False):
+                                    if src_url and src_url.startswith("http"):
+                                        st.markdown(f"[🔗 View Official Source Document]({src_url})")
+                                    st.markdown(f"**Document ID:** `{doc.get('document_id', 'N/A')}` | **Category:** `{src_type}` | **Published:** `{pub_dt}`")
+                                    st.code(excerpt, language=None)
+                        else:
+                            st.info(f"No specific RAG evidence records found for `{sym}`. Showing ingested data summaries:")
+                            if s.get("institutional_data"):
+                                st.markdown(f"**🏛️ Institutional & SEC Filings:** {s.get('institutional_data')}")
+                            if s.get("news"):
+                                st.markdown(f"**📰 News Catalysts:** {s.get('news')}")
+                            if s.get("investment_bank_coverage"):
+                                st.markdown(f"**🏦 Wall Street Analyst Coverage:** {s.get('investment_bank_coverage')}")
 
             with st.expander("📊 View as Spreadsheet Table", expanded=False):
                 df_display = pd.DataFrame(filtered_signals)
@@ -904,7 +1096,8 @@ with tab2:
 
             st.markdown("#### 💡 AI Model Decision Reasoning")
             if model_reasoning:
-                st.info(f"**Why the Model Recommended {model_dec_str}:**\n\n{model_reasoning}")
+                clean_model_reasoning = sanitize_plain_english_reasoning(model_reasoning)
+                st.info(f"**Why the Model Recommended {model_dec_str}:**\n\n{clean_model_reasoning}")
             else:
                 st.info(f"No specific decision reasoning recorded for `{selected_stock}`.")
 
@@ -1210,6 +1403,36 @@ with tab2:
                 if stock_data.get("missing_information"):
                     st.subheader("❓ Missing Information")
                     st.caption(stock_data.get("missing_information"))
+
+            # =====================================================================
+            # 📄 Processed Input Documents & Auditable Evidence
+            # =====================================================================
+            st.markdown("---")
+            st.markdown("#### 📄 Processed Input Documents & Auditable Evidence")
+            stock_sig_id = stock_data.get("id")
+            stock_docs = []
+            if stock_sig_id:
+                stock_docs = get_evidence_records_for_signal(stock_sig_id)
+            if not stock_docs and selected_stock:
+                stock_docs = query_evidence_as_of(selected_stock, stock_data.get("timestamp") or "", limit=12)
+
+            if stock_docs:
+                st.caption(f"Audit of **{len(stock_docs)} source documents** retrieved and processed for `{selected_stock}` before LLM analysis:")
+                for d in stock_docs:
+                    s_type = d.get("source_type", "GENERAL_NEWS")
+                    p_dt = (d.get("publication_timestamp") or "")[:10]
+                    exc = (d.get("passage_or_excerpt") or "").strip()
+                    s_url = d.get("source_url") or ""
+                    sq = d.get("sub_query") or d.get("event_type") or "Document"
+                    sc = d.get("hybrid_score")
+                    sc_tag = f" • Score: `{sc:.2f}`" if sc is not None else ""
+                    with st.expander(f"📄 [{s_type}] {sq} ({p_dt}){sc_tag}", expanded=False):
+                        if s_url and s_url.startswith("http"):
+                            st.markdown(f"[🔗 View Official Source Document]({s_url})")
+                        st.markdown(f"**Document ID:** `{d.get('document_id', 'N/A')}` | **Category:** `{s_type}` | **Published:** `{p_dt}`")
+                        st.code(exc, language=None)
+            else:
+                st.info(f"No specific RAG evidence records found in database for `{selected_stock}`.")
 
             with st.expander("🛠️ View Full JSON Payload"):
                 st.json(stock_data.get("raw_json") or json.dumps(stock_data))

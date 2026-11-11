@@ -42,6 +42,8 @@ from db import (
     get_execution_events,
     get_latest_kill_switch_state,
     save_kill_switch_state,
+    get_evidence_records_for_signal,
+    query_evidence_as_of,
 )
 from dashboard import collect_dashboard_data
 from ticker_resolver import resolve_symbol, get_currency_for_symbol
@@ -244,6 +246,33 @@ def fetch_signal_history(
         "count": len(records),
         "symbol": symbol.strip().upper() if symbol else None,
         "records": records,
+    }
+
+
+@app.get("/api/signals/{signal_id}/evidence", tags=["Signals"])
+def fetch_signal_evidence(signal_id: int):
+    """Returns all auditable evidence documents ingested for a specific signal ID before LLM analysis."""
+    records = get_evidence_records_for_signal(signal_id)
+    return {
+        "signal_id": signal_id,
+        "count": len(records),
+        "evidence_records": records,
+    }
+
+
+@app.get("/api/stocks/{ticker}/evidence", tags=["Signals"])
+def fetch_stock_evidence(
+    ticker: str,
+    limit: int = Query(default=12, ge=1, le=50, description="Max evidence documents to return"),
+):
+    """Returns auditable evidence documents processed for a ticker symbol."""
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    records = query_evidence_as_of(ticker.strip().upper(), now_iso, limit=limit)
+    return {
+        "ticker": ticker.strip().upper(),
+        "count": len(records),
+        "evidence_records": records,
     }
 
 

@@ -206,6 +206,29 @@ class TestAPI(unittest.TestCase):
         self.assertIn("risk_sensitivity_sweep", results)
 
 
+    def test_fetch_signal_evidence_endpoint(self):
+        # Fetch latest signals to get a valid signal ID
+        resp = self.client.get("/api/signals/latest?days=30")
+        self.assertEqual(resp.status_code, 200)
+        signals = resp.json().get("signals", [])
+        if signals:
+            sig_id = signals[0]["id"]
+            ev_resp = self.client.get(f"/api/signals/{sig_id}/evidence")
+            self.assertEqual(ev_resp.status_code, 200)
+            data = ev_resp.json()
+            self.assertEqual(data["signal_id"], sig_id)
+            self.assertIn("evidence_records", data)
+            self.assertIsInstance(data["evidence_records"], list)
+
+    def test_fetch_stock_evidence_endpoint(self):
+        resp = self.client.get("/api/stocks/NVDA/evidence?limit=5")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["ticker"], "NVDA")
+        self.assertIn("evidence_records", data)
+        self.assertIsInstance(data["evidence_records"], list)
+
+
 if __name__ == "__main__":
     unittest.main()
 
